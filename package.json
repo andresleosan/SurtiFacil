@@ -1,9 +1,5 @@
 {
-<<<<<<< HEAD
-  "name": "proyecto",
-=======
   "name": "surtifacil",
->>>>>>> f5439f8241bd40d1bfe5630bdaf47b64c5bdbdb9
   "version": "0.1.0",
   "private": true,
   "scripts": {

@@ -14,7 +14,7 @@ function App() {
     if (page === 'inventory') return <Inventory />;
     if (page === 'sales') return <Sales />;
     if (page === 'create-sale') return <CreateSale />;
-    if (page === 'whatsapp') return <WhatsAppChat />;
+  
     return <Dashboard />;
   }, [page]);
 

@@ -1,18 +1,10 @@
-<<<<<<< HEAD
-# 🛒 SmartMarket Admin
-=======
 # 🛒 SurtiFácil Admin
->>>>>>> f5439f8241bd40d1bfe5630bdaf47b64c5bdbdb9
 
 ## Sistema Web para la Administración de Supermercados
 
 ### 📌 Descripción General
 
-<<<<<<< HEAD
-SmartMarket Admin es una aplicación web diseñada para facilitar la gestión integral de un supermercado o tienda de barrio. Su objetivo es centralizar procesos clave como el control de inventario, registro de ventas, administración de empleados y análisis de datos, permitiendo optimizar el tiempo, reducir errores y mejorar la toma de decisiones.
-=======
 SurtiFácil Admin es una aplicación web diseñada para facilitar la gestión integral de un supermercado o tienda de barrio. Su objetivo es centralizar procesos clave como el control de inventario, registro de ventas, administración de empleados y análisis de datos, permitiendo optimizar el tiempo, reducir errores y mejorar la toma de decisiones.
->>>>>>> f5439f8241bd40d1bfe5630bdaf47b64c5bdbdb9
 
 ---
 

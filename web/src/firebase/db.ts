@@ -6,18 +6,21 @@ import {
   DocumentSnapshot,
   CollectionReference,
   Query,
-} from 'firebase/firestore';
-import { db } from './config';
+} from "firebase/firestore";
+import { db } from "./config";
 
 /**
  * Obtiene documentos de una colección con filtros opcionales
  */
 export async function getDocuments<T>(
   collectionName: string,
-  constraints?: QueryConstraint[]
+  constraints?: QueryConstraint[],
 ): Promise<(T & { id: string })[]> {
   try {
-    const collectionRef = collection(db, collectionName) as CollectionReference<T>;
+    const collectionRef = collection(
+      db,
+      collectionName,
+    ) as CollectionReference<T>;
     let q: Query<T>;
 
     if (constraints && constraints.length > 0) {
@@ -51,6 +54,7 @@ export interface Product {
   name: string;
   price_cents: number; // Precio en centavos (ej: 250 = $2.50)
   stock: number;
+  category?: string; // Categoría del producto (opcional)
   createdAt?: any;
 }
 
@@ -72,7 +76,7 @@ export interface Sale {
   id: string;
   date: any; // Firestore Timestamp
   total: number; // Total en centavos
-  payment_method: 'cash' | 'card' | 'other';
+  payment_method: "cash" | "card" | "other";
   items: SaleItem[];
   createdAt?: any;
 }
