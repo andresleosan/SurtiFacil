@@ -9,6 +9,9 @@ export interface Product {
   category?: string; // Categoría del producto (opcional)
   supplier_id?: string;
   createdAt?: any;
+  last_cost_cents?: number;
+  last_cost_source?: 'purchase' | 'fallback_price';
+  last_cost_updated_at?: any;
 }
 
 /**
