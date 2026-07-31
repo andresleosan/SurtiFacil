@@ -14,6 +14,7 @@ import {
   updateOrderStatus,
   archiveConversation,
 } from "../services/whatsappService";
+import { getProducts } from "../services/saleService";
 
 type TabType = "conversations" | "orders" | "statistics";
 
@@ -79,6 +80,7 @@ export default function WhatsAppChat() {
       console.error("Error loading orders:", error);
     }
   };
+
   const handleSendMessage = async () => {
     if (!newMessage.trim() || !selectedConversation) return;
 
@@ -92,25 +94,32 @@ export default function WhatsAppChat() {
 
       // Si el mensaje contiene una orden potencial, crear un borrador
       if (processedData.hasOrder && processedData.products) {
-        const totalPrice = processedData.products.reduce(
-          (sum, p) => sum + p.quantity * 10, // Precio placeholder
-          0,
-        );
-        console.log(
-          "🚀 ~ file: WhatsAppChat.tsx:96 ~ handleSendMessage ~ totalPrice:",
-          totalPrice,
-        );
+        // Buscar precios reales de productos
+        const allProducts = await getProducts();
+        const findProduct = (name: string) =>
+          allProducts.find(
+            (p) => p.name.toLowerCase().includes(name.toLowerCase()) ||
+                   name.toLowerCase().includes(p.name.toLowerCase())
+          );
+
+        let totalPrice = 0;
+        const items = processedData.products.map((p) => {
+          const matched = findProduct(p.name);
+          const price = matched ? matched.price_cents : 0;
+          totalPrice += p.quantity * price;
+          return {
+            productId: matched?.id || "",
+            productName: matched?.name || p.name,
+            quantity: p.quantity,
+            price,
+          };
+        });
 
         await createWhatsAppOrder({
           conversationId: selectedConversation.id,
           phoneNumber: selectedConversation.phoneNumber,
           customerName: selectedConversation.customerName,
-          items: processedData.products.map((p) => ({
-            productId: "",
-            productName: p.name,
-            quantity: p.quantity,
-            price: 10, // Placeholder
-          })),
+          items,
           deliveryAddress: processedData.address || "Por confirmar",
           totalPrice,
           status: "pending",
@@ -475,7 +484,7 @@ export default function WhatsAppChat() {
                         type="text"
                         value={newMessage}
                         onChange={(e) => setNewMessage(e.target.value)}
-                        onKeyPress={(e) => {
+                        onKeyDown={(e) => {
                           if (e.key === "Enter") handleSendMessage();
                         }}
                         placeholder="Escribe un mensaje..."

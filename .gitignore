@@ -1,39 +1,60 @@
-# Node
-node_modules/
-# Web build outputs
-/web/dist/
-/dist/
-/build/
-/.vite/
+# Base de 1 Titán — Cronos la completa con lo específico del stack elegido (STACK.md).
 
-# Logs
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-pnpm-debug.log*
-*.log
-
-# Environment
+# Secretos y credenciales — nunca deben llegar al repo
 .env
-.env.local
-.env.*.local
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.cer
+secrets/
+credentials/
 
-# OS files
-.DS_Store
-Thumbs.db
-Desktop.ini
-ehthumbs.db
+# Google Cloud / Firebase / Apps Script
+*-firebase-adminsdk-*.json
+serviceAccountKey.json
+.clasprc.json
+.firebase/
+firebase-debug.log
 
-# IDEs
-.vscode/
-.idea/
+# Dependencias e instalación
+node_modules/
+vendor/
+.venv/
+venv/
+__pycache__/
+*.pyc
 
-# Coverage
+# Builds y artefactos
+dist/
+build/
+out/
+*.log
 coverage/
 
-# Temporary files
-*.tgz
-*.bak
-*.tmp
+# Reportes de QA (browser-qa-e2e, v3.3.0) — se regeneran en cada corrida, no se versionan
+qa/reports/
+playwright-report/
+test-results/
 
-# Optional: lockfiles are kept to ensure reproducible installs; do not ignore
+# Editor / sistema operativo
+.DS_Store
+.vscode/
+.idea/
+Thumbs.db
+
+# Bases de datos locales
+*.sqlite3
+*.db
+
+# Backups que dejan los scripts de la agencia al actualizar
+*.bak-*
+
+# Herramientas de agencia / opencode — config local, no del proyecto SurtiFacil
+.agencia-version
+opencode.json
+.opencode/
+
+# Knowledge graph de graphify — salida local, se regenera
+graphify-out/

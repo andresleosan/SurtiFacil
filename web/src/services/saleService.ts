@@ -72,23 +72,25 @@ export async function createSale(
 
   try {
     const saleId = await runTransaction(db, async (transaction) => {
-      const productsRef = collection(db, 'products');
-      const allProductsSnapshot = await getDocs(productsRef);
       const currentProducts = new Map<string, Product>();
 
-      allProductsSnapshot.forEach((doc) => {
-        currentProducts.set(doc.id, {
-          id: doc.id,
-          ...(doc.data() as Omit<Product, 'id'>),
-        });
-      });
-
-      // Validar cada producto
+      // Solo cargar los productos que están en el carrito
       for (const item of cartItems) {
-        const product = currentProducts.get(item.product_id);
-        if (!product) {
+        const productRef = doc(db, 'products', item.product_id);
+        const productSnapshot = await transaction.get(productRef);
+        if (!productSnapshot.exists()) {
           throw new Error(`Producto ${item.product_id} no encontrado`);
         }
+        const productData = {
+          id: productSnapshot.id,
+          ...productSnapshot.data(),
+        } as Product;
+        currentProducts.set(item.product_id, productData);
+      }
+
+      // Validar stock de cada producto
+      for (const item of cartItems) {
+        const product = currentProducts.get(item.product_id)!;
         if (item.quantity > product.stock) {
           throw new Error(
             `Stock insuficiente de "${product.name}". Intenta vender ${item.quantity} pero solo hay ${product.stock}`
@@ -114,14 +116,9 @@ export async function createSale(
       // Actualizar stock de cada producto
       for (const item of cartItems) {
         const productRef = doc(db, 'products', item.product_id);
-        const productData = currentProducts.get(item.product_id);
-
-        if (productData) {
-          const newStock = productData.stock - item.quantity;
-          transaction.update(productRef, {
-            stock: newStock,
-          });
-        }
+        const productData = currentProducts.get(item.product_id)!;
+        const newStock = productData.stock - item.quantity;
+        transaction.update(productRef, { stock: newStock });
       }
 
       return newSaleRef.id;

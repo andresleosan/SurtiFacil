@@ -10,6 +10,13 @@
     "start:backend": "node backend/whatsapp-webhook.js",
     "dev:all": "concurrently \"npm run start:web\" \"npm run start:backend\"",
     "whatsapp:init": "node scripts/whatsapp-init.js",
+    "build:web": "cd web && npm run build",
+    "test": "cd web && npm run test",
+    "deploy": "npm run build:web && firebase deploy --only hosting",
+    "deploy:hosting": "npm run build:web && firebase deploy --only hosting",
+    "deploy:rules": "firebase deploy --only firestore:rules",
+    "deploy:indexes": "firebase deploy --only firestore:indexes",
+    "deploy:all": "npm run build:web && firebase deploy",
     "docs": "echo 'See docs/run_instructions.md'"
   },
   "engines": {

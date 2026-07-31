@@ -90,7 +90,7 @@ async function sendWhatsAppMessage(phoneNumber, message) {
     throw new Error('WhatsApp credentials missing');
   }
 
-  const url = `https://graph.instagram.com/v18.0/${process.env.WHATSAPP_PHONE_NUMBER_ID}/messages`;
+  const url = `https://graph.facebook.com/v18.0/${process.env.WHATSAPP_PHONE_NUMBER_ID}/messages`;
 
   try {
     const response = await fetch(url, {
@@ -120,6 +120,28 @@ async function sendWhatsAppMessage(phoneNumber, message) {
     console.error('❌ Error sending WhatsApp message:', error);
     throw error;
   }
+}
+
+// ============ MIDDLEWARE DE AUTENTICACIÓN ============
+
+/**
+ * Middleware simple para proteger endpoints de admin
+ * Requiere header X-API-Key o Authorization: Bearer <token>
+ */
+function requireAuth(req, res, next) {
+  const apiKey = req.headers['x-api-key'] || req.headers['authorization']?.replace('Bearer ', '');
+  const validKey = process.env.ADMIN_API_KEY;
+
+  if (!validKey) {
+    // Si no hay clave configurada, permitir (modo desarrollo)
+    return next();
+  }
+
+  if (!apiKey || apiKey !== validKey) {
+    return res.status(401).json({ error: 'Unauthorized: invalid or missing API key' });
+  }
+
+  next();
 }
 
 // ============ RUTAS ============
@@ -205,7 +227,7 @@ app.post('/api/webhooks/whatsapp', async (req, res) => {
 /**
  * POST /api/whatsapp/send - Enviar mensaje desde admin
  */
-app.post('/api/whatsapp/send', async (req, res) => {
+app.post('/api/whatsapp/send', requireAuth, async (req, res) => {
   try {
     const { phoneNumber, message, conversationId } = req.body;
 
@@ -241,7 +263,7 @@ app.get('/api/health', (req, res) => {
 /**
  * POST /api/whatsapp/test - Test endpoint
  */
-app.post('/api/whatsapp/test', async (req, res) => {
+app.post('/api/whatsapp/test', requireAuth, async (req, res) => {
   try {
     const { phoneNumber } = req.body;
 
@@ -253,7 +275,7 @@ app.post('/api/whatsapp/test', async (req, res) => {
 
     const result = await sendWhatsAppMessage(
       phoneNumber,
-      '✅ Este es un mensaje de prueba desde SmartMarket Admin.'
+      '✅ Este es un mensaje de prueba desde SurtiFácil Admin.'
     );
 
     res.json({ success: true, message: 'Test message sent', data: result });

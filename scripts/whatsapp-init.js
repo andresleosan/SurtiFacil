@@ -46,7 +46,7 @@ async function main() {
     [path.join(__dirname, '../web/src/types/whatsapp.ts'), 'Tipos TypeScript'],
     [path.join(__dirname, '../backend/whatsapp-webhook.js'), 'Backend Webhook'],
     [path.join(__dirname, '../docs/WHATSAPP_INTEGRATION.md'), 'Documentación'],
-    [path.join(__dirname, '../../.env.example'), 'Variables de entorno'],
+    [path.join(__dirname, '../.env.example'), 'Variables de entorno'],
   ];
 
   let allOk = true;

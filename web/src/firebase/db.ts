@@ -1,51 +1,3 @@
-import {
-  collection,
-  getDocs,
-  query,
-  QueryConstraint,
-  DocumentSnapshot,
-  CollectionReference,
-  Query,
-} from "firebase/firestore";
-import { db } from "./config";
-
-/**
- * Obtiene documentos de una colección con filtros opcionales
- */
-export async function getDocuments<T>(
-  collectionName: string,
-  constraints?: QueryConstraint[],
-): Promise<(T & { id: string })[]> {
-  try {
-    const collectionRef = collection(
-      db,
-      collectionName,
-    ) as CollectionReference<T>;
-    let q: Query<T>;
-
-    if (constraints && constraints.length > 0) {
-      q = query(collectionRef, ...constraints) as Query<T>;
-    } else {
-      q = collectionRef as Query<T>;
-    }
-
-    const snapshot = await getDocs(q);
-    const documents: (T & { id: string })[] = [];
-
-    snapshot.forEach((doc: DocumentSnapshot<T>) => {
-      documents.push({
-        ...(doc.data() as T),
-        id: doc.id,
-      });
-    });
-
-    return documents;
-  } catch (error) {
-    console.error(`Error getting documents from ${collectionName}:`, error);
-    throw error;
-  }
-}
-
 /**
  * Tipo para un producto en Firestore
  */
@@ -56,6 +8,24 @@ export interface Product {
   stock: number;
   category?: string; // Categoría del producto (opcional)
   createdAt?: any;
+}
+
+/**
+ * Roles de usuario en el sistema
+ */
+export type UserRole = 'admin' | 'manager' | 'cashier';
+
+/**
+ * Tipo para un usuario en Firestore
+ */
+export interface User {
+  id: string;
+  email: string;
+  displayName: string;
+  role: UserRole;
+  active: boolean;
+  createdAt?: any;
+  lastLogin?: any;
 }
 
 /**
