@@ -31,6 +31,7 @@ export interface ProductMargin {
   margin_cents: number;
   margin_percent: number;
   units_sold: number;
+  isEstimated: boolean;
 }
 
 export interface CategoryMargin {
@@ -189,23 +190,25 @@ export async function getTopProductsByMargin(
 
   const totals = new Map<
     string,
-    { revenue: number; cost: number; units: number; name: string }
+    { revenue: number; cost: number; units: number; name: string; isEstimated: boolean }
   >();
 
   for (const sale of sales) {
     for (const item of sale.items || []) {
       const product = productsById.get(item.product_id);
       if (!product) continue;
-      const { cost } = itemCost(item, productsById);
+      const { cost, estimated } = itemCost(item, productsById);
       const existing = totals.get(item.product_id) || {
         revenue: 0,
         cost: 0,
         units: 0,
         name: product.name,
+        isEstimated: false,
       };
       existing.revenue += item.subtotal;
       existing.cost += cost;
       existing.units += item.quantity;
+      if (estimated) existing.isEstimated = true;
       totals.set(item.product_id, existing);
     }
   }
@@ -221,6 +224,7 @@ export async function getTopProductsByMargin(
       margin_cents: margin,
       margin_percent: percent,
       units_sold: t.units,
+      isEstimated: t.isEstimated,
     };
   });
 
