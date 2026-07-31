@@ -1,8 +1,8 @@
 # BRIEF.md - SurtiFácil Admin
 
 ## Estado Actual
-**Fase**: v1.2 Analytics de Margen (completada 2026-07-31)  
-**Core Features**: Dashboard, Inventario, Ventas, WhatsApp, Empleados, Reportes, Proveedores, Órdenes de Compra con recepción automática
+**Fase**: v1.3 Reposición Predictiva (en diseño 2026-07-31)
+**Core Features**: Dashboard, Inventario, Ventas, WhatsApp, Empleados, Reportes, Proveedores, Órdenes de Compra con recepción automática, Márgenes
 
 ---
 
@@ -28,7 +28,8 @@
 | 3 | **Reportes Básicos** | 3 | 3 | 4 | 4 | **3.50** | ✅ MVP v1.0 |
 | 4 | **Gestión de Proveedores** | 3 | 4 | 3 | 2 | **3.00** | ✅ v1.1 |
 | 5 | **Analytics Avanzados (Margen)** | 2 | 3 | 3 | 2 | **2.50** | ✅ v1.2 |
-| 6 | **Multi-tenant/SaaS** | 2 | 2 | 2 | 1 | **1.75** | ❌ Descartado v1.x |
+| 6 | **Reposición Predictiva** | 3 | 4 | 3 | 2 | **3.00** | ✅ v1.3 |
+| 7 | **Multi-tenant/SaaS** | 2 | 2 | 2 | 1 | **1.75** | ❌ Descartado v1.x |
 
 ---
 
@@ -63,8 +64,9 @@
 
 ```
 Jul-Ago 2026  → MVP v1.0 (Alertas + Empleados + Reportes)
-Sep 2026      → v1.1 (Proveedores)  
-Oct 2026      → v1.2 (Analytics)
+Sep 2026      → v1.1 (Proveedores)
+Oct 2026      → v1.2 (Analytics de Margen)
+Nov 2026      → v1.3 (Reposición Predictiva)
 Q4 2026       → Evaluar SaaS
 ```
 
