@@ -334,7 +334,14 @@ export async function receiveOrderItems(
       if (r.received_quantity > 0) {
         if (item.product_id) {
           const product = mockProducts.find((p) => p.id === item.product_id);
-          if (product) product.stock += r.received_quantity;
+          if (product) {
+            product.stock += r.received_quantity;
+            if (r.final_cost_cents !== undefined && r.final_cost_cents !== null) {
+              product.last_cost_cents = r.final_cost_cents;
+              product.last_cost_source = 'purchase';
+              product.last_cost_updated_at = new Date();
+            }
+          }
         } else if (item.isNewProduct && item.name) {
           const newProduct: Product = {
             id: `prod-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
@@ -344,6 +351,9 @@ export async function receiveOrderItems(
             stock: r.received_quantity,
             supplier_id: order.supplierId,
             createdAt: new Date(),
+            last_cost_cents: r.final_cost_cents,
+            last_cost_source: 'purchase',
+            last_cost_updated_at: new Date(),
           };
           mockProducts.push(newProduct);
           item.product_id = newProduct.id;
@@ -410,7 +420,15 @@ export async function receiveOrderItems(
         const productSnap = await transaction.get(productRef);
         if (productSnap.exists()) {
           const current = productSnap.data() as Product;
-          transaction.update(productRef, { stock: current.stock + r.received_quantity });
+          const updatePayload: Record<string, any> = {
+            stock: current.stock + r.received_quantity,
+          };
+          if (r.final_cost_cents !== undefined && r.final_cost_cents !== null) {
+            updatePayload.last_cost_cents = r.final_cost_cents;
+            updatePayload.last_cost_source = 'purchase';
+            updatePayload.last_cost_updated_at = serverTimestamp();
+          }
+          transaction.update(productRef, updatePayload);
         }
       } else if (item.isNewProduct && item.name) {
         const newProductRef = doc(collection(db, 'products'));
@@ -421,6 +439,9 @@ export async function receiveOrderItems(
           stock: r.received_quantity,
           supplier_id: order.supplierId,
           createdAt: serverTimestamp(),
+          last_cost_cents: r.final_cost_cents,
+          last_cost_source: 'purchase',
+          last_cost_updated_at: serverTimestamp(),
         });
         createdProducts.push({ itemIndex: idx, productId: newProductRef.id });
         updatedItems[idx] = { ...item, product_id: newProductRef.id };

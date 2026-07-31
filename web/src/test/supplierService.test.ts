@@ -222,4 +222,61 @@ describe('supplierService - Recepcion', () => {
     await updateOrderStatus(order.id, 'ordered');
     await expect(cancelOrder(order.id)).resolves.not.toThrow();
   });
+
+  it('receiveOrderItems actualiza last_cost_cents del producto existente', async () => {
+    const suppliers = await getSuppliers();
+    const order = await createOrder({
+      supplierId: suppliers[0].id, supplierName: suppliers[0].name,
+      items: [{ product_id: 'p1', name: 'Manzana Roja', quantity: 10, unit_cost_cents: 250, received_quantity: 0, isNewProduct: false } as OrderItem],
+    });
+    await updateOrderStatus(order.id, 'ordered');
+    await receiveOrderItems(order.id, [
+      { index: 0, received_quantity: 5, final_cost_cents: 320 },
+    ]);
+    const { mockProducts } = await import('../services/mockData');
+    const updatedProduct = mockProducts.find((p) => p.id === 'p1');
+    expect(updatedProduct?.last_cost_cents).toBe(320);
+    expect(updatedProduct?.last_cost_source).toBe('purchase');
+    expect(updatedProduct?.last_cost_updated_at).toBeDefined();
+  });
+
+  it('receiveOrderItems conserva last_cost_cents previo cuando final_cost_cents es undefined', async () => {
+    const { mockProducts } = await import('../services/mockData');
+    const target = mockProducts.find((p) => p.id === 'p1');
+    const previousCost = 500;
+    if (target) {
+      target.last_cost_cents = previousCost;
+      target.last_cost_source = 'purchase';
+    }
+
+    const suppliers = await getSuppliers();
+    const order = await createOrder({
+      supplierId: suppliers[0].id, supplierName: suppliers[0].name,
+      items: [{ product_id: 'p1', name: 'Manzana Roja', quantity: 10, unit_cost_cents: 250, received_quantity: 0, isNewProduct: false } as OrderItem],
+    });
+    await updateOrderStatus(order.id, 'ordered');
+    await receiveOrderItems(order.id, [
+      { index: 0, received_quantity: 3, final_cost_cents: undefined as any },
+    ]);
+
+    const updated = mockProducts.find((p) => p.id === 'p1');
+    expect(updated?.last_cost_cents).toBe(previousCost);
+  });
+
+  it('receiveOrderItems graba last_cost_cents al crear producto nuevo', async () => {
+    const suppliers = await getSuppliers();
+    const order = await createOrder({
+      supplierId: suppliers[0].id, supplierName: suppliers[0].name,
+      items: [{ name: 'Producto Costo Test', category: 'Test', quantity: 5, unit_cost_cents: 1000, received_quantity: 0, isNewProduct: true } as OrderItem],
+    });
+    await updateOrderStatus(order.id, 'ordered');
+    const result = await receiveOrderItems(order.id, [
+      { index: 0, received_quantity: 5, final_cost_cents: 1234 },
+    ]);
+    const { mockProducts } = await import('../services/mockData');
+    const created = mockProducts.find((p) => p.id === result.items[0].product_id);
+    expect(created?.last_cost_cents).toBe(1234);
+    expect(created?.last_cost_source).toBe('purchase');
+    expect(created?.last_cost_updated_at).toBeDefined();
+  });
 });
