@@ -6,8 +6,9 @@ import CreateSale from './components/CreateSale';
 import WhatsAppChat from './components/WhatsAppChat';
 import UserManagement from './components/UserManagement';
 import Reports from './components/Reports';
+import Suppliers from './components/Suppliers';
 
-type Page = 'dashboard' | 'inventory' | 'sales' | 'create-sale' | 'whatsapp' | 'employees' | 'reports';
+type Page = 'dashboard' | 'inventory' | 'sales' | 'create-sale' | 'whatsapp' | 'employees' | 'reports' | 'suppliers' | 'orders';
 
 function App() {
   const [page, setPage] = useState<Page>('dashboard');
@@ -26,6 +27,7 @@ function App() {
     if (page === 'sales') return <Sales />;
     if (page === 'create-sale') return <CreateSale />;
     if (page === 'employees') return <UserManagement />;
+    if (page === 'suppliers') return <Suppliers />;
     if (page === 'reports') return <Reports />;
   
     return <Dashboard />;
@@ -51,6 +53,9 @@ function App() {
             </button>
             <button onClick={() => setPage('employees')} className="hover:underline">
               👥 Empleados
+            </button>
+            <button onClick={() => setPage('suppliers')} className="hover:underline">
+              🚚 Proveedores
             </button>
             <button onClick={() => setPage('reports')} className="hover:underline">
               📊 Reportes
