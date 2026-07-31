@@ -23,6 +23,24 @@ export interface MarginDaily {
   margin_percent: number;
 }
 
+export interface ProductMargin {
+  product_id: string;
+  product_name: string;
+  revenue_cents: number;
+  cost_cents: number;
+  margin_cents: number;
+  margin_percent: number;
+  units_sold: number;
+}
+
+export interface CategoryMargin {
+  category: string;
+  revenue_cents: number;
+  cost_cents: number;
+  margin_cents: number;
+  margin_percent: number;
+}
+
 export function resolveCost(product: Product): { costCents: number; isEstimated: boolean } {
   if (product.last_cost_cents !== undefined && product.last_cost_cents !== null) {
     return { costCents: product.last_cost_cents, isEstimated: false };
@@ -160,4 +178,94 @@ export async function getMarginDaily(days: number = 30): Promise<MarginDaily[]> 
   }
 
   return result;
+}
+
+export async function getTopProductsByMargin(
+  limit: number = 10,
+  sortBy: 'absolute' | 'percent' = 'absolute'
+): Promise<ProductMargin[]> {
+  const [sales, products] = await Promise.all([getSales(), getProducts()]);
+  const productsById = new Map(products.map((p) => [p.id, p]));
+
+  const totals = new Map<
+    string,
+    { revenue: number; cost: number; units: number; name: string }
+  >();
+
+  for (const sale of sales) {
+    for (const item of sale.items || []) {
+      const product = productsById.get(item.product_id);
+      if (!product) continue;
+      const { cost } = itemCost(item, productsById);
+      const existing = totals.get(item.product_id) || {
+        revenue: 0,
+        cost: 0,
+        units: 0,
+        name: product.name,
+      };
+      existing.revenue += item.subtotal;
+      existing.cost += cost;
+      existing.units += item.quantity;
+      totals.set(item.product_id, existing);
+    }
+  }
+
+  const rows: ProductMargin[] = Array.from(totals.entries()).map(([id, t]) => {
+    const margin = t.revenue - t.cost;
+    const percent = t.revenue > 0 ? (margin / t.revenue) * 100 : 0;
+    return {
+      product_id: id,
+      product_name: t.name,
+      revenue_cents: t.revenue,
+      cost_cents: t.cost,
+      margin_cents: margin,
+      margin_percent: percent,
+      units_sold: t.units,
+    };
+  });
+
+  const filtered = sortBy === 'percent' ? rows.filter((r) => r.revenue_cents >= 1000) : rows;
+
+  filtered.sort((a, b) => {
+    if (sortBy === 'percent') {
+      return b.margin_percent - a.margin_percent;
+    }
+    return b.margin_cents - a.margin_cents;
+  });
+
+  return filtered.slice(0, limit);
+}
+
+export async function getMarginByCategory(): Promise<CategoryMargin[]> {
+  const [sales, products] = await Promise.all([getSales(), getProducts()]);
+  const productsById = new Map(products.map((p) => [p.id, p]));
+
+  const buckets = new Map<string, { revenue: number; cost: number }>();
+
+  for (const sale of sales) {
+    for (const item of sale.items || []) {
+      const product = productsById.get(item.product_id);
+      if (!product) continue;
+      const category = product.category || 'Sin categoría';
+      const { cost } = itemCost(item, productsById);
+      const existing = buckets.get(category) || { revenue: 0, cost: 0 };
+      existing.revenue += item.subtotal;
+      existing.cost += cost;
+      buckets.set(category, existing);
+    }
+  }
+
+  return Array.from(buckets.entries())
+    .map(([category, t]) => {
+      const margin = t.revenue - t.cost;
+      const percent = t.revenue > 0 ? (margin / t.revenue) * 100 : 0;
+      return {
+        category,
+        revenue_cents: t.revenue,
+        cost_cents: t.cost,
+        margin_cents: margin,
+        margin_percent: percent,
+      };
+    })
+    .sort((a, b) => b.margin_cents - a.margin_cents);
 }
