@@ -152,6 +152,17 @@
 | Task 7: Reglas + Índices | 1 | ✅ COMPLETADA |
 | **Subtotal v1.1** | **10 días** | **✅** |
 
+### v1.2 Analytics de Margen ✅ COMPLETADO
+| Fase | Días | Estado |
+|------|------|--------|
+| Tarea 1: Modelo + resolveCost | 1 | ✅ COMPLETADA |
+| Tarea 2: Servicio resumen + diario | 2 | ✅ COMPLETADA |
+| Tarea 3: Top productos + categorías | 1 | ✅ COMPLETADA |
+| Tarea 4: Registro costo atómico | 1 | ✅ COMPLETADA |
+| Tarea 5: UI KPIs + chart diario | 1 | ✅ COMPLETADA |
+| Tarea 6: UI categorías + tablas + CSV | 1 | ✅ COMPLETADA |
+| **Subtotal v1.2** | **7 días** | **✅** |
+
 ---
 
 ## Checklist Pre-Entrega ✅

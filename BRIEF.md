@@ -1,7 +1,7 @@
 # BRIEF.md - SurtiFácil Admin
 
 ## Estado Actual
-**Fase**: v1.2 Analytics de Margen (en diseño 2026-07-31)  
+**Fase**: v1.2 Analytics de Margen (completada 2026-07-31)  
 **Core Features**: Dashboard, Inventario, Ventas, WhatsApp, Empleados, Reportes, Proveedores, Órdenes de Compra con recepción automática
 
 ---
