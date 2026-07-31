@@ -16,6 +16,7 @@ interface PurchaseOrderModalProps {
     andOrder: boolean
   ) => void;
   suppliers: Supplier[];
+  initialItems?: Array<{ product_id: string; quantity: number; unit_cost_cents: number }>;
 }
 
 interface RowItem extends OrderItem {
@@ -33,7 +34,7 @@ const newRow = (): RowItem => ({
   isNewProduct: false,
 });
 
-const PurchaseOrderModal = ({ isOpen, onClose, onSave, suppliers }: PurchaseOrderModalProps) => {
+const PurchaseOrderModal = ({ isOpen, onClose, onSave, suppliers, initialItems }: PurchaseOrderModalProps) => {
   const [supplierId, setSupplierId] = useState<string>('');
   const [items, setItems] = useState<RowItem[]>([newRow()]);
   const [expectedDate, setExpectedDate] = useState<string>('');
@@ -55,11 +56,22 @@ const PurchaseOrderModal = ({ isOpen, onClose, onSave, suppliers }: PurchaseOrde
   useEffect(() => {
     if (isOpen) {
       setSupplierId(suppliers.find((s) => s.active)?.id || '');
-      setItems([newRow()]);
+      if (initialItems && initialItems.length > 0) {
+        setItems(initialItems.map((it) => ({
+          _rowKey: ++rowCounter,
+          product_id: it.product_id,
+          quantity: it.quantity,
+          unit_cost_cents: it.unit_cost_cents,
+          received_quantity: 0,
+          isNewProduct: false,
+        })));
+      } else {
+        setItems([newRow()]);
+      }
       setExpectedDate('');
       setNotes('');
     }
-  }, [isOpen, suppliers]);
+  }, [isOpen, suppliers, initialItems]);
 
   const activeSuppliers = suppliers.filter((s) => s.active);
 
