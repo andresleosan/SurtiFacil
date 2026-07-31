@@ -7,6 +7,7 @@ export interface Product {
   price_cents: number; // Precio en centavos (ej: 250 = $2.50)
   stock: number;
   category?: string; // Categoría del producto (opcional)
+  supplier_id?: string;
   createdAt?: any;
 }
 
@@ -48,5 +49,47 @@ export interface Sale {
   total: number; // Total en centavos
   payment_method: "cash" | "card" | "other";
   items: SaleItem[];
+  createdAt?: any;
+}
+
+export type OrderStatus = 'draft' | 'ordered' | 'partial' | 'received' | 'cancelled';
+
+export interface Supplier {
+  id: string;
+  name: string;
+  contactName?: string;
+  phone?: string;
+  email?: string;
+  address?: string;
+  category?: string;
+  active: boolean;
+  createdAt?: any;
+  totalOrders: number;
+  totalSpentCents: number;
+}
+
+export interface OrderItem {
+  product_id?: string;
+  name?: string;
+  category?: string;
+  quantity: number;
+  received_quantity: number;
+  unit_cost_cents: number;
+  final_cost_cents?: number;
+  isNewProduct: boolean;
+}
+
+export interface PurchaseOrder {
+  id: string;
+  supplierId: string;
+  supplierName: string;
+  status: OrderStatus;
+  items: OrderItem[];
+  total_cents: number;
+  received_total_cents: number;
+  date: any;
+  expectedDate?: any;
+  receivedDate?: any;
+  notes?: string;
   createdAt?: any;
 }

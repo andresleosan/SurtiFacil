@@ -3,7 +3,7 @@
  * Se usan cuando Firebase no está configurado
  */
 
-import { Product, Sale, SaleItem } from '../firebase/db';
+import { Product, Sale, SaleItem, Supplier, PurchaseOrder } from '../firebase/db';
 
 const baseProducts: Product[] = [
   {
@@ -143,3 +143,32 @@ export function resetLocalSales(): void {
   localSales = [...mockSales];
   mockProducts = JSON.parse(JSON.stringify(baseProducts));
 }
+
+export const mockSuppliers: Supplier[] = [
+  {
+    id: 'sup-1',
+    name: 'Distribuidora Central',
+    contactName: 'Carlos Pérez',
+    phone: '555-0101',
+    email: 'ventas@central.com',
+    category: 'Abarrotes',
+    active: true,
+    totalOrders: 0,
+    totalSpentCents: 0,
+    createdAt: new Date(),
+  },
+  {
+    id: 'sup-2',
+    name: 'Lácteos del Valle',
+    contactName: 'María Gómez',
+    phone: '555-0202',
+    email: 'compras@lacteos.com',
+    category: 'Lácteos',
+    active: true,
+    totalOrders: 0,
+    totalSpentCents: 0,
+    createdAt: new Date(),
+  },
+];
+
+export const mockOrders: PurchaseOrder[] = [];
