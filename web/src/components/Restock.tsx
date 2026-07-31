@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import { getRestockSuggestions, RestockSuggestion, Urgency } from '../services/restockService';
 import { formatCurrency } from '../services/reportService';
+import { Supplier } from '../firebase/db';
+import PurchaseOrderModal from './PurchaseOrderModal';
+import { createOrder, getSuppliers } from '../services/supplierService';
 
 const URGENCY_LABELS: Record<Urgency, string> = {
   critical: 'Crítico',
@@ -28,17 +31,25 @@ const Restock = () => {
   const [loading, setLoading] = useState(true);
   const [filterCategory, setFilterCategory] = useState('');
   const [filterUrgencies, setFilterUrgencies] = useState<Urgency[]>([...ALL_URGENCIES]);
+  const [orderModalOpen, setOrderModalOpen] = useState(false);
+  const [orderInitial, setOrderInitial] = useState<Array<{ product_id: string; quantity: number; unit_cost_cents: number }> | null>(null);
+  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
+  const [orderSupplierId, setOrderSupplierId] = useState<string>('');
 
   useEffect(() => {
     let cancelled = false;
     const load = async () => {
       try {
-        const data = await getRestockSuggestions();
+        const [data, suppliersData] = await Promise.all([
+          getRestockSuggestions(),
+          getSuppliers(),
+        ]);
         if (!cancelled) {
           setSuggestions(data);
+          setSuppliers(suppliersData);
         }
       } catch (error) {
-        console.error('Error loading restock suggestions:', error);
+        console.error('Error loading restock data:', error);
       } finally {
         if (!cancelled) {
           setLoading(false);
@@ -97,6 +108,20 @@ const Restock = () => {
     setFilterUrgencies((prev) =>
       prev.includes(urgency) ? prev.filter((u) => u !== urgency) : [...prev, urgency]
     );
+  };
+
+  const handleCreateOrder = (suggestion: RestockSuggestion) => {
+    if (!suggestion.supplier_id) return;
+    setOrderSupplierId(suggestion.supplier_id);
+    const unitCost = suggestion.suggested_quantity > 0
+      ? Math.floor(suggestion.estimated_cost_cents / suggestion.suggested_quantity)
+      : 0;
+    setOrderInitial([{
+      product_id: suggestion.product_id,
+      quantity: suggestion.suggested_quantity,
+      unit_cost_cents: unitCost,
+    }]);
+    setOrderModalOpen(true);
   };
 
   if (loading) {
@@ -258,7 +283,7 @@ const Restock = () => {
                       <button
                         type="button"
                         disabled={s.supplier_id === null}
-                        onClick={() => {}}
+                        onClick={() => handleCreateOrder(s)}
                         className="px-3 py-1.5 rounded-lg text-sm font-medium bg-sf-primary text-white hover:opacity-90 transition disabled:bg-gray-300 disabled:cursor-not-allowed"
                       >
                         Crear orden
@@ -271,6 +296,18 @@ const Restock = () => {
           </table>
         </div>
       </div>
+
+      <PurchaseOrderModal
+        isOpen={orderModalOpen}
+        onClose={() => setOrderModalOpen(false)}
+        suppliers={suppliers.filter((s) => s.id === orderSupplierId)}
+        initialItems={orderInitial ?? undefined}
+        onSave={(data) => {
+          createOrder(data).then(() => {
+            setOrderModalOpen(false);
+          });
+        }}
+      />
     </section>
   );
 };
