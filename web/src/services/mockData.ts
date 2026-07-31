@@ -142,6 +142,7 @@ export function getLocalSales(): Sale[] {
 export function resetLocalSales(): void {
   localSales = [...mockSales];
   mockProducts = JSON.parse(JSON.stringify(baseProducts));
+  mockOrders.length = 0;
 }
 
 export const mockSuppliers: Supplier[] = [

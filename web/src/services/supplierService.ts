@@ -6,10 +6,13 @@ import {
   doc,
   deleteDoc,
   serverTimestamp,
+  runTransaction,
+  getDoc,
+  setDoc,
 } from 'firebase/firestore';
 import { db } from '../firebase/config';
-import { Supplier, PurchaseOrder, OrderStatus, OrderItem } from '../firebase/db';
-import { mockSuppliers, mockOrders } from './mockData';
+import { Supplier, PurchaseOrder, OrderStatus, OrderItem, Product } from '../firebase/db';
+import { mockSuppliers, mockOrders, mockProducts } from './mockData';
 
 const ALLOWED_TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
   draft: ['ordered', 'cancelled'],
@@ -295,5 +298,206 @@ export async function updateOrderStatus(
     }
     console.error('Error updating order status:', error);
     throw new Error(error.message || 'Error al actualizar estado de orden');
+  }
+}
+
+export interface ReceiveItem {
+  index: number;
+  received_quantity: number;
+  final_cost_cents: number;
+}
+
+export async function receiveOrderItems(
+  orderId: string,
+  receives: ReceiveItem[]
+): Promise<PurchaseOrder> {
+  if (!isFirebaseConfigured()) {
+    const order = mockOrders.find((o) => o.id === orderId);
+    if (!order) throw new Error('Orden no encontrada');
+
+    for (const r of receives) {
+      const item = order.items[r.index];
+      if (!item) throw new Error(`Ítem en índice ${r.index} no existe`);
+      const cumulative = item.received_quantity + r.received_quantity;
+      if (cumulative > item.quantity) {
+        throw new Error(
+          `No se puede recibir más de lo pedido en "${item.name || item.product_id}". Pedido: ${item.quantity}, ya recibido: ${item.received_quantity}, intento: ${r.received_quantity}`
+        );
+      }
+    }
+
+    for (const r of receives) {
+      const item = order.items[r.index];
+      item.received_quantity += r.received_quantity;
+      item.final_cost_cents = r.final_cost_cents;
+
+      if (r.received_quantity > 0) {
+        if (item.product_id) {
+          const product = mockProducts.find((p) => p.id === item.product_id);
+          if (product) product.stock += r.received_quantity;
+        } else if (item.isNewProduct && item.name) {
+          const newProduct: Product = {
+            id: `prod-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+            name: item.name,
+            category: item.category,
+            price_cents: r.final_cost_cents * 2,
+            stock: r.received_quantity,
+            supplier_id: order.supplierId,
+            createdAt: new Date(),
+          };
+          mockProducts.push(newProduct);
+          item.product_id = newProduct.id;
+        }
+      }
+    }
+
+    const totalReceived = order.items.reduce((s, i) => s + i.received_quantity * (i.final_cost_cents || 0), 0);
+    order.received_total_cents = totalReceived;
+
+    const allReceived = order.items.every((i) => i.received_quantity >= i.quantity);
+    const somePartial = order.items.some((i) => i.received_quantity > 0 && i.received_quantity < i.quantity);
+
+    if (allReceived) {
+      order.status = 'received';
+      order.receivedDate = new Date();
+      const supplier = mockSuppliers.find((s) => s.id === order.supplierId);
+      if (supplier) {
+        supplier.totalOrders += 1;
+        supplier.totalSpentCents += totalReceived;
+      }
+    } else if (somePartial) {
+      order.status = 'partial';
+    }
+
+    return order;
+  }
+
+  return runTransaction(db, async (transaction) => {
+    const orderRef = doc(db, 'purchase_orders', orderId);
+    const orderSnap = await transaction.get(orderRef);
+    if (!orderSnap.exists()) throw new Error('Orden no encontrada');
+    const order = orderSnap.data() as PurchaseOrder;
+
+    for (const r of receives) {
+      const item = order.items[r.index];
+      if (!item) throw new Error(`Ítem en índice ${r.index} no existe`);
+      const cumulative = item.received_quantity + r.received_quantity;
+      if (cumulative > item.quantity) {
+        throw new Error(
+          `No se puede recibir más de lo pedido en "${item.name || item.product_id}". Pedido: ${item.quantity}, ya recibido: ${item.received_quantity}, intento: ${r.received_quantity}`
+        );
+      }
+    }
+
+    const updatedItems: OrderItem[] = order.items.map((item, idx) => {
+      const r = receives.find((x) => x.index === idx);
+      if (!r || r.received_quantity === 0) return item;
+      return {
+        ...item,
+        received_quantity: item.received_quantity + r.received_quantity,
+        final_cost_cents: r.final_cost_cents,
+      };
+    });
+
+    const createdProducts: { itemIndex: number; productId: string }[] = [];
+    for (let idx = 0; idx < updatedItems.length; idx++) {
+      const item = updatedItems[idx];
+      const r = receives.find((x) => x.index === idx);
+      if (!r || r.received_quantity === 0) continue;
+
+      if (item.product_id) {
+        const productRef = doc(db, 'products', item.product_id);
+        const productSnap = await transaction.get(productRef);
+        if (productSnap.exists()) {
+          const current = productSnap.data() as Product;
+          transaction.update(productRef, { stock: current.stock + r.received_quantity });
+        }
+      } else if (item.isNewProduct && item.name) {
+        const newProductRef = doc(collection(db, 'products'));
+        transaction.set(newProductRef, {
+          name: item.name,
+          category: item.category,
+          price_cents: r.final_cost_cents * 2,
+          stock: r.received_quantity,
+          supplier_id: order.supplierId,
+          createdAt: serverTimestamp(),
+        });
+        createdProducts.push({ itemIndex: idx, productId: newProductRef.id });
+        updatedItems[idx] = { ...item, product_id: newProductRef.id };
+      }
+    }
+
+    const totalReceived = updatedItems.reduce(
+      (s, i) => s + i.received_quantity * (i.final_cost_cents || 0),
+      0
+    );
+
+    const allReceived = updatedItems.every((i) => i.received_quantity >= i.quantity);
+    const somePartial = updatedItems.some(
+      (i) => i.received_quantity > 0 && i.received_quantity < i.quantity
+    );
+
+    const updatePayload: any = {
+      items: updatedItems,
+      received_total_cents: totalReceived,
+    };
+
+    if (allReceived) {
+      updatePayload.status = 'received';
+      updatePayload.receivedDate = serverTimestamp();
+    } else if (somePartial) {
+      updatePayload.status = 'partial';
+    }
+
+    transaction.update(orderRef, updatePayload);
+
+    if (allReceived) {
+      const supplierRef = doc(db, 'suppliers', order.supplierId);
+      const supplierSnap = await transaction.get(supplierRef);
+      if (supplierSnap.exists()) {
+        const current = supplierSnap.data() as Supplier;
+        transaction.update(supplierRef, {
+          totalOrders: (current.totalOrders || 0) + 1,
+          totalSpentCents: (current.totalSpentCents || 0) + totalReceived,
+        });
+      }
+    }
+
+    return { ...order, ...updatePayload, receivedDate: allReceived ? new Date() : order.receivedDate };
+  });
+}
+
+export async function cancelOrder(orderId: string): Promise<void> {
+  if (!isFirebaseConfigured()) {
+    const order = mockOrders.find((o) => o.id === orderId);
+    if (!order) throw new Error('Orden no encontrada');
+    const hasReception = order.items.some((i) => i.received_quantity > 0);
+    if (hasReception) {
+      throw new Error(
+        `No se puede cancelar: ya se recibió stock (${order.items.reduce((s, i) => s + i.received_quantity, 0)} unidades)`
+      );
+    }
+    order.status = 'cancelled';
+    return;
+  }
+
+  try {
+    const orderRef = doc(db, 'purchase_orders', orderId);
+    const orderSnap = await getDoc(orderRef);
+    if (!orderSnap.exists()) throw new Error('Orden no encontrada');
+    const order = orderSnap.data() as PurchaseOrder;
+    const hasReception = order.items.some((i) => i.received_quantity > 0);
+    if (hasReception) {
+      throw new Error(
+        `No se puede cancelar: ya se recibió stock (${order.items.reduce((s, i) => s + i.received_quantity, 0)} unidades)`
+      );
+    }
+    await updateDoc(orderRef, { status: 'cancelled' });
+  } catch (error: any) {
+    if (error.message && (error.message.includes('No se puede cancelar') || error.message.includes('no encontrada'))) {
+      throw error;
+    }
+    console.error('Error canceling order:', error);
+    throw new Error(error.message || 'Error al cancelar orden');
   }
 }

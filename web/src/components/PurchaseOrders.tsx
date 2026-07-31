@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { PurchaseOrder, OrderStatus, Supplier } from '../firebase/db';
-import { getOrders, getSuppliers, createOrder, updateOrderStatus } from '../services/supplierService';
+import { getOrders, getSuppliers, createOrder, updateOrderStatus, cancelOrder } from '../services/supplierService';
 import PurchaseOrderModal from './PurchaseOrderModal';
+import ReceiveOrder from './ReceiveOrder';
 
 const PurchaseOrders = () => {
   const [orders, setOrders] = useState<PurchaseOrder[]>([]);
@@ -11,6 +12,7 @@ const PurchaseOrders = () => {
   const [filterStatus, setFilterStatus] = useState<OrderStatus | 'all'>('all');
   const [filterSupplier, setFilterSupplier] = useState<string>('all');
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [receivingOrder, setReceivingOrder] = useState<PurchaseOrder | null>(null);
 
   const loadData = async () => {
     try {
@@ -98,7 +100,7 @@ const PurchaseOrders = () => {
   const handleCancel = async (orderId: string) => {
     if (!confirm('¿Estás seguro de cancelar esta orden?')) return;
     try {
-      await updateOrderStatus(orderId, 'cancelled');
+      await cancelOrder(orderId);
       await loadData();
     } catch (err: any) {
       setError(err.message || 'Error al cancelar');
@@ -106,7 +108,8 @@ const PurchaseOrders = () => {
   };
 
   const handleReceive = (orderId: string) => {
-    alert('Recepción se implementará en la próxima tarea');
+    const order = orders.find((o) => o.id === orderId);
+    if (order) setReceivingOrder(order);
   };
 
   const handleSave = async (
@@ -303,6 +306,14 @@ const PurchaseOrders = () => {
         onSave={handleSave}
         suppliers={suppliers}
       />
+
+      {receivingOrder && (
+        <ReceiveOrder
+          order={receivingOrder}
+          onClose={() => setReceivingOrder(null)}
+          onReceived={() => loadData()}
+        />
+      )}
     </section>
   );
 };

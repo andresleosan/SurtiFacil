@@ -8,10 +8,14 @@ vi.mock('firebase/firestore', () => ({
   updateDoc: vi.fn(),
   deleteDoc: vi.fn(),
   doc: vi.fn(),
+  runTransaction: vi.fn(),
+  getDoc: vi.fn(),
+  setDoc: vi.fn(),
   serverTimestamp: vi.fn(() => new Date()),
 }));
 
 import { OrderItem, OrderStatus } from '../firebase/db';
+import { resetLocalSales } from '../services/mockData';
 import {
   getSuppliers,
   addSupplier,
@@ -21,6 +25,8 @@ import {
   getOrders,
   createOrder,
   updateOrderStatus,
+  receiveOrderItems,
+  cancelOrder,
 } from '../services/supplierService';
 
 describe('supplierService - CRUD proveedores', () => {
@@ -81,7 +87,10 @@ describe('supplierService - CRUD proveedores', () => {
 });
 
 describe('supplierService - Órdenes de compra', () => {
-  beforeEach(() => { vi.clearAllMocks(); });
+  beforeEach(() => {
+    vi.clearAllMocks();
+    resetLocalSales();
+  });
 
   it('createOrder crea orden en estado draft con received_quantity en 0', async () => {
     const suppliers = await getSuppliers();
@@ -128,5 +137,89 @@ describe('supplierService - Órdenes de compra', () => {
     const suppliers = await getSuppliers();
     const orders = await getOrders({ supplierId: suppliers[0].id });
     expect(orders.every(o => o.supplierId === suppliers[0].id)).toBe(true);
+  });
+});
+
+describe('supplierService - Recepcion', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    resetLocalSales();
+  });
+
+  it('receiveOrderItems suma stock y deja orden en partial', async () => {
+    const suppliers = await getSuppliers();
+    const order = await createOrder({
+      supplierId: suppliers[0].id, supplierName: suppliers[0].name,
+      items: [{ product_id: 'p1', name: 'Manzana Roja', quantity: 10, unit_cost_cents: 250, received_quantity: 0, isNewProduct: false } as OrderItem],
+    });
+    await updateOrderStatus(order.id, 'ordered');
+    const result = await receiveOrderItems(order.id, [
+      { index: 0, received_quantity: 5, final_cost_cents: 250 },
+    ]);
+    expect(result.status).toBe('partial');
+    expect(result.items[0].received_quantity).toBe(5);
+  });
+
+  it('receiveOrderItems completa orden cuando todo se recibe', async () => {
+    const suppliers = await getSuppliers();
+    const order = await createOrder({
+      supplierId: suppliers[0].id, supplierName: suppliers[0].name,
+      items: [{ product_id: 'p1', name: 'Manzana Roja', quantity: 10, unit_cost_cents: 250, received_quantity: 0, isNewProduct: false } as OrderItem],
+    });
+    await updateOrderStatus(order.id, 'ordered');
+    const result = await receiveOrderItems(order.id, [
+      { index: 0, received_quantity: 10, final_cost_cents: 250 },
+    ]);
+    expect(result.status).toBe('received');
+    const updatedSuppliers = await getSuppliers();
+    const supplier = updatedSuppliers.find(s => s.id === suppliers[0].id);
+    expect(supplier?.totalOrders).toBeGreaterThan(0);
+  });
+
+  it('receiveOrderItems crea producto nuevo si isNewProduct', async () => {
+    const suppliers = await getSuppliers();
+    const order = await createOrder({
+      supplierId: suppliers[0].id, supplierName: suppliers[0].name,
+      items: [{ name: 'Producto Nuevo Test', category: 'Test', quantity: 5, unit_cost_cents: 1000, received_quantity: 0, isNewProduct: true } as OrderItem],
+    });
+    await updateOrderStatus(order.id, 'ordered');
+    const result = await receiveOrderItems(order.id, [
+      { index: 0, received_quantity: 5, final_cost_cents: 1000 },
+    ]);
+    expect(result.items[0].product_id).toBeDefined();
+    expect(result.status).toBe('received');
+  });
+
+  it('receiveOrderItems rechaza recibir mas de lo pedido', async () => {
+    const suppliers = await getSuppliers();
+    const order = await createOrder({
+      supplierId: suppliers[0].id, supplierName: suppliers[0].name,
+      items: [{ product_id: 'p1', name: 'Test', quantity: 5, unit_cost_cents: 100, received_quantity: 0, isNewProduct: false } as OrderItem],
+    });
+    await updateOrderStatus(order.id, 'ordered');
+    await expect(
+      receiveOrderItems(order.id, [{ index: 0, received_quantity: 10, final_cost_cents: 100 }])
+    ).rejects.toThrow('No se puede recibir');
+  });
+
+  it('cancelOrder bloquea si hay recepcion previa', async () => {
+    const suppliers = await getSuppliers();
+    const order = await createOrder({
+      supplierId: suppliers[0].id, supplierName: suppliers[0].name,
+      items: [{ product_id: 'p1', name: 'Test', quantity: 10, unit_cost_cents: 100, received_quantity: 0, isNewProduct: false } as OrderItem],
+    });
+    await updateOrderStatus(order.id, 'ordered');
+    await receiveOrderItems(order.id, [{ index: 0, received_quantity: 5, final_cost_cents: 100 }]);
+    await expect(cancelOrder(order.id)).rejects.toThrow('No se puede cancelar');
+  });
+
+  it('cancelOrder permite cancelar sin recepcion previa', async () => {
+    const suppliers = await getSuppliers();
+    const order = await createOrder({
+      supplierId: suppliers[0].id, supplierName: suppliers[0].name,
+      items: [{ quantity: 5, unit_cost_cents: 100, received_quantity: 0, isNewProduct: false } as OrderItem],
+    });
+    await updateOrderStatus(order.id, 'ordered');
+    await expect(cancelOrder(order.id)).resolves.not.toThrow();
   });
 });
