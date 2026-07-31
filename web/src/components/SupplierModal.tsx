@@ -16,6 +16,7 @@ const SupplierModal = ({ isOpen, onClose, onSave, editingSupplier }: SupplierMod
     email: '',
     address: '',
     category: '',
+    lead_time_days: 7 as number | '',
   });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -29,6 +30,7 @@ const SupplierModal = ({ isOpen, onClose, onSave, editingSupplier }: SupplierMod
         email: editingSupplier.email || '',
         address: editingSupplier.address || '',
         category: editingSupplier.category || '',
+        lead_time_days: editingSupplier.lead_time_days ?? 7,
       });
     } else {
       setFormData({
@@ -38,6 +40,7 @@ const SupplierModal = ({ isOpen, onClose, onSave, editingSupplier }: SupplierMod
         email: '',
         address: '',
         category: '',
+        lead_time_days: 7,
       });
     }
     setError('');
@@ -64,6 +67,7 @@ const SupplierModal = ({ isOpen, onClose, onSave, editingSupplier }: SupplierMod
       email: formData.email.trim() || undefined,
       address: formData.address.trim() || undefined,
       category: formData.category.trim() || undefined,
+      lead_time_days: formData.lead_time_days === '' ? 7 : Number(formData.lead_time_days),
       active: editingSupplier ? editingSupplier.active : true,
     };
 
@@ -175,6 +179,25 @@ const SupplierModal = ({ isOpen, onClose, onSave, editingSupplier }: SupplierMod
               onChange={(e) => setFormData({ ...formData, category: e.target.value })}
               className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-sf-primary"
               placeholder="Ej: Lácteos, Bebidas, Abarrotes"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Lead time (días)
+            </label>
+            <input
+              type="number"
+              min="0"
+              value={formData.lead_time_days}
+              onChange={(e) =>
+                setFormData({
+                  ...formData,
+                  lead_time_days: e.target.value === '' ? '' : Number(e.target.value),
+                })
+              }
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-sf-primary"
+              placeholder="Ej: 7"
             />
           </div>
 
