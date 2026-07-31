@@ -5,6 +5,8 @@ import {
   getMarginDaily,
   getTopProductsByMargin,
   getMarginByCategory,
+  escapeCsvCell,
+  toCsv,
 } from '../services/marginService';
 import { Product, Sale } from '../firebase/db';
 
@@ -352,5 +354,42 @@ describe('marginService - getMarginByCategory', () => {
     const byCategory = await getMarginByCategory();
 
     expect(byCategory).toEqual([]);
+  });
+});
+
+describe('marginService - export CSV (escapeCsvCell / toCsv)', () => {
+  it('escapeCsvCell envuelve el valor entre comillas dobles', () => {
+    expect(escapeCsvCell('Arroz')).toBe('"Arroz"');
+  });
+
+  it('escapeCsvCell escapa comillas dobles duplicándolas', () => {
+    expect(escapeCsvCell('Arroz "premium"')).toBe('"Arroz ""premium"""');
+  });
+
+  it('escapeCsvCell antepone apostrofe si la celda empieza con = (anti formula injection)', () => {
+    expect(escapeCsvCell('=SUM(A1)')).toBe(`"'=SUM(A1)"`);
+  });
+
+  it('escapeCsvCell antepone apostrofe para + - @ tab CR', () => {
+    expect(escapeCsvCell('+cmd|/c calc')).toBe(`"'+cmd|/c calc"`);
+    expect(escapeCsvCell('-2+3')).toBe(`"'-2+3"`);
+    expect(escapeCsvCell('@evil')).toBe(`"'@evil"`);
+    expect(escapeCsvCell('\ttab')).toBe(`"'\ttab"`);
+    expect(escapeCsvCell('\rcr')).toBe(`"'\rcr"`);
+  });
+
+  it('escapeCsvCell maneja null y undefined como string vacio', () => {
+    expect(escapeCsvCell(null)).toBe('""');
+    expect(escapeCsvCell(undefined)).toBe('""');
+  });
+
+  it('toCsv une filas con coma y salto de linea', () => {
+    const out = toCsv([['Producto', 'Margen'], ['Arroz', '25']]);
+    expect(out).toBe('"Producto","Margen"\n"Arroz","25"');
+  });
+
+  it('toCsv sanitiza celdas con caracteres de formula', () => {
+    const out = toCsv([['=DANGER()', 'ok']]);
+    expect(out.split('\n')[0].startsWith('"\'=')).toBe(true);
   });
 });

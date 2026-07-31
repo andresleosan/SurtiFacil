@@ -84,9 +84,13 @@ const MarginReports = () => {
       p.margin_percent.toFixed(2),
       p.isEstimated ? '1' : '0',
     ]);
-    const csvContent = [headers, ...rows]
-      .map((row) => row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(','))
-      .join('\n');
+    const csvContent = [headers, ...rows].map((row) => row.map((c) => {
+      const s = String(c);
+      const FORMULA = ['=', '+', '-', '@', '\t', '\r'];
+      const needsPrefix = FORMULA.some((ch) => s.startsWith(ch));
+      const escaped = s.replace(/"/g, '""').replace(/\n/g, ' ');
+      return needsPrefix ? `"'${escaped}"` : `"${escaped}"`;
+    }).join(',')).join('\n');
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');

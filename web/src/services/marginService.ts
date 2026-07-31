@@ -1,6 +1,27 @@
 import { getSales, getProducts } from './saleService';
 import { Sale, Product, SaleItem } from '../firebase/db';
 
+/**
+ * Escapa un valor para exportación CSV evitando CSV injection (CWE-1236).
+ * Si el valor empieza con =, +, -, @, \t o \r, se antepone una comilla
+ * simple para que Excel/LibreOffice no lo interpreten como fórmula.
+ * También escapa comillas dobles y saltos de línea internos.
+ */
+export function escapeCsvCell(value: unknown): string {
+  const str = value == null ? '' : String(value);
+  const FORMULA_CHARS = ['=', '+', '-', '@', '\t', '\r'];
+  const needsPrefix = FORMULA_CHARS.some((ch) => str.startsWith(ch));
+  const escaped = str.replace(/"/g, '""').replace(/\n/g, ' ');
+  return needsPrefix ? `"'${escaped}"` : `"${escaped}"`;
+}
+
+/**
+ * Une filas (arrays) en un CSV sanitizado. Las celdas pasan por escapeCsvCell.
+ */
+export function toCsv(rows: (string | number)[][]): string {
+  return rows.map((row) => row.map(escapeCsvCell).join(',')).join('\n');
+}
+
 export interface MarginBucket {
   revenue_cents: number;
   cost_cents: number;
@@ -139,12 +160,13 @@ export async function getMarginSummary(): Promise<MarginSummary> {
 }
 
 export async function getMarginDaily(days: number = 30): Promise<MarginDaily[]> {
+  const safeDays = Math.min(Math.max(Math.floor(days), 1), 365);
   const [sales, products] = await Promise.all([getSales(), getProducts()]);
   const productsById = new Map(products.map((p) => [p.id, p]));
   const result: MarginDaily[] = [];
   const now = new Date();
 
-  for (let i = days - 1; i >= 0; i--) {
+  for (let i = safeDays - 1; i >= 0; i--) {
     const date = new Date(now);
     date.setDate(now.getDate() - i);
     date.setHours(0, 0, 0, 0);
@@ -185,6 +207,7 @@ export async function getTopProductsByMargin(
   limit: number = 10,
   sortBy: 'absolute' | 'percent' = 'absolute'
 ): Promise<ProductMargin[]> {
+  const safeLimit = Math.min(Math.max(Math.floor(limit), 1), 100);
   const [sales, products] = await Promise.all([getSales(), getProducts()]);
   const productsById = new Map(products.map((p) => [p.id, p]));
 
@@ -237,7 +260,7 @@ export async function getTopProductsByMargin(
     return b.margin_cents - a.margin_cents;
   });
 
-  return filtered.slice(0, limit);
+  return filtered.slice(0, safeLimit);
 }
 
 export async function getMarginByCategory(): Promise<CategoryMargin[]> {

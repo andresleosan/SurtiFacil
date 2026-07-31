@@ -32,5 +32,11 @@
     "typescript": "^5.4.5",
     "vite": "^5.2.1",
     "vitest": "^4.1.10"
+  },
+  "overrides": {
+    "protobufjs": ">=7.6.5",
+    "@protobufjs/utf8": ">=1.1.1",
+    "websocket-driver": ">=0.7.5",
+    "@grpc/grpc-js": ">=1.10.10"
   }
 }

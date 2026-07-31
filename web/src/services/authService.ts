@@ -22,6 +22,26 @@ import { User, UserRole } from '../firebase/db';
 
 const auth = getAuth();
 
+/**
+ * Sincroniza los custom claims de Firebase Auth con el rol del usuario
+ * almacenado en Firestore. Es idempotente y seguro de llamar después
+ * de cada login. Ver ADR-0001.
+ */
+async function syncCustomClaims(uid: string): Promise<void> {
+  const backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3000';
+  const idToken = await auth.currentUser?.getIdToken();
+  if (!idToken) return;
+  try {
+    await fetch(`${backendUrl}/api/auth/sync-claims`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ uid, idToken }),
+    });
+  } catch (err) {
+    console.warn('No se pudieron sincronizar custom claims:', err);
+  }
+}
+
 // Mock data for development without Firebase
 let mockUsers: User[] = [
   {
@@ -93,6 +113,10 @@ export async function registerUser(
 
     const docRef = await addDoc(collection(db, 'users'), userData);
 
+    // Sincronizar custom claims inmediatamente para que el usuario recién
+    // creado pueda escribir según su rol sin re-login. Ver ADR-0001.
+    await syncCustomClaims(firebaseUser.uid);
+
     return {
       id: docRef.id,
       ...userData,
@@ -138,6 +162,10 @@ export async function loginUser(email: string, password: string): Promise<User> 
       lastLogin: serverTimestamp(),
     });
 
+    // Sincronizar custom claims (admin/manager) para que Firestore rules funcionen.
+    // Ver ADR-0001.
+    await syncCustomClaims(firebaseUser.uid);
+
     currentUser = {
       id: userDoc.id,
       ...userData,
@@ -171,7 +199,7 @@ export async function logoutUser(): Promise<void> {
 /**
  * Obtiene el usuario actual
  */
-export function getCurrentUser(): User | null {
+export async function getCurrentUser(): Promise<User | null> {
   if (!isFirebaseConfigured()) {
     return currentUser;
   }
@@ -179,13 +207,22 @@ export function getCurrentUser(): User | null {
   const firebaseUser = auth.currentUser;
   if (!firebaseUser) return null;
 
-  // En modo producción, esto debería obtenerse de Firestore
-  // Por ahora retornamos un objeto básico
+  // Leer rol desde custom claims (verdad criptográfica, ver ADR-0001).
+  // Fallback a cashier si los claims aún no se han propagado (re-login requerido).
+  let role: UserRole = 'cashier';
+  try {
+    const tokenResult = await firebaseUser.getIdTokenResult();
+    if (tokenResult.claims.admin === true) role = 'admin';
+    else if (tokenResult.claims.manager === true) role = 'manager';
+  } catch {
+    role = 'cashier';
+  }
+
   return {
     id: firebaseUser.uid,
     email: firebaseUser.email || '',
     displayName: firebaseUser.displayName || '',
-    role: 'cashier', // Default role
+    role,
     active: true,
   };
 }
@@ -277,20 +314,37 @@ export async function deleteUser(userId: string): Promise<void> {
 }
 
 /**
- * Verifica si el usuario actual tiene un rol específico
+ * Verifica si el usuario actual tiene un rol específico (async, lee custom claims).
  */
-export function hasRole(role: UserRole): boolean {
-  const user = getCurrentUser();
+export async function hasRoleAsync(role: UserRole): Promise<boolean> {
+  const user = await getCurrentUser();
   if (!user) return false;
-
-  // Admin tiene acceso a todo
   if (user.role === 'admin') return true;
-
   return user.role === role;
 }
 
 /**
- * Verifica si el usuario actual es admin
+ * Verifica si el usuario actual es admin (async, lee custom claims).
+ */
+export async function isAdminAsync(): Promise<boolean> {
+  return hasRoleAsync('admin');
+}
+
+/**
+ * Verifica si el usuario actual tiene un rol específico.
+ * Solo lee del cache local (currentUser). Útil en tests o paths que no
+ * quieren await. Para gates de seguridad en producción usar isAdminAsync().
+ */
+export function hasRole(role: UserRole): boolean {
+  const user = currentUser;
+  if (!user) return false;
+  if (user.role === 'admin') return true;
+  return user.role === role;
+}
+
+/**
+ * Verifica si el usuario actual es admin (cache local).
+ * Para gates de seguridad reales usar isAdminAsync().
  */
 export function isAdmin(): boolean {
   return hasRole('admin');

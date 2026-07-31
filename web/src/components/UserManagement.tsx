@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { User, UserRole } from '../firebase/db';
-import { getUsers, updateUserRole, toggleUserActive, deleteUser, isAdmin } from '../services/authService';
+import { getUsers, updateUserRole, toggleUserActive, deleteUser, isAdminAsync } from '../services/authService';
 import CreateUserModal from './CreateUserModal';
 
 const UserManagement = () => {
@@ -9,6 +9,13 @@ const UserManagement = () => {
   const [error, setError] = useState<string>('');
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [editingUser, setEditingUser] = useState<User | null>(null);
+  const [isAdminUser, setIsAdminUser] = useState<boolean>(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    isAdminAsync().then((v) => { if (!cancelled) setIsAdminUser(v); });
+    return () => { cancelled = true; };
+  }, []);
 
   const loadUsers = async () => {
     try {
@@ -90,7 +97,7 @@ const UserManagement = () => {
     );
   }
 
-  if (!isAdmin()) {
+  if (!isAdminUser) {
     return (
       <section className="space-y-4">
         <h2 className="text-2xl font-bold text-sf-text">Gestión de Empleados</h2>

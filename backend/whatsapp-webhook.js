@@ -261,6 +261,54 @@ app.get('/api/health', (req, res) => {
 });
 
 /**
+ * POST /api/auth/sync-claims
+ * Body: { uid: string, idToken: string }
+ *
+ * Lee el rol del usuario desde Firestore y lo sincroniza como custom claims
+ * de Firebase Auth (request.auth.token.admin / .manager). Idempotente.
+ * Requiere idToken válido del usuario que se está sincronizando.
+ *
+ * ADR-0001: custom claims son la fuente de verdad para autorización en rules.
+ */
+app.post('/api/auth/sync-claims', async (req, res) => {
+  try {
+    const { uid, idToken } = req.body || {};
+    if (!uid || !idToken) {
+      return res.status(400).json({ error: 'uid and idToken required' });
+    }
+
+    // Verificar que el idToken pertenece al uid solicitado
+    const decoded = await admin.auth().verifyIdToken(idToken);
+    if (decoded.uid !== uid) {
+      return res.status(403).json({ error: 'Token does not match uid' });
+    }
+
+    // Leer rol desde Firestore
+    const userDoc = await db.collection('users').doc(uid).get();
+    if (!userDoc.exists) {
+      return res.status(404).json({ error: 'User not found in Firestore' });
+    }
+    const role = userDoc.data().role;
+    if (!role || !['admin', 'manager', 'cashier'].includes(role)) {
+      return res.status(400).json({ error: 'Invalid role in Firestore' });
+    }
+
+    // Setear custom claims
+    const claims = {
+      admin: role === 'admin',
+      manager: role === 'manager' || role === 'admin',
+    };
+    await admin.auth().setCustomUserClaims(uid, claims);
+
+    console.log(`🔐 Custom claims sincronizados para uid=${uid}: ${JSON.stringify(claims)}`);
+    res.json({ success: true, claims });
+  } catch (error) {
+    console.error('❌ Error syncing custom claims:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
  * POST /api/whatsapp/test - Test endpoint
  */
 app.post('/api/whatsapp/test', requireAuth, async (req, res) => {

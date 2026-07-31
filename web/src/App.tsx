@@ -9,12 +9,15 @@ import Reports from './components/Reports';
 import Suppliers from './components/Suppliers';
 import PurchaseOrders from './components/PurchaseOrders';
 import MarginReports from './components/MarginReports';
-import { isAdmin } from './services/authService';
+import { isAdminAsync } from './services/authService';
 
 type Page = 'dashboard' | 'inventory' | 'sales' | 'create-sale' | 'whatsapp' | 'employees' | 'reports' | 'suppliers' | 'orders' | 'margins';
 
+const ADMIN_ONLY_PAGES: Page[] = ['margins'];
+
 function App() {
   const [page, setPage] = useState<Page>('dashboard');
+  const [isAdmin, setIsAdmin] = useState<boolean>(false);
 
   useEffect(() => {
     const handler = (e: Event) => {
@@ -25,7 +28,23 @@ function App() {
     return () => window.removeEventListener('navigate', handler);
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+    isAdminAsync().then((v) => { if (!cancelled) setIsAdmin(v); });
+    return () => { cancelled = true; };
+  }, []);
+
   const pageComponent = useMemo(() => {
+    if (ADMIN_ONLY_PAGES.includes(page) && !isAdmin) {
+      return (
+        <section className="space-y-4">
+          <h2 className="text-2xl font-bold text-sf-text">🔒 Acceso restringido</h2>
+          <div className="text-gray-600">
+            Esta sección requiere rol de administrador.
+          </div>
+        </section>
+      );
+    }
     if (page === 'inventory') return <Inventory />;
     if (page === 'sales') return <Sales />;
     if (page === 'create-sale') return <CreateSale />;
@@ -34,9 +53,9 @@ function App() {
     if (page === 'orders') return <PurchaseOrders />;
     if (page === 'reports') return <Reports />;
     if (page === 'margins') return <MarginReports />;
-  
+
     return <Dashboard />;
-  }, [page]);
+  }, [page, isAdmin]);
 
   return (
     <div className="min-h-screen bg-sf-light text-sf-text font-poppins">
@@ -68,9 +87,9 @@ function App() {
             <button onClick={() => setPage('reports')} className="hover:underline">
               📊 Reportes
             </button>
-            {isAdmin() && (
+            {isAdmin && (
               <button onClick={() => setPage('margins')} className="hover:underline">
-                📊 Márgenes
+                💰 Márgenes
               </button>
             )}
             <button onClick={() => setPage('whatsapp')} className="hover:underline">

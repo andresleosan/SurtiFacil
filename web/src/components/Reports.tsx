@@ -55,8 +55,14 @@ const Reports = () => {
 
   const exportToCSV = () => {
     const headers = ['Fecha', 'Total', 'Ventas'];
-    const rows = dailySales.map(d => [d.date, d.total, d.count]);
-    const csvContent = [headers, ...rows].map(row => row.join(',')).join('\n');
+    const rows = dailySales.map(d => [d.date, String(d.total), String(d.count)]);
+    const esc = (v: string): string => {
+      const FORMULA = ['=', '+', '-', '@', '\t', '\r'];
+      const needsPrefix = FORMULA.some((ch) => v.startsWith(ch));
+      const escaped = v.replace(/"/g, '""').replace(/\n/g, ' ');
+      return needsPrefix ? `"'${escaped}"` : `"${escaped}"`;
+    };
+    const csvContent = [headers, ...rows].map(row => row.map(esc).join(',')).join('\n');
     const blob = new Blob([csvContent], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
