@@ -8,8 +8,10 @@ import UserManagement from './components/UserManagement';
 import Reports from './components/Reports';
 import Suppliers from './components/Suppliers';
 import PurchaseOrders from './components/PurchaseOrders';
+import MarginReports from './components/MarginReports';
+import { isAdmin } from './services/authService';
 
-type Page = 'dashboard' | 'inventory' | 'sales' | 'create-sale' | 'whatsapp' | 'employees' | 'reports' | 'suppliers' | 'orders';
+type Page = 'dashboard' | 'inventory' | 'sales' | 'create-sale' | 'whatsapp' | 'employees' | 'reports' | 'suppliers' | 'orders' | 'margins';
 
 function App() {
   const [page, setPage] = useState<Page>('dashboard');
@@ -31,6 +33,7 @@ function App() {
     if (page === 'suppliers') return <Suppliers />;
     if (page === 'orders') return <PurchaseOrders />;
     if (page === 'reports') return <Reports />;
+    if (page === 'margins') return <MarginReports />;
   
     return <Dashboard />;
   }, [page]);
@@ -65,6 +68,11 @@ function App() {
             <button onClick={() => setPage('reports')} className="hover:underline">
               📊 Reportes
             </button>
+            {isAdmin() && (
+              <button onClick={() => setPage('margins')} className="hover:underline">
+                📊 Márgenes
+              </button>
+            )}
             <button onClick={() => setPage('whatsapp')} className="hover:underline">
               💬 WhatsApp
             </button>
