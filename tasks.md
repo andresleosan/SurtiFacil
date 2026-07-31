@@ -130,6 +130,7 @@
 
 ## Resumen Estimación
 
+### MVP v1.0 ✅ COMPLETADO
 | Fase | Días | Estado |
 |------|------|--------|
 | Alertas Stock | 5 | ✅ COMPLETADA |
@@ -137,19 +138,42 @@
 | Reportes | 5 | ✅ COMPLETADA |
 | Testing | 3 | ✅ COMPLETADA |
 | Deploy | 2 | ✅ COMPLETADA |
-| **TOTAL** | **22 días** | **22/22 días ✅** |
+| **Subtotal MVP v1.0** | **22 días** | **✅** |
+
+### v1.1 Gestión de Proveedores ✅ COMPLETADO
+| Fase | Días | Estado |
+|------|------|--------|
+| Task 1: Modelos y Mock Data | 1 | ✅ COMPLETADA |
+| Task 2: Servicio CRUD Proveedores | 1 | ✅ COMPLETADA |
+| Task 3: UI Proveedores | 2 | ✅ COMPLETADA |
+| Task 4: Servicio Órdenes | 1 | ✅ COMPLETADA |
+| Task 5: UI Órdenes | 2 | ✅ COMPLETADA |
+| Task 6: Recepción Atómica | 2 | ✅ COMPLETADA |
+| Task 7: Reglas + Índices | 1 | ✅ COMPLETADA |
+| **Subtotal v1.1** | **10 días** | **✅** |
 
 ---
 
 ## Checklist Pre-Entrega ✅
 
 - [x] Todos los features funcionando
-- [x] Tests pass (`npm run test`) - 38/38 pass
+- [x] Tests pass (`npm run test`) - 54/54 pass
 - [x] Build exitoso (`npm run build`) - chunks optimizados
 - [x] Sin errores en consola (build limpio)
-- [x] Documentación actualizada (DEPLOY.md)
+- [x] Documentación actualizada (DEPLOY.md, BRIEF.md)
 - [ ] Deploy a producción (pendiente credenciales Firebase)
 
 ---
 
-*Generado por Cronos - MVP v1.0 Planning*
+## Commits Recientes (v1.1)
+
+- `723086a` feat(v1.1): recepción parcial atómica de órdenes
+- `7a904b2` feat(v1.1): UI de órdenes de compra con filtros y modal
+- `0f19229` feat(v1.1): servicio de órdenes con transiciones de estado
+- `2dd1a26` feat(v1.1): UI de gestión de proveedores
+- `b09eaa4` feat(v1.1): servicio CRUD de proveedores
+- `24c527f` feat(v1.1): agregar modelos de datos de proveedores y órdenes
+
+---
+
+*Generado por Cronos - MVP v1.0 + v1.1 Planning*

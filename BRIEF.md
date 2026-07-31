@@ -1,9 +1,8 @@
 # BRIEF.md - SurtiFácil Admin
 
 ## Estado Actual
-**Fase**: MVP/Alpha funcional  
-**Fecha**: 2026-07-31  
-**Core Features**: Dashboard, Inventario, Ventas, WhatsApp Integration, AI (Audio/Image)
+**Fase**: v1.1 Gestión de Proveedores (completada 2026-07-31)  
+**Core Features**: Dashboard, Inventario, Ventas, WhatsApp, Empleados, Reportes, Proveedores, Órdenes de Compra con recepción automática
 
 ---
 
@@ -27,7 +26,7 @@
 | 1 | **Alertas Stock Bajo** | 5 | 5 | 5 | 4 | **4.75** | ✅ MVP v1.0 |
 | 2 | **Gestión de Empleados** | 4 | 4 | 4 | 3 | **3.75** | ✅ MVP v1.0 |
 | 3 | **Reportes Básicos** | 3 | 3 | 4 | 4 | **3.50** | ✅ MVP v1.0 |
-| 4 | **Gestión de Proveedores** | 3 | 4 | 3 | 2 | **3.00** | ⏳ v1.1 |
+| 4 | **Gestión de Proveedores** | 3 | 4 | 3 | 2 | **3.00** | ✅ v1.1 |
 | 5 | **Analytics Avanzados** | 2 | 3 | 3 | 2 | **2.50** | ⏳ v2.0 |
 | 6 | **Multi-tenant/SaaS** | 2 | 2 | 2 | 1 | **1.75** | ❌ Descartado v1.x |
 
