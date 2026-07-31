@@ -9,15 +9,16 @@ import Reports from './components/Reports';
 import Suppliers from './components/Suppliers';
 import PurchaseOrders from './components/PurchaseOrders';
 import MarginReports from './components/MarginReports';
-import { isAdminAsync } from './services/authService';
+import { isAdminAsync, hasRoleAsync } from './services/authService';
+import Restock from './components/Restock';
 
-type Page = 'dashboard' | 'inventory' | 'sales' | 'create-sale' | 'whatsapp' | 'employees' | 'reports' | 'suppliers' | 'orders' | 'margins';
+type Page = 'dashboard' | 'inventory' | 'sales' | 'create-sale' | 'whatsapp' | 'employees' | 'reports' | 'suppliers' | 'orders' | 'margins' | 'restock';
 
-const ADMIN_ONLY_PAGES: Page[] = ['margins'];
+const ADMIN_OR_MANAGER_PAGES: Page[] = ['margins', 'restock'];
 
 function App() {
   const [page, setPage] = useState<Page>('dashboard');
-  const [isAdmin, setIsAdmin] = useState<boolean>(false);
+  const [userRoles, setUserRoles] = useState<{ admin: boolean; manager: boolean }>({ admin: false, manager: false });
 
   useEffect(() => {
     const handler = (e: Event) => {
@@ -30,17 +31,21 @@ function App() {
 
   useEffect(() => {
     let cancelled = false;
-    isAdminAsync().then((v) => { if (!cancelled) setIsAdmin(v); });
+    Promise.all([isAdminAsync(), hasRoleAsync('manager')]).then(([admin, manager]) => {
+      if (!cancelled) setUserRoles({ admin, manager });
+    });
     return () => { cancelled = true; };
   }, []);
 
+  const canAccessManagerPages = userRoles.admin || userRoles.manager;
+
   const pageComponent = useMemo(() => {
-    if (ADMIN_ONLY_PAGES.includes(page) && !isAdmin) {
+    if (ADMIN_OR_MANAGER_PAGES.includes(page) && !canAccessManagerPages) {
       return (
         <section className="space-y-4">
-          <h2 className="text-2xl font-bold text-sf-text">🔒 Acceso restringido</h2>
+          <h2 className="text-2xl font-bold text-sf-text">Acceso restringido</h2>
           <div className="text-gray-600">
-            Esta sección requiere rol de administrador.
+            Esta sección requiere rol de administrador o gerente.
           </div>
         </section>
       );
@@ -53,9 +58,10 @@ function App() {
     if (page === 'orders') return <PurchaseOrders />;
     if (page === 'reports') return <Reports />;
     if (page === 'margins') return <MarginReports />;
+    if (page === 'restock') return <Restock />;
 
     return <Dashboard />;
-  }, [page, isAdmin]);
+  }, [page, canAccessManagerPages]);
 
   return (
     <div className="min-h-screen bg-sf-light text-sf-text font-poppins">
@@ -82,14 +88,19 @@ function App() {
               🚚 Proveedores
             </button>
             <button onClick={() => setPage('orders')} className="hover:underline">
-              📦 Pedidos
+              Pedidos
             </button>
+            {canAccessManagerPages && (
+              <button onClick={() => setPage('restock')} className="hover:underline">
+                Reposición
+              </button>
+            )}
             <button onClick={() => setPage('reports')} className="hover:underline">
-              📊 Reportes
+              Reportes
             </button>
-            {isAdmin && (
+            {canAccessManagerPages && (
               <button onClick={() => setPage('margins')} className="hover:underline">
-                💰 Márgenes
+                Márgenes
               </button>
             )}
             <button onClick={() => setPage('whatsapp')} className="hover:underline">
