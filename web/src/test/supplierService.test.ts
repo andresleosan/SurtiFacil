@@ -11,12 +11,16 @@ vi.mock('firebase/firestore', () => ({
   serverTimestamp: vi.fn(() => new Date()),
 }));
 
+import { OrderItem, OrderStatus } from '../firebase/db';
 import {
   getSuppliers,
   addSupplier,
   updateSupplier,
   toggleSupplierActive,
   deleteSupplier,
+  getOrders,
+  createOrder,
+  updateOrderStatus,
 } from '../services/supplierService';
 
 describe('supplierService - CRUD proveedores', () => {
@@ -73,5 +77,56 @@ describe('supplierService - CRUD proveedores', () => {
     await deleteSupplier(supplier.id);
     const remaining = await getSuppliers();
     expect(remaining.find((s) => s.id === supplier.id)).toBeUndefined();
+  });
+});
+
+describe('supplierService - Órdenes de compra', () => {
+  beforeEach(() => { vi.clearAllMocks(); });
+
+  it('createOrder crea orden en estado draft con received_quantity en 0', async () => {
+    const suppliers = await getSuppliers();
+    const order = await createOrder({
+      supplierId: suppliers[0].id,
+      supplierName: suppliers[0].name,
+      items: [
+        { quantity: 10, unit_cost_cents: 1000, received_quantity: 0, isNewProduct: false } as OrderItem,
+      ],
+    });
+    expect(order.status).toBe('draft');
+    expect(order.total_cents).toBe(10000);
+    expect(order.items[0].received_quantity).toBe(0);
+  });
+
+  it('updateOrderStatus permite draft a ordered', async () => {
+    const suppliers = await getSuppliers();
+    const order = await createOrder({
+      supplierId: suppliers[0].id, supplierName: suppliers[0].name,
+      items: [{ quantity: 5, unit_cost_cents: 500, received_quantity: 0, isNewProduct: false } as OrderItem],
+    });
+    await updateOrderStatus(order.id, 'ordered');
+    const orders = await getOrders();
+    const updated = orders.find(o => o.id === order.id);
+    expect(updated?.status).toBe('ordered');
+  });
+
+  it('updateOrderStatus bloquea transicion invalida (received a draft)', async () => {
+    const suppliers = await getSuppliers();
+    const order = await createOrder({
+      supplierId: suppliers[0].id, supplierName: suppliers[0].name,
+      items: [{ quantity: 5, unit_cost_cents: 500, received_quantity: 0, isNewProduct: false } as OrderItem],
+    });
+    await updateOrderStatus(order.id, 'ordered');
+    await expect(updateOrderStatus(order.id, 'draft')).rejects.toThrow('no permitida');
+  });
+
+  it('getOrders filtra por estado', async () => {
+    const orders = await getOrders({ status: 'draft' });
+    expect(orders.every(o => o.status === 'draft')).toBe(true);
+  });
+
+  it('getOrders filtra por proveedor', async () => {
+    const suppliers = await getSuppliers();
+    const orders = await getOrders({ supplierId: suppliers[0].id });
+    expect(orders.every(o => o.supplierId === suppliers[0].id)).toBe(true);
   });
 });
