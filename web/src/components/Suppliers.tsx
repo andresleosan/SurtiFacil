@@ -114,6 +114,7 @@ const Suppliers = () => {
               <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide">Contacto</th>
               <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide">Tel</th>
               <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide">Categoría</th>
+              <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide">Lead time</th>
               <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide">Total Comprado</th>
               <th className="px-4 py-3 text-center text-xs font-semibold uppercase tracking-wide">Estado</th>
               <th className="px-4 py-3 text-center text-xs font-semibold uppercase tracking-wide">Acciones</th>
@@ -129,6 +130,9 @@ const Suppliers = () => {
                 <td className="px-4 py-3 text-sm text-gray-600">{supplier.contactName || '—'}</td>
                 <td className="px-4 py-3 text-sm text-gray-600">{supplier.phone || '—'}</td>
                 <td className="px-4 py-3 text-sm text-gray-600">{supplier.category || '—'}</td>
+                <td className="px-4 py-3 text-sm text-gray-700">
+                  {supplier.lead_time_days ? `${supplier.lead_time_days} días` : '7 días (default)'}
+                </td>
                 <td className="px-4 py-3 text-sm text-right text-gray-600">{formatCents(supplier.totalSpentCents)}</td>
                 <td className="px-4 py-3 text-center">
                   <span
