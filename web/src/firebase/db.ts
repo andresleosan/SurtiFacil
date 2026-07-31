@@ -69,6 +69,7 @@ export interface Supplier {
   createdAt?: any;
   totalOrders: number;
   totalSpentCents: number;
+  lead_time_days?: number;
 }
 
 export interface OrderItem {
