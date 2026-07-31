@@ -237,6 +237,8 @@ export async function createOrder(data: {
     return {
       id: docRef.id,
       ...orderData,
+      date: new Date(),
+      createdAt: new Date(),
     };
   } catch (error: any) {
     console.error('Error creating order:', error);
@@ -253,6 +255,7 @@ export async function updateOrderStatus(
     if (!order) {
       throw new Error('Orden no encontrada');
     }
+    if (order.status === newStatus) return;
     const allowed = ALLOWED_TRANSITIONS[order.status];
     if (!allowed.includes(newStatus)) {
       throw new Error(
@@ -283,6 +286,7 @@ export async function updateOrderStatus(
         `Transición de estado no permitida: ${currentStatus} → ${newStatus}`
       );
     }
+    if (currentStatus === newStatus) return;
 
     await updateDoc(doc(db, 'purchase_orders', orderId), { status: newStatus });
   } catch (error: any) {
