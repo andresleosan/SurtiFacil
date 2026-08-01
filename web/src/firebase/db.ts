@@ -12,6 +12,7 @@ export interface Product {
   last_cost_cents?: number;
   last_cost_source?: 'purchase' | 'fallback_price';
   last_cost_updated_at?: any;
+  barcode?: string; // EAN-13, UPC-A, or QR code
 }
 
 /**
