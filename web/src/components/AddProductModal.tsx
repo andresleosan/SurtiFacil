@@ -1,6 +1,8 @@
 import { useState, useRef } from 'react';
 import ImageUploadAI from './ImageUploadAI';
 import AudioUploadAI from './AudioUploadAI';
+import BarcodeScanner from './BarcodeScanner';
+import { useBarcode } from '../hooks/useBarcode';
 
 interface AddProductModalProps {
   isOpen: boolean;
@@ -10,6 +12,7 @@ interface AddProductModalProps {
     price_cents: number;
     stock: number;
     category: string;
+    barcode?: string;
   }) => void;
 }
 
@@ -22,6 +25,7 @@ const AddProductModal = ({ isOpen, onClose, onAddProduct }: AddProductModalProps
     price: '',
     stock: '',
     category: 'Abarrotes',
+    barcode: '',
   });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -70,6 +74,15 @@ const AddProductModal = ({ isOpen, onClose, onAddProduct }: AddProductModalProps
       [name]: value,
     }));
   };
+
+  const handleBarcodeScan = (code: string) => {
+    setFormData((prev) => ({
+      ...prev,
+      barcode: code,
+    }));
+  };
+
+  const { isOpen: isScannerOpen, open: openScanner, close: closeScanner, handleScan } = useBarcode(handleBarcodeScan);
 
   const handleImageData = (data: {
     nombre: string;
@@ -142,6 +155,7 @@ const AddProductModal = ({ isOpen, onClose, onAddProduct }: AddProductModalProps
         price_cents: Math.round(price * 100),
         stock: stock,
         category: formData.category,
+        barcode: formData.barcode.trim() || undefined,
       });
 
       // Resetear formulario
@@ -150,6 +164,7 @@ const AddProductModal = ({ isOpen, onClose, onAddProduct }: AddProductModalProps
         price: '',
         stock: '',
         category: 'Abarrotes',
+        barcode: '',
       });
       setMode('manual');
       onClose();
@@ -184,12 +199,20 @@ const AddProductModal = ({ isOpen, onClose, onAddProduct }: AddProductModalProps
           onMouseDown={handleMouseDown}
         >
           <h2 className="text-xl font-bold">Agregar Producto</h2>
-          <button
-            onClick={onClose}
-            className="text-xl hover:bg-sf-dark rounded p-1 transition"
-          >
-            ✕
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={openScanner}
+              className="px-3 py-1 text-sm bg-white/20 text-white rounded hover:bg-white/30 transition"
+            >
+              Escanear codigo
+            </button>
+            <button
+              onClick={onClose}
+              className="text-xl hover:bg-sf-dark rounded p-1 transition"
+            >
+              ✕
+            </button>
+          </div>
         </div>
 
         {/* Contenido */}
@@ -309,6 +332,20 @@ const AddProductModal = ({ isOpen, onClose, onAddProduct }: AddProductModalProps
                 </select>
               </div>
 
+              <div>
+                <label className="block text-sm font-medium text-sf-text mb-1">
+                  Codigo de barras (opcional)
+                </label>
+                <input
+                  type="text"
+                  name="barcode"
+                  value={formData.barcode}
+                  onChange={handleInputChange}
+                  placeholder="Escanear o escribir codigo"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-sf-primary text-sf-text"
+                />
+              </div>
+
               <button
                 type="submit"
                 disabled={loading}
@@ -330,6 +367,10 @@ const AddProductModal = ({ isOpen, onClose, onAddProduct }: AddProductModalProps
           )}
         </div>
       </div>
+
+      {isScannerOpen && (
+        <BarcodeScanner onScan={handleScan} onClose={closeScanner} />
+      )}
     </div>
   );
 };
