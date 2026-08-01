@@ -1,8 +1,8 @@
 # BRIEF.md - SurtiFácil Admin
 
 ## Estado Actual
-**Fase**: v1.3 Reposición Predictiva ✅ COMPLETADA (2026-07-31)
-**Core Features**: Dashboard, Inventario, Ventas, WhatsApp, Empleados, Reportes, Proveedores, Órdenes de Compra con recepción automática, Márgenes, Reposición Predictiva
+**Fase**: v2.0 Barcode Scanner + PWA ✅ COMPLETADA (2026-07-31)
+**Core Features**: Dashboard, Inventario, Ventas, WhatsApp, Empleados, Reportes, Proveedores, Órdenes de Compra con recepción automática, Márgenes, Reposición Predictiva, Escáner de Códigos de Barras, PWA (instalable + offline)
 
 ---
 
@@ -29,7 +29,8 @@
 | 4 | **Gestión de Proveedores** | 3 | 4 | 3 | 2 | **3.00** | ✅ v1.1 |
 | 5 | **Analytics Avanzados (Margen)** | 2 | 3 | 3 | 2 | **2.50** | ✅ v1.2 |
 | 6 | **Reposición Predictiva** | 3 | 4 | 3 | 2 | **3.00** | ✅ v1.3 COMPLETADO |
-| 7 | **Multi-tenant/SaaS** | 2 | 2 | 2 | 1 | **1.75** | ❌ Descartado v1.x |
+| 7 | **Barcode Scanner + PWA** | 3 | 4 | 3 | 2 | **3.00** | ✅ v2.0 COMPLETADO |
+| 8 | **Multi-tenant/SaaS** | 2 | 2 | 2 | 1 | **1.75** | ❌ Descartado v1.x |
 
 ---
 
@@ -67,9 +68,10 @@ Jul-Ago 2026  → MVP v1.0 (Alertas + Empleados + Reportes) ✅
 Sep 2026      → v1.1 (Proveedores) ✅
 Oct 2026      → v1.2 (Analytics de Margen) ✅
 Nov 2026      → v1.3 (Reposición Predictiva) ✅
-Q4 2026       → Evaluar SaaS / v2.0
+Q4 2026       → v2.0 (Barcode Scanner + PWA) ✅
+Q1 2027       → Evaluar SaaS / Multi-tenant
 ```
 
 ---
 
-*Documento generado por Cronos - v1.3 Reposición Predictiva Completada*
+*Documento generado por Cronos - v2.0 Barcode Scanner + PWA Completada*

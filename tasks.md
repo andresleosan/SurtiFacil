@@ -176,30 +176,48 @@
 | Task 8: Nav + guard admin/manager | 0.5 | ✅ COMPLETADA |
 | **Subtotal v1.3** | **6.5 días** | **✅** |
 
+### v2.0 Barcode Scanner + PWA ✅ COMPLETADO
+| Fase | Días | Estado |
+|------|------|--------|
+| Task 1: Data model + barcode field | 0.5 | ✅ COMPLETADA |
+| Task 2: Instalar dependencias | 0.5 | ✅ COMPLETADA |
+| Task 3: BarcodeScanner component | 1 | ✅ COMPLETADA |
+| Task 4: useBarcode hook | 0.5 | ✅ COMPLETADA |
+| Task 5: Integración Inventory | 1 | ✅ COMPLETADA |
+| Task 6: Integración CreateSale | 1 | ✅ COMPLETADA |
+| Task 7: Integración AddProductModal | 0.5 | ✅ COMPLETADA |
+| Task 8: PWA Setup (manifest + plugin) | 1 | ✅ COMPLETADA |
+| Task 9: Offline Strategy (Workbox) | 1 | ✅ COMPLETADA |
+| Task 10: Unit Tests | 1 | ✅ COMPLETADA |
+| Task 11: Final Verification + Deploy | 0.5 | ✅ COMPLETADA |
+| **Subtotal v2.0** | **8 días** | **✅** |
+
 ---
 
 ## Checklist Pre-Entrega ✅
 
 - [x] Todos los features funcionando
-- [x] Tests pass (`npm run test`) - 92/92 pass
+- [x] Tests pass (`npm run test`) - 96/96 pass
 - [x] Build exitoso (`npm run build`) - chunks optimizados
 - [x] Sin errores en consola (build limpio)
 - [x] Documentación actualizada (DEPLOY.md, BRIEF.md)
-- [ ] Deploy a producción (pendiente credenciales Firebase)
+- [x] Deploy a producción (v2.0)
 
 ---
 
-## Commits Recientes (v1.3)
+## Commits Recientes (v2.0)
 
-- `f58ee35` feat(v1.3): pagina Reposicion en nav con guard admin/manager
-- `7c1549e` feat(v1.3): cablear Restock con PurchaseOrderModal pre-llenado
-- `20f9006` feat(v1.3): PurchaseOrderModal acepta initialItems para pre-llenado
-- `5c80f0d` feat(v1.3): UI de pagina Reposicion con KPIs y tabla priorizada
-- `7c0163a` feat(v1.3): columna lead time en tabla de proveedores
-- `45ffd65` feat(v1.3): input lead_time_days en SupplierModal
-- `97cacf0` feat(v1.3): algoritmo completo de sugerencias con fallback por categoria
-- `49cb77a` feat(v1.3): extender Supplier y crear restockService skeleton
+- `4b0dd06` test(v2.0): agregar tests para useBarcode hook
+- `323ef2c` feat(v2.0): configurar Workbox offline caching
+- `8cd8add` feat(v2.0): configurar PWA manifest y plugin
+- `fe3fc79` feat(v2.0): integrar escaner en AddProductModal
+- `f756371` feat(v2.0): integrar escaner en CreateSale
+- `4c4e44d` feat(v2.0): integrar escaner en Inventory
+- `7f367fc` feat(v2.0): crear hook useBarcode
+- `ac1c7d8` feat(v2.0): crear componente BarcodeScanner
+- `8edc418` feat(v2.0): instalar html5-qrcode y vite-plugin-pwa
+- `cf6bfce` feat(v2.0): agregar campo barcode a Product
 
 ---
 
-*Generado por Cronos - v1.3 Reposición Predictiva Completada*
+*Generado por Cronos - v2.0 Barcode Scanner + PWA Completada*
