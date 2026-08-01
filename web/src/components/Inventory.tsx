@@ -3,6 +3,8 @@ import { Product } from "../firebase/db";
 import { getProducts } from "../services/saleService";
 import { getStockAlertCount } from "../services/stockAlertService";
 import AddProductModal from "./AddProductModal";
+import BarcodeScanner from "./BarcodeScanner";
+import { useBarcode } from "../hooks/useBarcode";
 
 const Inventory = () => {
   const [products, setProducts] = useState<Product[]>([]);
@@ -13,6 +15,19 @@ const Inventory = () => {
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [alertCount, setAlertCount] = useState(0);
+
+  const handleBarcodeScan = (code: string) => {
+    const found = products.find(p => p.barcode === code);
+    if (found) {
+      setEditingProduct(found);
+    } else {
+      if (confirm(`Codigo ${code} no encontrado. Crear producto?`)) {
+        setShowAddModal(true);
+      }
+    }
+  };
+
+  const { isOpen: isScannerOpen, open: openScanner, close: closeScanner, handleScan } = useBarcode(handleBarcodeScan);
 
   const loadProducts = async () => {
     try {
@@ -93,6 +108,7 @@ const Inventory = () => {
           price_cents: updatedProduct.price_cents,
           stock: updatedProduct.stock,
           category: updatedProduct.category,
+          barcode: updatedProduct.barcode ?? null,
         });
       }
       const updated = products.map((p) =>
@@ -159,12 +175,20 @@ const Inventory = () => {
             </span>
           )}
         </h2>
-        <button
-          onClick={() => setShowAddModal(true)}
-          className="bg-sf-primary text-white px-4 py-2 rounded-lg hover:bg-sf-dark font-medium transition flex items-center gap-2"
-        >
-          <span>➕</span> Agregar Producto
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={openScanner}
+            className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 font-medium transition"
+          >
+            Escanear
+          </button>
+          <button
+            onClick={() => setShowAddModal(true)}
+            className="bg-sf-primary text-white px-4 py-2 rounded-lg hover:bg-sf-dark font-medium transition flex items-center gap-2"
+          >
+            <span>➕</span> Agregar Producto
+          </button>
+        </div>
       </div>
 
       {/* Buscador */}
@@ -191,6 +215,9 @@ const Inventory = () => {
               </th>
               <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide">
                 Categoría
+              </th>
+              <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide">
+                Codigo
               </th>
               <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide">
                 Precio
@@ -223,6 +250,9 @@ const Inventory = () => {
                   <span className="bg-sf-cyan/10 text-sf-cyan px-2 py-1 rounded text-xs font-medium">
                     {product.category || "Sin categoría"}
                   </span>
+                </td>
+                <td className="px-4 py-3 text-sm text-gray-700 font-mono">
+                  {product.barcode ?? "-"}
                 </td>
                 <td className="px-4 py-3 text-sm text-right font-medium text-sf-primary">
                   {formatPrice(product.price_cents)}
@@ -298,6 +328,10 @@ const Inventory = () => {
         onAddProduct={handleAddProduct}
       />
 
+      {isScannerOpen && (
+        <BarcodeScanner onScan={handleScan} onClose={closeScanner} />
+      )}
+
       {/* Modal para editar producto */}
       {editingProduct && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
@@ -338,6 +372,18 @@ const Inventory = () => {
                   value={editingProduct.category || ""}
                   onChange={(e) => setEditingProduct({ ...editingProduct, category: e.target.value })}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-sf-primary"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Codigo de barras
+                </label>
+                <input
+                  type="text"
+                  value={editingProduct.barcode ?? ""}
+                  onChange={(e) => setEditingProduct({ ...editingProduct, barcode: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-sf-primary"
+                  placeholder="EAN-13, UPC-A, o QR"
                 />
               </div>
             </div>
