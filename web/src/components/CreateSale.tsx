@@ -1,6 +1,8 @@
 import { useState, useEffect } from "react";
 import { Product, SaleItem } from "../firebase/db";
 import { createSale, getProducts } from "../services/saleService";
+import BarcodeScanner from "./BarcodeScanner";
+import { useBarcode } from "../hooks/useBarcode";
 
 type PaymentMethod = "cash" | "card" | "other";
 
@@ -16,6 +18,54 @@ const CreateSale = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string>("");
   const [success, setSuccess] = useState(false);
+
+  const handleBarcodeScan = (code: string) => {
+    setError("");
+    const found = products.find((p) => p.barcode === code);
+    if (!found) {
+      setError(`Codigo ${code} no registrado. Agrega el producto primero.`);
+      return;
+    }
+    if (found.stock <= 0) {
+      setError(`Sin stock disponible para ${found.name}`);
+      return;
+    }
+
+    const existingItem = cartItems.find((item) => item.product_id === found.id);
+    if (existingItem) {
+      if (existingItem.quantity + 1 > found.stock) {
+        setError(
+          `Stock insuficiente para ${found.name}. Disponible: ${found.stock}`,
+        );
+        return;
+      }
+      setCartItems(
+        cartItems.map((item) =>
+          item.product_id === found.id
+            ? {
+                ...item,
+                quantity: item.quantity + 1,
+                subtotal: (item.quantity + 1) * item.price_cents,
+              }
+            : item,
+        ),
+      );
+    } else {
+      setCartItems([
+        ...cartItems,
+        {
+          product_id: found.id,
+          product_name: found.name,
+          quantity: 1,
+          price_cents: found.price_cents,
+          subtotal: found.price_cents,
+        },
+      ]);
+    }
+  };
+
+  const { isOpen: isScannerOpen, open: openScanner, close: closeScanner, handleScan } =
+    useBarcode(handleBarcodeScan);
 
   // Cargar productos al montar
   useEffect(() => {
@@ -172,21 +222,30 @@ const CreateSale = () => {
                 <label className="block text-sm font-medium mb-1 text-sf-text">
                   Producto
                 </label>
-                <select
-                  value={selectedProductId}
-                  onChange={(e) => setSelectedProductId(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-sf-primary text-sf-text"
-                >
-                  <option value="">-- Selecciona un producto --</option>
-                  {products
-                    .filter((p) => p.stock > 0)
-                    .map((product) => (
-                      <option key={product.id} value={product.id}>
-                        {product.name} ({product.stock} disponibles) -{" "}
-                        {formatPrice(product.price_cents)}
-                      </option>
-                    ))}
-                </select>
+                <div className="flex gap-2">
+                  <select
+                    value={selectedProductId}
+                    onChange={(e) => setSelectedProductId(e.target.value)}
+                    className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-sf-primary text-sf-text"
+                  >
+                    <option value="">-- Selecciona un producto --</option>
+                    {products
+                      .filter((p) => p.stock > 0)
+                      .map((product) => (
+                        <option key={product.id} value={product.id}>
+                          {product.name} ({product.stock} disponibles) -{" "}
+                          {formatPrice(product.price_cents)}
+                        </option>
+                      ))}
+                  </select>
+                  <button
+                    type="button"
+                    onClick={openScanner}
+                    className="px-3 py-2 bg-sf-primary text-white rounded-lg hover:opacity-90 whitespace-nowrap"
+                  >
+                    Escanear
+                  </button>
+                </div>
               </div>
 
               <div>
@@ -324,6 +383,10 @@ const CreateSale = () => {
           </button>
         </div>
       </div>
+
+      {isScannerOpen && (
+        <BarcodeScanner onScan={handleScan} onClose={closeScanner} />
+      )}
     </section>
   );
 };
