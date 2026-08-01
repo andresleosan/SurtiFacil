@@ -163,12 +163,25 @@
 | Tarea 6: UI categorías + tablas + CSV | 1 | ✅ COMPLETADA |
 | **Subtotal v1.2** | **7 días** | **✅** |
 
+### v1.3 Reposición Predictiva ✅ COMPLETADO
+| Fase | Días | Estado |
+|------|------|--------|
+| Task 1: Extender Supplier + restockService skeleton | 1 | ✅ COMPLETADA |
+| Task 2: Algoritmo completo + 10 tests | 2 | ✅ COMPLETADA |
+| Task 3: SupplierModal - input lead_time_days | 0.5 | ✅ COMPLETADA |
+| Task 4: Tabla proveedores - columna lead time | 0.5 | ✅ COMPLETADA |
+| Task 5: UI página Reposición (KPIs + tabla) | 1 | ✅ COMPLETADA |
+| Task 6: PurchaseOrderModal - prop initialItems | 0.5 | ✅ COMPLETADA |
+| Task 7: Cablear Restock → PurchaseOrderModal | 0.5 | ✅ COMPLETADA |
+| Task 8: Nav + guard admin/manager | 0.5 | ✅ COMPLETADA |
+| **Subtotal v1.3** | **6.5 días** | **✅** |
+
 ---
 
 ## Checklist Pre-Entrega ✅
 
 - [x] Todos los features funcionando
-- [x] Tests pass (`npm run test`) - 54/54 pass
+- [x] Tests pass (`npm run test`) - 92/92 pass
 - [x] Build exitoso (`npm run build`) - chunks optimizados
 - [x] Sin errores en consola (build limpio)
 - [x] Documentación actualizada (DEPLOY.md, BRIEF.md)
@@ -176,15 +189,17 @@
 
 ---
 
-## Commits Recientes (v1.1)
+## Commits Recientes (v1.3)
 
-- `723086a` feat(v1.1): recepción parcial atómica de órdenes
-- `7a904b2` feat(v1.1): UI de órdenes de compra con filtros y modal
-- `0f19229` feat(v1.1): servicio de órdenes con transiciones de estado
-- `2dd1a26` feat(v1.1): UI de gestión de proveedores
-- `b09eaa4` feat(v1.1): servicio CRUD de proveedores
-- `24c527f` feat(v1.1): agregar modelos de datos de proveedores y órdenes
+- `f58ee35` feat(v1.3): pagina Reposicion en nav con guard admin/manager
+- `7c1549e` feat(v1.3): cablear Restock con PurchaseOrderModal pre-llenado
+- `20f9006` feat(v1.3): PurchaseOrderModal acepta initialItems para pre-llenado
+- `5c80f0d` feat(v1.3): UI de pagina Reposicion con KPIs y tabla priorizada
+- `7c0163a` feat(v1.3): columna lead time en tabla de proveedores
+- `45ffd65` feat(v1.3): input lead_time_days en SupplierModal
+- `97cacf0` feat(v1.3): algoritmo completo de sugerencias con fallback por categoria
+- `49cb77a` feat(v1.3): extender Supplier y crear restockService skeleton
 
 ---
 
-*Generado por Cronos - MVP v1.0 + v1.1 Planning*
+*Generado por Cronos - v1.3 Reposición Predictiva Completada*
