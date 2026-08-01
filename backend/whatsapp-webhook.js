@@ -14,8 +14,22 @@ const cors = require('cors');
 require('dotenv').config();
 
 const app = express();
-app.use(cors());
-app.use(express.json());
+
+// CORS configurado solo para el frontend
+const ALLOWED_ORIGINS = [
+  'http://localhost:5173',
+  'https://smartmarket-b37ce.web.app',
+];
+app.use(cors({
+  origin: (origin, callback) => {
+    if (!origin || ALLOWED_ORIGINS.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+}));
+app.use(express.json({ limit: '10mb' }));
 
 // ============ INICIALIZAR FIREBASE ============
 let db;
@@ -133,8 +147,9 @@ function requireAuth(req, res, next) {
   const validKey = process.env.ADMIN_API_KEY;
 
   if (!validKey) {
-    // Si no hay clave configurada, permitir (modo desarrollo)
-    return next();
+    // Si no hay clave configurada, RECHAZAR (fail closed)
+    console.warn('⚠️  ADMIN_API_KEY not configured - rejecting request');
+    return res.status(503).json({ error: 'Server not configured for authentication' });
   }
 
   if (!apiKey || apiKey !== validKey) {
@@ -173,45 +188,54 @@ app.post('/api/webhooks/whatsapp', async (req, res) => {
     const body = req.body;
 
     // Validar estructura del webhook
-    if (body.object !== 'whatsapp_business_account') {
-      console.log('⏭️ Ignorando evento no-whatsapp:', body.object);
+    if (!body || body.object !== 'whatsapp_business_account') {
+      console.log('⏭️ Ignorando evento no-whatsapp:', body?.object);
       return res.sendStatus(200);
     }
 
+    // Validar que entry sea array
+    if (!Array.isArray(body.entry)) {
+      return res.status(400).json({ error: 'Invalid webhook format: entry must be array' });
+    }
+
     // Procesar cada evento
-    for (const entry of body.entry || []) {
-      for (const change of entry.changes || []) {
-        if (change.field === 'messages') {
-          const messages = change.value.messages || [];
-          const contacts = change.value.contacts || [];
+    for (const entry of body.entry) {
+      if (!entry.changes || !Array.isArray(entry.changes)) continue;
 
-          for (const message of messages) {
-            const phoneNumber = message.from;
-            const messageText = message.text?.body || '[Mensaje sin texto]';
-            const customerName = contacts[0]?.profile?.name || 'Cliente';
+      for (const change of entry.changes) {
+        if (change.field !== 'messages') continue;
 
-            console.log(`📨 Mensaje recibido de ${customerName} (${phoneNumber}): "${messageText}"`);
+        const value = change.value || {};
+        const messages = Array.isArray(value.messages) ? value.messages : [];
+        const contacts = Array.isArray(value.contacts) ? value.contacts : [];
 
-            try {
-              // Obtener o crear conversación
-              const conversationId = await getOrCreateConversation(phoneNumber, customerName);
+        for (const message of messages) {
+          // Validar que message tenga campos requeridos
+          if (!message.from || typeof message.from !== 'string') continue;
+          if (!/^\d{10,15}$/.test(message.from)) continue;
 
-              // Guardar mensaje
-              await saveMessage(conversationId, 'customer', messageText, 'text');
+          const phoneNumber = message.from;
+          const messageText = (typeof message.text?.body === 'string')
+            ? message.text.body.slice(0, 1000)
+            : '[Mensaje sin texto]';
+          const customerName = (typeof contacts[0]?.profile?.name === 'string')
+            ? contacts[0].profile.name.slice(0, 100)
+            : 'Cliente';
 
-              // Actualizar timestamp
-              await updateConversationTimestamp(conversationId);
+          console.log(`📨 Mensaje recibido de ${customerName} (${phoneNumber})`);
 
-              // Respuesta automática (OPCIONAL)
-              if (process.env.AUTO_RESPONSE_ENABLED === 'true') {
-                const autoResponse = process.env.AUTO_RESPONSE_MESSAGE || 
-                  '👋 Hola, gracias por tu mensaje. Un administrador te responderá pronto.';
-                
-                await sendWhatsAppMessage(phoneNumber, autoResponse);
-              }
-            } catch (error) {
-              console.error('❌ Error processing message:', error);
+          try {
+            const conversationId = await getOrCreateConversation(phoneNumber, customerName);
+            await saveMessage(conversationId, 'customer', messageText, 'text');
+            await updateConversationTimestamp(conversationId);
+
+            if (process.env.AUTO_RESPONSE_ENABLED === 'true') {
+              const autoResponse = process.env.AUTO_RESPONSE_MESSAGE || 
+                '👋 Hola, gracias por tu mensaje. Un administrador te responderá pronto.';
+              await sendWhatsAppMessage(phoneNumber, autoResponse);
             }
+          } catch (error) {
+            console.error('❌ Error processing message:', error);
           }
         }
       }
@@ -328,6 +352,117 @@ app.post('/api/whatsapp/test', requireAuth, async (req, res) => {
 
     res.json({ success: true, message: 'Test message sent', data: result });
   } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * POST /api/anthropic/analyze-image - Proxy para Claude Vision
+ * Body: { imageBase64: string }
+ */
+app.post('/api/anthropic/analyze-image', requireAuth, async (req, res) => {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) {
+    return res.status(503).json({ error: 'ANTHROPIC_API_KEY not configured' });
+  }
+
+  const { imageBase64 } = req.body;
+  if (!imageBase64) {
+    return res.status(400).json({ error: 'imageBase64 required' });
+  }
+
+  try {
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 1024,
+        messages: [{
+          role: 'user',
+          content: [
+            { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: imageBase64 } },
+            { type: 'text', text: `Analiza esta imagen de un producto de supermercado. 
+Extrae SOLO un JSON: { nombre: string, precio_sugerido: number, categoria: string }
+Si no puedes identificar el precio, usa null.
+Categorías: Abarrotes, Bebidas, Lácteos, Limpieza, Otros
+Responde SOLO con el JSON.` },
+          ],
+        }],
+      }),
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.error?.message || 'Anthropic API error');
+    }
+
+    const data = await response.json();
+    const content = data.content[0]?.text;
+    const jsonMatch = content?.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) throw new Error('Invalid response format');
+
+    res.json({ success: true, data: JSON.parse(jsonMatch[0]) });
+  } catch (error) {
+    console.error('❌ Anthropic image analysis error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * POST /api/anthropic/analyze-audio - Proxy para Claude Text
+ * Body: { transcribedText: string }
+ */
+app.post('/api/anthropic/analyze-audio', requireAuth, async (req, res) => {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) {
+    return res.status(503).json({ error: 'ANTHROPIC_API_KEY not configured' });
+  }
+
+  const { transcribedText } = req.body;
+  if (!transcribedText) {
+    return res.status(400).json({ error: 'transcribedText required' });
+  }
+
+  try {
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 1024,
+        messages: [{
+          role: 'user',
+          content: `El usuario dictó: "${transcribedText}"
+Extrae SOLO un JSON: { nombre: string, precio: number, stock: number, categoria: string }
+Si falta algún campo, usa null.
+Categorías: Abarrotes, Bebidas, Lácteos, Limpieza, Otros
+Responde SOLO con el JSON.`,
+        }],
+      }),
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.error?.message || 'Anthropic API error');
+    }
+
+    const data = await response.json();
+    const content = data.content[0]?.text;
+    const jsonMatch = content?.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) throw new Error('Invalid response format');
+
+    res.json({ success: true, data: JSON.parse(jsonMatch[0]) });
+  } catch (error) {
+    console.error('❌ Anthropic audio analysis error:', error);
     res.status(500).json({ error: error.message });
   }
 });
