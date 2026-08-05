@@ -408,4 +408,4 @@ Status: revisión. Report: `docs/final-review-2026-08-04.md`
 - [x] Flujo login/logout validado manualmente con Playwright mediante una cuenta temporal activa con rol `cashier` y documento Firestore correspondiente.
 - [x] Fallo controlado con valores ficticios conserva únicamente un contexto con campos vacíos; no genera captura, video ni traza.
 - [ ] La ejecución CLI autenticada sigue requiriendo inyectar `QA_TEST_EMAIL` y `QA_TEST_PASSWORD` como variables de proceso desde un mecanismo seguro.
-- [ ] La cuenta temporal permanece pendiente de eliminación con confirmación explícita del operador.
+- [x] La cuenta temporal fue eliminada de Authentication y su documento Firestore fue borrado (confirmado en consola).
