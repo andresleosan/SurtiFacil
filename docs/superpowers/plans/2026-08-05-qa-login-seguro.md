@@ -22,7 +22,8 @@
 
 **Files:**
 - Modify: `qa/tests/auth-boundary.spec.ts:101-120`
-- Test: `qa/tests/auth-boundary.spec.ts`
+- Create: `qa/tests/auth-qa-session.spec.ts`
+- Test: `qa/tests/auth-qa-session.spec.ts`
 
 **Interfaces:**
 - Consumes: `process.env.QA_TEST_EMAIL`, `process.env.QA_TEST_PASSWORD`.
@@ -45,23 +46,25 @@ Run: `npm run test:e2e -- --grep "logs in and out with the dedicated QA account 
 
 Expected: el caso falla antes de la modificación porque todavía no limpia ambos campos ni desactiva sus artefactos.
 
-- [ ] **Step 3: Aislar las opciones del caso autenticado y limpiar campos**
+- [ ] **Step 3: Mover el caso autenticado a un archivo con opciones seguras de nivel superior**
 
 ```ts
-test.describe('authenticated QA session', () => {
-  test.use({ screenshot: 'off', trace: 'off', video: 'off' });
+// qa/tests/auth-qa-session.spec.ts
+import { expect, test } from '@playwright/test';
 
-  test('logs in and out with the dedicated QA account when supplied', async ({ page }) => {
-    // conservar el skip existente y el runtime collector
-    await page.goto('/');
-    await page.getByLabel('Correo electrónico').fill(qaEmail!);
-    await page.getByLabel('Contraseña').fill(qaPassword!);
-    await page.getByRole('button', { name: 'Iniciar sesión' }).click();
-    await page.getByLabel('Correo electrónico').fill('');
-    await page.getByLabel('Contraseña').fill('');
-    await expect(page.getByText('Panel de Control')).toBeVisible();
-    // conservar logout y expectNoUnexpectedRuntimeIssues
-  });
+test.use({ screenshot: 'off', trace: 'off', video: 'off' });
+
+test('logs in and out with the dedicated QA account when supplied', async ({ page }) => {
+  // conservar el skip existente
+  await page.goto('/');
+  await page.getByLabel('Correo electrónico').fill(qaEmail!);
+  await page.getByLabel('Contraseña').fill(qaPassword!);
+  await page.getByRole('button', { name: 'Iniciar sesión' }).click();
+  await page.getByLabel('Correo electrónico').fill('');
+  await page.getByLabel('Contraseña').fill('');
+  await expect(page.getByText('Panel de Control')).toBeVisible();
+  await page.getByRole('button', { name: 'Cerrar sesión' }).click();
+  await expect(page.getByRole('heading', { name: 'Iniciar sesión' })).toBeVisible();
 });
 ```
 
@@ -74,7 +77,7 @@ Expected: con una cuenta QA válida, aparece el dashboard, se cierra sesión y n
 - [ ] **Step 5: Commit**
 
 ```powershell
-git add qa/tests/auth-boundary.spec.ts
+git add qa/tests/auth-boundary.spec.ts qa/tests/auth-qa-session.spec.ts
 git commit -m "test: proteger credenciales QA en E2E"
 ```
 

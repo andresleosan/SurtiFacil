@@ -402,3 +402,10 @@ Status: revisión. Report: `docs/final-review-2026-08-04.md`
 - [x] Verificación previa a integración: frontend `186/186`, backend `54/54`, build, reglas Firestore, transacción de ventas y E2E `2 passed / 1 skipped`.
 - [ ] Login/logout E2E válido pendiente de `QA_TEST_EMAIL` y `QA_TEST_PASSWORD`.
 - [ ] Despliegue a producción pendiente de configuración real, backup/rollback verificados y confirmación explícita del operador.
+
+### Seguimiento QA autenticado (2026-08-05)
+- [x] El caso autenticado de Playwright limpia los controles y desactiva captura, video y traza para no conservar credenciales en artefactos.
+- [x] Flujo login/logout validado manualmente con Playwright mediante una cuenta temporal activa con rol `cashier` y documento Firestore correspondiente.
+- [x] Fallo controlado con valores ficticios conserva únicamente un contexto con campos vacíos; no genera captura, video ni traza.
+- [ ] La ejecución CLI autenticada sigue requiriendo inyectar `QA_TEST_EMAIL` y `QA_TEST_PASSWORD` como variables de proceso desde un mecanismo seguro.
+- [ ] La cuenta temporal permanece pendiente de eliminación con confirmación explícita del operador.
