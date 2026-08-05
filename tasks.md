@@ -395,3 +395,10 @@ Status: revisión. Evidence: `.superpowers/sdd/2026-08-04-auth-guard-fail-closed
 - [x] No deployment or commit performed.
 
 Status: revisión. Report: `docs/final-review-2026-08-04.md`
+
+### Integración de cambios de seguridad (2026-08-05)
+- [x] Cambios de las tareas 7 a 15 integrados en `main`.
+- [x] Commit `e73df51` publicado en `origin/main`.
+- [x] Verificación previa a integración: frontend `186/186`, backend `54/54`, build, reglas Firestore, transacción de ventas y E2E `2 passed / 1 skipped`.
+- [ ] Login/logout E2E válido pendiente de `QA_TEST_EMAIL` y `QA_TEST_PASSWORD`.
+- [ ] Despliegue a producción pendiente de configuración real, backup/rollback verificados y confirmación explícita del operador.
