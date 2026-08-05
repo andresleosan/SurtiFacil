@@ -9,16 +9,35 @@ import Reports from './components/Reports';
 import Suppliers from './components/Suppliers';
 import PurchaseOrders from './components/PurchaseOrders';
 import MarginReports from './components/MarginReports';
-import { isAdminAsync, hasRoleAsync } from './services/authService';
+import {
+  getSafeAuthErrorMessage,
+  hasRoleAsync,
+  isAdminAsync,
+  logoutUser,
+  subscribeToAuthState,
+} from './services/authService';
 import Restock from './components/Restock';
+import Login from './components/Login';
+import { User } from './firebase/db';
 
 type Page = 'dashboard' | 'inventory' | 'sales' | 'create-sale' | 'whatsapp' | 'employees' | 'reports' | 'suppliers' | 'orders' | 'margins' | 'restock';
 
 const ADMIN_OR_MANAGER_PAGES: Page[] = ['margins', 'restock'];
 
 function App() {
+  const [authLoading, setAuthLoading] = useState(true);
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [page, setPage] = useState<Page>('dashboard');
   const [userRoles, setUserRoles] = useState<{ admin: boolean; manager: boolean }>({ admin: false, manager: false });
+  const [authError, setAuthError] = useState<string | null>(null);
+
+  useEffect(() => {
+    return subscribeToAuthState((user, error) => {
+      setCurrentUser(user);
+      setAuthLoading(false);
+      setAuthError(error ? getSafeAuthErrorMessage(error, 'No se pudo verificar la sesión. Inténtalo de nuevo.') : null);
+    });
+  }, []);
 
   useEffect(() => {
     const handler = (e: Event) => {
@@ -31,16 +50,36 @@ function App() {
 
   useEffect(() => {
     let cancelled = false;
-    Promise.all([isAdminAsync(), hasRoleAsync('manager')]).then(([admin, manager]) => {
-      if (!cancelled) setUserRoles({ admin, manager });
-    });
+    setUserRoles({ admin: false, manager: false });
+
+    if (!currentUser) {
+      return () => { cancelled = true; };
+    }
+
+    Promise.all([isAdminAsync(), hasRoleAsync('manager')])
+      .then(([admin, manager]) => {
+        if (!cancelled) setUserRoles({ admin, manager });
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setAuthError(getSafeAuthErrorMessage(error, 'No se pudo verificar la sesión. Inténtalo de nuevo.'));
+        }
+      });
     return () => { cancelled = true; };
-  }, []);
+  }, [currentUser]);
+
+  const handleLogout = async () => {
+    try {
+      await logoutUser();
+    } catch (error) {
+      setAuthError(getSafeAuthErrorMessage(error, 'No se pudo cerrar sesión. Inténtalo de nuevo.'));
+    }
+  };
 
   const canAccessManagerPages = userRoles.admin || userRoles.manager;
 
   const pageComponent = useMemo(() => {
-    if (ADMIN_OR_MANAGER_PAGES.includes(page) && !canAccessManagerPages) {
+    if ((ADMIN_OR_MANAGER_PAGES.includes(page) || page === 'whatsapp') && !canAccessManagerPages) {
       return (
         <section className="space-y-4">
           <h2 className="text-2xl font-bold text-sf-text">Acceso restringido</h2>
@@ -59,9 +98,27 @@ function App() {
     if (page === 'reports') return <Reports />;
     if (page === 'margins') return <MarginReports />;
     if (page === 'restock') return <Restock />;
+    if (page === 'whatsapp') return <WhatsAppChat />;
 
     return <Dashboard />;
   }, [page, canAccessManagerPages]);
+
+  if (authLoading) {
+    return <div className="min-h-screen bg-sf-light p-8 text-center text-gray-600">Cargando sesión...</div>;
+  }
+
+  if (!currentUser) {
+    if (authError) {
+      return (
+        <main className="min-h-screen bg-sf-light p-8 text-center text-gray-600">
+          <div role="alert" className="mx-auto max-w-md rounded border border-red-200 bg-red-50 p-4 text-red-700">
+            {authError}
+          </div>
+        </main>
+      );
+    }
+    return <Login />;
+  }
 
   return (
     <div className="min-h-screen bg-sf-light text-sf-text font-poppins">
@@ -103,14 +160,26 @@ function App() {
                 Márgenes
               </button>
             )}
-            <button onClick={() => setPage('whatsapp')} className="hover:underline">
-              💬 WhatsApp
+            {canAccessManagerPages && (
+              <button onClick={() => setPage('whatsapp')} className="hover:underline">
+                💬 WhatsApp
+              </button>
+            )}
+            <button onClick={handleLogout} className="hover:underline">
+              Cerrar sesión
             </button>
           </nav>
         </div>
       </header>
 
-      <main className="container mx-auto py-8 px-4">{pageComponent}</main>
+      <main className="container mx-auto py-8 px-4">
+        {authError && (
+          <div role="alert" className="mb-4 rounded border border-red-200 bg-red-50 p-4 text-red-700">
+            {authError}
+          </div>
+        )}
+        {pageComponent}
+      </main>
     </div>
   );
 }

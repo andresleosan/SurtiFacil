@@ -16,145 +16,65 @@ npm install firebase-admin express cors
 
 ```env
 # En la carpeta raíz del proyecto
-FIREBASE_SERVICE_ACCOUNT_KEY=tu_clave_json
+FIREBASE_SERVICE_ACCOUNT_PATH=./serviceAccountKey.json
 WHATSAPP_API_TOKEN=tu_token_de_whatsapp
 WHATSAPP_PHONE_NUMBER_ID=tu_numero_id
 WHATSAPP_BUSINESS_ACCOUNT_ID=tu_account_id
 WEBHOOK_VERIFY_TOKEN=tu_token_secreto_webhook
+WHATSAPP_APP_SECRET=tu_app_secret_de_meta
 ```
+
+Estas variables son exclusivamente del backend. Nunca uses un prefijo `VITE_` para un bearer token, App Secret, Verify Token o credencial de Firebase.
 
 ---
 
-### **Fase 2: Backend - Cloud Functions o Express Server**
+### **Fase 2: Backend - Servidor Express**
 
-#### Crear archivo: `backend/functions/webhooks.js`
+#### Usar el servidor Express: `backend/whatsapp-webhook.js`
 
 ```javascript
 const express = require("express");
-const admin = require("firebase-admin");
 const cors = require("cors");
+const {
+  createWhatsAppWebhookHandler,
+  registerWhatsAppWebhookRoutes,
+} = require("./whatsappWebhook");
 
 const app = express();
 app.use(cors());
-app.use(express.json());
 
-// Inicializar Firebase Admin
-const serviceAccount = require("./serviceAccountKey.json");
-admin.initializeApp({
-  credential: admin.credential.cert(serviceAccount),
+// Estas funciones de persistencia y el cliente de salida viven en el backend.
+const handleWhatsAppWebhook = createWhatsAppWebhookHandler({
+  getOrCreateConversation,
+  saveMessage,
+  updateConversationTimestamp,
+  sendWhatsAppMessage,
+  logError: (context) => console.error(`[api] ${context} failed`),
 });
 
-const db = admin.firestore();
-
-// Webhook para verificación (GET)
-app.get("/api/webhooks/whatsapp", (req, res) => {
-  const mode = req.query["hub.mode"];
-  const token = req.query["hub.verify_token"];
-  const challenge = req.query["hub.challenge"];
-
-  if (mode === "subscribe" && token === process.env.WEBHOOK_VERIFY_TOKEN) {
-    res.status(200).send(challenge);
-  } else {
-    res.sendStatus(403);
-  }
+// Registra GET y POST antes del parser JSON global. El POST instala:
+// rate limiter acotado -> express.raw() -> HMAC -> parseo JSON -> handler.
+registerWhatsAppWebhookRoutes(app, {
+  getSecret: () => process.env.WHATSAPP_APP_SECRET,
+  getVerifyToken: () => process.env.WEBHOOK_VERIFY_TOKEN,
+  handler: handleWhatsAppWebhook,
 });
 
-// Webhook para recibir mensajes (POST)
-app.post("/api/webhooks/whatsapp", async (req, res) => {
-  const body = req.body;
+// El resto de endpoints puede usar JSON después de registrar el webhook.
+app.use(express.json({ limit: "10mb" }));
 
-  if (body.object === "whatsapp_business_account") {
-    for (const entry of body.entry) {
-      for (const change of entry.changes) {
-        if (change.field === "messages") {
-          const message = change.value.messages[0];
-          const contact = change.value.contacts[0];
-
-          const phoneNumber = message.from;
-          const messageText = message.text?.body || "";
-          const timestamp = new Date(parseInt(message.timestamp) * 1000);
-
-          // Buscar o crear conversación
-          const conversationRef = db
-            .collection("whatsapp_conversations")
-            .where("phoneNumber", "==", phoneNumber);
-
-          const snapshot = await conversationRef.get();
-          let conversationId;
-
-          if (snapshot.empty) {
-            // Crear nueva conversación
-            const newConv = await db.collection("whatsapp_conversations").add({
-              phoneNumber,
-              customerName: contact.profile?.name || "Cliente",
-              firstMessageDate: admin.firestore.Timestamp.now(),
-              lastMessageDate: admin.firestore.Timestamp.now(),
-              status: "active",
-            });
-            conversationId = newConv.id;
-          } else {
-            conversationId = snapshot.docs[0].id;
-            // Actualizar lastMessageDate
-            await db
-              .collection("whatsapp_conversations")
-              .doc(conversationId)
-              .update({
-                lastMessageDate: admin.firestore.Timestamp.now(),
-              });
-          }
-
-          // Guardar mensaje
-          await db.collection("whatsapp_messages").add({
-            conversationId,
-            sender: "customer",
-            message: messageText,
-            timestamp: admin.firestore.Timestamp.fromDate(timestamp),
-            messageType: "text",
-          });
-        }
-      }
-    }
-    res.sendStatus(200);
-  } else {
-    res.sendStatus(404);
-  }
+// No devuelvas errores del proveedor ni secretos al cliente.
+app.use((error, req, res, next) => {
+  console.error("[api] Unhandled request failed");
+  res.status(500).json({ error: "Error interno del servidor" });
 });
-
-// Función para enviar mensajes de WhatsApp
-async function sendWhatsAppMessage(phoneNumber, message) {
-  const url = `https://graph.instagram.com/v18.0/${process.env.WHATSAPP_PHONE_NUMBER_ID}/messages`;
-
-  const response = await fetch(url, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${process.env.WHATSAPP_API_TOKEN}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      messaging_product: "whatsapp",
-      to: phoneNumber,
-      type: "text",
-      text: { body: message },
-    }),
-  });
-
-  return response.json();
-}
-
-// Endpoint para enviar respuesta desde admin
-app.post("/api/whatsapp/send", async (req, res) => {
-  try {
-    const { phoneNumber, message } = req.body;
-    const result = await sendWhatsAppMessage(phoneNumber, message);
-    res.json(result);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
 ```
+
+Firebase Hosting solo sirve el frontend. `backend/whatsapp-webhook.js` es un
+servidor Express separado y debe ejecutarse en un objetivo de backend propio.
+El helper `backend/whatsappWebhook.js` conserva el cuerpo raw, valida HMAC y
+registra las rutas protegidas del webhook; no se debe sustituir por un parser
+JSON que pierda el cuerpo original.
 
 ---
 
@@ -166,6 +86,10 @@ app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
    - **Webhook URL**: `https://tu-dominio.com/api/webhooks/whatsapp`
    - **Verify Token**: El valor de `WEBHOOK_VERIFY_TOKEN` de tu `.env`
 4. Suscríbete a eventos: `messages`, `message_status`
+
+Para el POST, Meta debe enviar `X-Hub-Signature-256: sha256=...`. El backend canónico conserva el cuerpo HTTP exacto antes de parsear JSON, calcula HMAC-SHA256 con `WHATSAPP_APP_SECRET` y compara con `crypto.timingSafeEqual`. Si falta el secreto o la firma no es válida, responde `401` genérico sin procesar ni escribir datos. El endpoint también limita a 100 POST por IP cada 60 segundos, elimina entradas vencidas y mantiene como máximo 10.000 entradas por proceso.
+
+La verificación GET también falla cerrada si `WEBHOOK_VERIFY_TOKEN` falta, está vacío o no coincide. Los errores de parseo, persistencia o proveedores se registran con mensajes estáticos y se responden con contratos genéricos; nunca se devuelven detalles internos de excepción, cuerpos del proveedor, teléfonos, firmas o tokens.
 
 ---
 
@@ -180,28 +104,51 @@ VITE_FIREBASE_PROJECT_ID=tu_project_id
 VITE_FIREBASE_STORAGE_BUCKET=tu_storage_bucket
 VITE_FIREBASE_MESSAGING_SENDER_ID=tu_messaging_sender_id
 VITE_FIREBASE_APP_ID=tu_app_id
-VITE_BACKEND_URL=http://localhost:3000
+VITE_BACKEND_URL=https://api.example.com
 ```
 
 ---
 
 ### **Fase 5: Reglas de Firebase Security**
 
-Actualiza `firestore.rules`:
+Usa únicamente el archivo raíz `firestore.rules`, que exige usuario activo y
+rol vigente. No copies reglas abiertas a esta guía:
 
 ```javascript
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Proteger colecciones de WhatsApp
-    match /whatsapp_conversations/{document=**} {
-      allow read, write: if request.auth != null;
+    function isActiveUser() {
+      return request.auth != null
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.active == true
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['admin', 'manager', 'cashier'];
     }
-    match /whatsapp_messages/{document=**} {
-      allow read, write: if request.auth != null;
+
+    function isManagerUser() {
+      return isActiveUser()
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['admin', 'manager'];
     }
-    match /whatsapp_orders/{document=**} {
-      allow read, write: if request.auth != null;
+
+    function isAdminUser() {
+      return isActiveUser()
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+    }
+
+    match /whatsapp_conversations/{conversationId} {
+      allow read: if isManagerUser();
+      allow create, update: if isManagerUser();
+      allow delete: if isAdminUser();
+    }
+    match /whatsapp_messages/{messageId} {
+      allow read: if isManagerUser();
+      allow create: if isManagerUser();
+      allow update, delete: if isAdminUser();
+    }
+    match /whatsapp_orders/{orderId} {
+      allow read: if isManagerUser();
+      allow create, update: if isManagerUser();
+      allow delete: if isAdminUser();
     }
   }
 }
@@ -212,13 +159,18 @@ service cloud.firestore {
 ## 📋 Checklist de Implementación
 
 - [ ] Crear cuenta en Meta/WhatsApp Business
-- [ ] Obtener API Token y Phone Number ID
-- [ ] Crear proyecto Express/Cloud Functions
+- [ ] Obtener API Token, Phone Number ID y App Secret
+- [ ] Guardar las credenciales de WhatsApp únicamente en el `.env` del backend
+- [ ] Configurar el servidor Express y su objetivo de despliegue
 - [ ] Implementar webhook para recibir mensajes
+- [ ] Configurar raw-body capture, HMAC `X-Hub-Signature-256`, fail-closed y error genérico
+- [ ] Verificar rate limit acotado: 100 POST/IP/60s, expiración y máximo 10.000 entradas por proceso
+- [x] Limitar `POST /api/whatsapp/send` y `/api/whatsapp/test` por usuario y ruta: 10/60s, expiración, máximo 1.000 entradas y `Retry-After`
+- [x] Aplicar timeout finito de 10 segundos al proveedor WhatsApp con `AbortController`; los fallos son genéricos
 - [ ] Configurar webhook en WhatsApp Dashboard
 - [ ] Crear índices en Firestore (si es necesario)
-- [ ] Implementar autenticación en el backend
-- [ ] Desplegar en producción (Firebase, Heroku, Google Cloud, etc.)
+- [x] Implementar autenticación Firebase Bearer y autorización admin/manager en el backend
+- [ ] Desplegar frontend en Firebase Hosting y backend Express por separado
 - [ ] Probar envío y recepción de mensajes
 - [ ] Integrar IA para procesamiento de órdenes (OpenAI, Dialogflow)
 
@@ -231,7 +183,7 @@ service cloud.firestore {
 - [ ] Procesar órdenes con IA (OpenAI API)
 - [ ] Validar productos contra inventario
 - [ ] Calcular precios dinámicos
-- [ ] Enviar confirmación automática
+- [ ] Enviar confirmación automática de órdenes (pendiente; actualmente se envía manualmente desde el chat)
 - [ ] Validar direcciones con Google Maps API
 
 ### Nivel 3 - Avanzado
@@ -258,7 +210,7 @@ Para probar la integración sin servidor, puedes:
 npm run dev  # Frontend
 
 # Terminal 2
-node backend/functions/webhooks.js  # Backend local
+ node backend/whatsapp-webhook.js  # Backend local
 
 # Terminal 3
 ngrok http 3000  # Exponer localmente
@@ -271,6 +223,8 @@ ngrok http 3000  # Exponer localmente
 ### "Webhook no se conecta"
 
 - Verifica que el `WEBHOOK_VERIFY_TOKEN` sea idéntico
+- Verifica que `WHATSAPP_APP_SECRET` esté configurado únicamente en el backend
+- Confirma que Meta envía `X-Hub-Signature-256` y que el cuerpo no es modificado por un proxy
 - Usa ngrok para probar localmente
 - Revisa los logs de WhatsApp Dashboard
 

@@ -12,6 +12,9 @@
     "whatsapp:init": "node scripts/whatsapp-init.js",
     "build:web": "cd web && npm run build",
     "test": "cd web && npm run test",
+    "test:rules": "firebase emulators:exec --only firestore,auth \"node qa/tests/firestore-rules.cjs\"",
+    "test:sales": "firebase emulators:exec --only firestore \"node qa/tests/sales-transaction.cjs\"",
+    "test:e2e": "playwright test --config=qa/playwright.config.ts",
     "deploy": "npm run build:web && firebase deploy --only hosting",
     "deploy:hosting": "npm run build:web && firebase deploy --only hosting",
     "deploy:rules": "firebase deploy --only firestore:rules",
@@ -20,9 +23,10 @@
     "docs": "echo 'See docs/run_instructions.md'"
   },
   "engines": {
-    "node": ">=16"
+    "node": ">=18"
   },
   "devDependencies": {
+    "@playwright/test": "1.55.1",
     "concurrently": "^8.2.2"
   }
 }

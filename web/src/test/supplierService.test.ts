@@ -1,6 +1,6 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { afterEach, describe, it, expect, vi, beforeEach } from 'vitest';
 
-vi.mock('../firebase/config', () => ({ db: null }));
+vi.mock('../firebase/config', () => ({ db: {} }));
 vi.mock('firebase/firestore', () => ({
   collection: vi.fn(),
   getDocs: vi.fn(),
@@ -14,6 +14,7 @@ vi.mock('firebase/firestore', () => ({
   serverTimestamp: vi.fn(() => new Date()),
 }));
 
+import { addDoc, getDoc, getDocs, runTransaction, updateDoc } from 'firebase/firestore';
 import { OrderItem, OrderStatus } from '../firebase/db';
 import { resetLocalSales } from '../services/mockData';
 import {
@@ -32,12 +33,23 @@ import {
 describe('supplierService - CRUD proveedores', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.stubEnv('VITE_USE_MOCK_DATA', 'true');
+    vi.stubEnv('VITE_FIREBASE_PROJECT_ID', '');
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
   });
 
   it('getSuppliers retorna lista de proveedores', async () => {
     const suppliers = await getSuppliers();
     expect(Array.isArray(suppliers)).toBe(true);
     expect(suppliers.length).toBeGreaterThan(0);
+  });
+
+  it('no usa proveedores mock cuando el flag explícito está desactivado', async () => {
+    vi.stubEnv('VITE_USE_MOCK_DATA', 'false');
+    await expect(getSuppliers()).rejects.toThrow('Error al cargar proveedores');
   });
 
   it('addSupplier crea proveedor con contadores en 0', async () => {
@@ -90,6 +102,12 @@ describe('supplierService - Órdenes de compra', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     resetLocalSales();
+    vi.stubEnv('VITE_USE_MOCK_DATA', 'true');
+    vi.stubEnv('VITE_FIREBASE_PROJECT_ID', '');
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
   });
 
   it('createOrder crea orden en estado draft con received_quantity en 0', async () => {
@@ -144,6 +162,12 @@ describe('supplierService - Recepcion', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     resetLocalSales();
+    vi.stubEnv('VITE_USE_MOCK_DATA', 'true');
+    vi.stubEnv('VITE_FIREBASE_PROJECT_ID', '');
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
   });
 
   it('receiveOrderItems suma stock y deja orden en partial', async () => {
@@ -278,5 +302,230 @@ describe('supplierService - Recepcion', () => {
     expect(created?.last_cost_cents).toBe(1234);
     expect(created?.last_cost_source).toBe('purchase');
     expect(created?.last_cost_updated_at).toBeDefined();
+  });
+});
+
+describe('supplierService - Firebase configurado', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.stubEnv('VITE_USE_MOCK_DATA', 'false');
+    vi.stubEnv('VITE_FIREBASE_API_KEY', 'test-api-key');
+    vi.stubEnv('VITE_FIREBASE_AUTH_DOMAIN', 'test.firebaseapp.com');
+    vi.stubEnv('VITE_FIREBASE_PROJECT_ID', 'test-project');
+    vi.stubEnv('VITE_FIREBASE_STORAGE_BUCKET', 'test.appspot.com');
+    vi.stubEnv('VITE_FIREBASE_MESSAGING_SENDER_ID', 'sender');
+    vi.stubEnv('VITE_FIREBASE_APP_ID', 'app-id');
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it('mantiene el resultado de una lectura exitosa de proveedores en Firestore', async () => {
+    vi.mocked(getDocs).mockResolvedValueOnce({
+      forEach: (callback: (document: { id: string; data: () => object }) => void) => {
+        callback({
+          id: 'supplier-1',
+          data: () => ({ name: 'Proveedor Firebase', active: true, totalOrders: 2, totalSpentCents: 3000 }),
+        });
+      },
+    } as any);
+
+    await expect(getSuppliers()).resolves.toEqual([
+      {
+        id: 'supplier-1',
+        name: 'Proveedor Firebase',
+        active: true,
+        totalOrders: 2,
+        totalSpentCents: 3000,
+      },
+    ]);
+  });
+
+  it('mantiene los datos y el ID de un proveedor creado exitosamente en Firestore', async () => {
+    vi.mocked(addDoc).mockResolvedValueOnce({ id: 'supplier-2' } as any);
+    const data = {
+      name: 'Proveedor Nuevo',
+      contactName: 'Contacto',
+      phone: '555-0000',
+      email: 'proveedor@test.com',
+      category: 'Test',
+      active: true,
+    };
+
+    await expect(addSupplier(data)).resolves.toEqual({
+      id: 'supplier-2',
+      ...data,
+      totalOrders: 0,
+      totalSpentCents: 0,
+    });
+  });
+
+  it('mantiene el resultado de una lectura exitosa de órdenes en Firestore', async () => {
+    const order = {
+      id: 'order-1',
+      supplierId: 'supplier-1',
+      supplierName: 'Proveedor Firebase',
+      status: 'draft' as const,
+      items: [],
+      total_cents: 1000,
+      received_total_cents: 0,
+      date: new Date('2026-08-04T00:00:00.000Z'),
+    };
+    vi.mocked(getDocs).mockResolvedValueOnce({
+      forEach: (callback: (document: { id: string; data: () => object }) => void) => {
+        callback({
+          id: order.id,
+          data: () => ({
+            supplierId: order.supplierId,
+            supplierName: order.supplierName,
+            status: order.status,
+            items: order.items,
+            total_cents: order.total_cents,
+            received_total_cents: order.received_total_cents,
+            date: order.date,
+          }),
+        });
+      },
+    } as any);
+
+    await expect(getOrders()).resolves.toEqual([order]);
+  });
+
+  it('mantiene la actualización exitosa del estado de una orden en Firestore', async () => {
+    vi.mocked(getDocs).mockResolvedValueOnce({
+      forEach: (callback: (document: { id: string; data: () => object }) => void) => {
+        callback({ id: 'order-1', data: () => ({ status: 'draft' }) });
+      },
+    } as any);
+    vi.mocked(updateDoc).mockResolvedValueOnce(undefined);
+
+    await expect(updateOrderStatus('order-1', 'ordered')).resolves.toBeUndefined();
+    expect(updateDoc).toHaveBeenCalled();
+  });
+
+  it('rechaza la lectura de proveedores en vez de devolver una lista vacía', async () => {
+    vi.mocked(getDocs).mockRejectedValueOnce(new Error('permission denied'));
+
+    await expect(getSuppliers()).rejects.toThrow('Error al cargar proveedores');
+  });
+
+  it('rechaza la creación de proveedores sin exponer el error de Firebase', async () => {
+    vi.mocked(addDoc).mockRejectedValueOnce(new Error('token=secret-token'));
+
+    await expect(
+      addSupplier({
+        name: 'Proveedor',
+        contactName: 'Contacto',
+        phone: '555-0000',
+        email: 'proveedor@test.com',
+        category: 'Test',
+        active: true,
+      })
+    ).rejects.toThrow('Error al crear proveedor');
+  });
+
+  it('rechaza la actualización de proveedores sin exponer el error de Firebase', async () => {
+    vi.mocked(updateDoc).mockRejectedValueOnce(new Error('apiKey=secret-key'));
+
+    await expect(updateSupplier('sup-1', { name: 'Actualizado' })).rejects.toThrow(
+      'Error al actualizar proveedor'
+    );
+  });
+
+  it('rechaza la eliminación de proveedores si falla la lectura en Firebase', async () => {
+    vi.mocked(getDocs).mockRejectedValueOnce(new Error('permission denied'));
+
+    await expect(deleteSupplier('sup-1')).rejects.toThrow('Error al eliminar proveedor');
+  });
+
+  it('sanitiza una eliminación de proveedor que rechaza con un valor no Error', async () => {
+    vi.mocked(getDocs).mockRejectedValueOnce(null);
+
+    await expect(deleteSupplier('sup-1')).rejects.toThrow('Error al eliminar proveedor');
+  });
+
+  it('rechaza la lectura de órdenes en vez de devolver una lista vacía', async () => {
+    vi.mocked(getDocs).mockRejectedValueOnce(new Error('permission denied'));
+
+    await expect(getOrders()).rejects.toThrow('Error al cargar órdenes de compra');
+  });
+
+  it('rechaza la creación de órdenes sin exponer el error de Firebase', async () => {
+    vi.mocked(addDoc).mockRejectedValueOnce(new Error('password=secret-password'));
+
+    await expect(
+      createOrder({
+        supplierId: 'sup-1',
+        supplierName: 'Proveedor',
+        items: [{ quantity: 1, unit_cost_cents: 100, isNewProduct: false } as OrderItem],
+      })
+    ).rejects.toThrow('Error al crear orden de compra');
+  });
+
+  it('rechaza la actualización de estado si falla Firebase', async () => {
+    vi.mocked(getDocs).mockRejectedValueOnce(new Error('permission denied'));
+
+    await expect(updateOrderStatus('order-1', 'ordered')).rejects.toThrow(
+      'Error al actualizar estado de orden'
+    );
+  });
+
+  it('preserva el error de orden inexistente en modo Firebase', async () => {
+    vi.mocked(getDocs).mockResolvedValueOnce({
+      forEach: () => undefined,
+    } as any);
+
+    await expect(updateOrderStatus('missing-order', 'ordered')).rejects.toThrow(
+      'Orden no encontrada'
+    );
+  });
+
+  it('preserva el error de transición inválida en modo Firebase', async () => {
+    vi.mocked(getDocs).mockResolvedValueOnce({
+      forEach: (callback: (document: { id: string; data: () => object }) => void) => {
+        callback({ id: 'order-1', data: () => ({ status: 'received' }) });
+      },
+    } as any);
+
+    await expect(updateOrderStatus('order-1', 'draft')).rejects.toThrow(
+      'Transición de estado no permitida: received → draft'
+    );
+  });
+
+  it('sanitiza una actualización de estado que rechaza con un valor no Error', async () => {
+    vi.mocked(getDocs).mockRejectedValueOnce(null);
+
+    await expect(updateOrderStatus('order-1', 'ordered')).rejects.toThrow(
+      'Error al actualizar estado de orden'
+    );
+  });
+
+  it('rechaza la recepción si falla la transacción de Firebase', async () => {
+    vi.mocked(runTransaction).mockRejectedValueOnce(new Error('token=secret-token'));
+
+    await expect(
+      receiveOrderItems('order-1', [{ index: 0, received_quantity: 1, final_cost_cents: 100 }])
+    ).rejects.toThrow('Error al recibir orden');
+  });
+
+  it('sanitiza una recepción que rechaza con un valor no Error', async () => {
+    vi.mocked(runTransaction).mockRejectedValueOnce(null);
+
+    await expect(
+      receiveOrderItems('order-1', [{ index: 0, received_quantity: 1, final_cost_cents: 100 }])
+    ).rejects.toThrow('Error al recibir orden');
+  });
+
+  it('rechaza la cancelación si falla Firebase', async () => {
+    vi.mocked(getDoc).mockRejectedValueOnce(new Error('permission denied'));
+
+    await expect(cancelOrder('order-1')).rejects.toThrow('Error al cancelar orden');
+  });
+
+  it('sanitiza una cancelación que rechaza con un valor no Error', async () => {
+    vi.mocked(getDoc).mockRejectedValueOnce(null);
+
+    await expect(cancelOrder('order-1')).rejects.toThrow('Error al cancelar orden');
   });
 });

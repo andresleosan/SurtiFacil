@@ -20,10 +20,11 @@ const UserManagement = () => {
   const loadUsers = async () => {
     try {
       setLoading(true);
+      setError('');
       const data = await getUsers();
       setUsers(data);
-    } catch (err) {
-      console.error('Error loading users:', err);
+    } catch {
+      console.error('Error loading users.');
       setError('Error al cargar usuarios');
     } finally {
       setLoading(false);

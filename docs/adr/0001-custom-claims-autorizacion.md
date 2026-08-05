@@ -1,4 +1,4 @@
-# ADR-0001: Custom Claims como fuente de verdad para autorización en Firestore Rules
+# ADR-0001: Documento de usuario como autoridad de autorización en Firestore Rules
 
 **Fecha:** 2026-07-31
 **Estado:** Aceptada
@@ -6,33 +6,30 @@
 
 ## Contexto
 
-El codebase guarda el rol del usuario en Firestore (`users/{uid}.role`) pero las reglas de Firestore no pueden confiar en un documento mutable por el propio usuario sin generar una ventana TOCTOU. La única forma segura de tomar decisiones de autorización dentro de `firestore.rules` es mediante **Firebase Auth Custom Claims**, que son parte del JWT verificado criptográficamente por Firebase.
+El codebase guarda el estado activo y el rol del usuario en el documento protegido `users/{uid}`. Las reglas leen ese documento mediante helpers server-side; el usuario solo puede leer su propio documento y no puede cambiar su propio rol. Los custom claims se mantienen como datos derivados/cache para el backend, pero nunca son suficientes para autorizar una operación Firestore.
 
-Sin custom claims, no se puede:
-- Restringir reads de datos financieros (`products.last_cost_cents`, `sales.total`, `suppliers.totalSpentCents`).
-- Impedir que un cajero manipule órdenes de compra.
-- Auditar quién tiene qué permisos.
+Sin validar el documento protegido en rules, los claims pueden quedar obsoletos después de un cambio de rol o estado activo.
 
 ## Decisión
 
-Adoptar **Firebase Auth Custom Claims** como la fuente de verdad para autorización en `firestore.rules`. El rol en Firestore (`users/{uid}.role`) se mantiene como dato de UI, pero las reglas consultan `request.auth.token.admin` y `request.auth.token.manager`.
+Adoptar el documento activo `/users/{uid}` como autoridad de autorización en `firestore.rules`. `isActiveUser()`, `isAdminUser()` e `isManagerUser()` leen el documento protegido y aplican el estado y rol vigente en cada operación. Custom claims siguen derivándose para optimización del backend, pero no pueden conceder privilegios que contradigan el documento.
 
 ## Alternativas consideradas
 
-- **A — Custom Claims (elegida).** Seguro, performante (JWT sin latencia), patrón estándar de Firebase. Requiere backend con `firebase-admin` para setear claims. Migración: usuarios existentes deben re-loguear.
-- **B — Leer rol de Firestore en rules (`get(/databases/.../users/$(uid)).data.role`).** Más simple, sin custom claims. Latencia adicional por cada request (`get` cuenta como 1 lectura facturable). Ventana TOCTOU mínima pero existente.
+- **A — Documento protegido (elegida).** El cambio de rol o estado activo tiene efecto inmediato y las reglas validan la misma fuente que la UI. Requiere lecturas `get()` en rules y proteger estrictamente la colección `users`.
+- **B — Custom Claims como autoridad.** Menor latencia por request, pero puede quedar obsoleto hasta refrescar el token y permitir privilegios stale después de una mutación de rol.
 - **C — Dejar reglas permisivas y aceptar cliente-side only.** Sin valor real de seguridad.
 
 ## Consecuencias
 
 **Positivas:**
-- Autorización verificable criptográficamente, no manipulable por el cliente.
-- Latencia cero en rules (claims están en el JWT).
-- Patrón estándar de Firebase, bien documentado.
+- Cambios de rol y desactivación efectivos inmediatamente en rules y frontend.
+- El cliente no puede modificar el documento de otro usuario ni elevar su propio rol.
+- Claims derivados siguen disponibles para integraciones que los necesiten, sin convertirse en un bypass.
 
 **Negativas:**
-- Usuarios existentes deben re-loguear después del deploy para obtener sus claims.
-- Necesita un endpoint backend (`POST /api/auth/sync-claims`) que lee el rol de Firestore y setea claims vía Admin SDK.
+- Cada operación protegida incurre en las lecturas de rules necesarias para validar el documento de usuario.
+- El endpoint `POST /api/auth/sync-claims` es una sincronización derivada y debe rechazar usuarios inactivos o con rol inválido.
 - `registerUser` debe invocar sync-claims después de crear el documento en Firestore.
 
 ## Migración
@@ -40,11 +37,11 @@ Adoptar **Firebase Auth Custom Claims** como la fuente de verdad para autorizaci
 1. Deploy backend con nuevo endpoint.
 2. Deploy frontend con cambios en `authService.loginUser` y `authService.registerUser`.
 3. Deploy `firestore.rules` actualizado.
-4. Operador avisa a usuarios: "cierren sesión y vuelvan a entrar".
-5. Verificación: tras re-login, claims están en `firebaseUser.getIdTokenResult()`.
+4. Ejecutar `npm run test:rules` contra los emuladores Auth/Firestore.
+5. Verificación: cambiar rol y estado activo en el emulador y confirmar el efecto inmediato en rules y UI.
 
 ## Cambios concretos
 
-- `backend/whatsapp-webhook.js`: nuevo endpoint `POST /api/auth/sync-claims` con body `{ uid }`.
-- `web/src/services/authService.ts`: `loginUser` y `registerUser` llaman a `VITE_BACKEND_URL/api/auth/sync-claims` con el `uid`.
-- `firestore.rules` + `docs/firestore.rules`: todas las colecciones restringidas por `request.auth.token.admin/manager`.
+- `backend/whatsapp-webhook.js`: endpoint `POST /api/auth/sync-claims` con header `Authorization: Bearer <Firebase ID token>` y body `{ uid }` que genera claims derivados.
+- `web/src/services/authService.ts`: login y registro sincronizan claims derivados y observan el documento protegido para resolver rol/estado vigente.
+- `firestore.rules`: fuente canonica de reglas; cualquier copia documental debe mantenerse sincronizada y no se publica directamente.

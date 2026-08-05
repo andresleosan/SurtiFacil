@@ -3,7 +3,25 @@
  * Usa proxy backend para proteger la API key
  */
 
+import { getAuth } from 'firebase/auth';
+
 const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3000';
+const auth = getAuth();
+
+async function getProxyHeaders(): Promise<Record<string, string>> {
+  const user = auth.currentUser;
+  if (!user) throw new Error('Debes iniciar sesión para usar el análisis de productos');
+
+  try {
+    const idToken = await user.getIdToken();
+    return {
+      Authorization: `Bearer ${idToken}`,
+      'Content-Type': 'application/json',
+    };
+  } catch {
+    throw new Error('No se pudo verificar la sesión para usar el análisis de productos');
+  }
+}
 
 interface ProductAnalysisResult {
   nombre: string;
@@ -24,7 +42,7 @@ interface ProductFromAudioResult {
 export async function analyzeProductImage(imageBase64: string): Promise<ProductAnalysisResult> {
   const response = await fetch(`${BACKEND_URL}/api/anthropic/analyze-image`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: await getProxyHeaders(),
     body: JSON.stringify({ imageBase64 }),
   });
 
@@ -43,7 +61,7 @@ export async function analyzeProductImage(imageBase64: string): Promise<ProductA
 export async function analyzeProductAudio(transcribedText: string): Promise<ProductFromAudioResult> {
   const response = await fetch(`${BACKEND_URL}/api/anthropic/analyze-audio`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: await getProxyHeaders(),
     body: JSON.stringify({ transcribedText }),
   });
 

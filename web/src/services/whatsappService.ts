@@ -9,6 +9,7 @@ import {
   Timestamp,
   orderBy,
 } from 'firebase/firestore';
+import { getAuth } from 'firebase/auth';
 import { db } from '../firebase/config';
 import type {
   WhatsAppConversation,
@@ -16,6 +17,9 @@ import type {
   WhatsAppOrder,
   ProcessedMessageData,
 } from '../types/whatsapp';
+
+const auth = getAuth();
+const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3000';
 
 /**
  * Obtiene todas las conversaciones de WhatsApp
@@ -60,22 +64,31 @@ export async function sendMessage(
   message: string,
   messageType: 'text' | 'order_request' | 'location' | 'image' = 'text'
 ): Promise<string> {
-  const messagesRef = collection(db, 'whatsapp_messages');
-  const docRef = await addDoc(messagesRef, {
-    conversationId,
-    sender: 'admin',
-    message,
-    messageType,
-    timestamp: Timestamp.now(),
-  });
+  const user = auth.currentUser;
+  if (!user) throw new Error('Debes iniciar sesión para enviar mensajes');
 
-  // Actualizar lastMessageDate de la conversación
-  const conversationRef = doc(db, 'whatsapp_conversations', conversationId);
-  await updateDoc(conversationRef, {
-    lastMessageDate: Timestamp.now(),
-  });
+  try {
+    const idToken = await user.getIdToken();
+    const response = await fetch(`${BACKEND_URL}/api/whatsapp/send`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${idToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ conversationId, message, messageType }),
+    });
 
-  return docRef.id;
+    if (!response.ok) throw new Error('No se pudo enviar el mensaje');
+    const result = await response.json();
+    const providerMessageId = result?.data?.messages?.[0]?.id;
+    if (typeof providerMessageId !== 'string' || providerMessageId.length === 0) {
+      throw new Error('No se pudo enviar el mensaje');
+    }
+    return providerMessageId;
+  } catch (error) {
+    if (error instanceof Error && error.message === 'No se pudo enviar el mensaje') throw error;
+    throw new Error('No se pudo enviar el mensaje');
+  }
 }
 
 /**

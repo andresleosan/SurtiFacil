@@ -79,17 +79,19 @@ whatsapp_orders
 ```
 Cliente envía WhatsApp
         ↓
-Cloud Function recibe webhook
+Backend Express recibe webhook con firma HMAC
         ↓
 Guarda en Firestore (whatsapp_messages)
         ↓
 Frontend carga datos en tiempo real
         ↓
-Admin ve conversación en panel
+Administrador o gerente ve conversación en panel
         ↓
-Admin responde desde panel
+Administrador o gerente responde desde panel
         ↓
-Sistema envía respuesta por WhatsApp API
+Frontend envía un Firebase ID token al backend
+        ↓
+Backend envía respuesta por WhatsApp API y guarda el mensaje
 ```
 
 ---
@@ -104,6 +106,7 @@ Sistema envía respuesta por WhatsApp API
    - `WHATSAPP_API_TOKEN`
    - `WHATSAPP_PHONE_NUMBER_ID`
    - `WHATSAPP_BUSINESS_ACCOUNT_ID`
+   - `WHATSAPP_APP_SECRET` (App Secret de la aplicación Meta; requerido para POST)
 
 ### **Paso 2: Configurar Backend**
 
@@ -127,13 +130,26 @@ node backend/whatsapp-webhook.js
 3. Agregar webhook:
    - URL: `https://tu-dominio.com/api/webhooks/whatsapp`
    - Verify Token: Mismo valor de `.env`
+   - Meta debe enviar `X-Hub-Signature-256`; el backend valida `sha256=...` con `WHATSAPP_APP_SECRET` sobre el cuerpo exacto
 4. Suscribirse a eventos: `messages`, `message_status`
+
+El POST responde `401` de forma genérica cuando falta el secreto, falta la firma o la firma no coincide. También tiene un límite de 100 solicitudes por IP cada 60 segundos, con entradas expirables y un máximo de 10.000 entradas por proceso. No se registran cuerpos, firmas, teléfonos, tokens ni errores del proveedor.
+
+Las rutas administrativas `POST /api/whatsapp/send` y `POST /api/whatsapp/test` requieren un Firebase
+ID token Bearer y un usuario activo con rol `admin` o `manager`. Comparten un único límite de proceso:
+10 solicitudes por clave usuario/ruta cada 60 segundos, con entradas expirables y un máximo total de
+1.000 entradas; el exceso responde `429` con `Retry-After`. Las llamadas a Meta abortan después de 10 segundos por defecto
+(`WHATSAPP_REQUEST_TIMEOUT_MS`) y los fallos no exponen payloads del proveedor.
 
 ### **Paso 4: Configurar Firebase Rules**
 
 1. En Firebase Console → Firestore → Rules
-2. Copiar contenido de `docs/firestore.rules`
-3. Publicar reglas
+2. Publicar las reglas canonicas desde la raiz con `npm run deploy:rules`
+3. No usar copias de reglas desde la carpeta `docs/`
+
+Solo usuarios activos con rol `admin` o `manager` pueden leer o escribir las
+colecciones de WhatsApp. Las eliminaciones siguen siendo exclusivas de
+`admin`. El frontend nunca recibe `ADMIN_API_KEY` ni `WHATSAPP_API_TOKEN`.
 
 ---
 
@@ -269,6 +285,7 @@ proyecto/
 WHATSAPP_API_TOKEN=xxx
 WHATSAPP_PHONE_NUMBER_ID=xxx
 WEBHOOK_VERIFY_TOKEN=xxx
+WHATSAPP_APP_SECRET=xxx
 ```
 
 **Frontend (web/.env.local)**:
@@ -284,7 +301,7 @@ VITE_FIREBASE_PROJECT_ID=xxx
 
 | Problema                | Solución                                               |
 | ----------------------- | ------------------------------------------------------ |
-| Webhook no se conecta   | Verificar token de webhook y URL correcta              |
+| Webhook no se conecta   | Verificar URL, `WEBHOOK_VERIFY_TOKEN` y `WHATSAPP_APP_SECRET` |
 | No recibo mensajes      | Validar credenciales de WhatsApp y webhook activo      |
 | Frontend no carga datos | Verificar Firestore rules y autenticación              |
 | Órdenes no se crean     | Revisar procesamiento de mensajes y datos en Firestore |

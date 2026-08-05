@@ -75,7 +75,7 @@ ${colors.blue}3. CONFIGURAR FIREBASE:${colors.reset}
    • Ve a: https://console.firebase.google.com
    • Descarga tu serviceAccountKey.json
    • Cópialo a la raíz del proyecto (o especifica la ruta en .env)
-   • Publica las reglas de seguridad desde ${colors.blue}docs/firestore.rules${colors.reset}
+   • Publica las reglas canonicas desde ${colors.blue}firestore.rules${colors.reset} con npm run deploy:rules
 
 ${colors.blue}4. OBTENER CREDENCIALES DE WHATSAPP:${colors.reset}
    • Ve a: https://business.facebook.com/

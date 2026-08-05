@@ -11,6 +11,7 @@ const Dashboard = () => {
   const [ingresosTotales, setIngresosTotales] = useState(0);
   const [topProducts, setTopProducts] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     loadDashboardData();
@@ -21,6 +22,7 @@ const Dashboard = () => {
   const loadDashboardData = async () => {
     try {
       setLoading(true);
+      setError(null);
       const [sales, products] = await Promise.all([getSales(), getProducts()]);
 
       const now = new Date();
@@ -61,8 +63,9 @@ const Dashboard = () => {
       setIngresosTotales(totalAll);
       setTopProducts(sorted);
       setProductosVendidos(sales.length);
-    } catch (error) {
-      console.error('Error loading dashboard:', error);
+    } catch {
+      console.error('Error loading dashboard.');
+      setError('No se pudieron cargar los datos del panel.');
     } finally {
       setLoading(false);
     }
@@ -78,6 +81,17 @@ const Dashboard = () => {
     { title: 'Productos más vendidos', value: topProducts.length > 0 ? topProducts.join(', ') : 'Sin datos' },
     { title: 'Ingresos Totales', value: formatCents(ingresosTotales) }
   ];
+
+  if (error) {
+    return (
+      <section className="space-y-4">
+        <h2 className="text-2xl font-bold text-sf-text">Panel de Control</h2>
+        <div role="alert" className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded">
+          {error}
+        </div>
+      </section>
+    );
+  }
 
   return (
     <section className="space-y-4">

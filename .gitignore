@@ -37,6 +37,7 @@ coverage/
 qa/reports/
 playwright-report/
 test-results/
+.playwright-mcp/
 
 # Editor / sistema operativo
 .DS_Store

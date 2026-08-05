@@ -10,7 +10,10 @@
 2. **Cuenta de Firebase** con un proyecto creado en https://console.firebase.google.com
 
 3. **Variables de entorno** configuradas:
-   - `web/.env.local` con `VITE_FIREBASE_*` completos
+   - Variables de build de producción para `web/` con `VITE_FIREBASE_*` completos y `VITE_BACKEND_URL` apuntando a la URL HTTPS pública del backend Express (no `localhost`)
+   - Entorno separado del backend con service account, `WHATSAPP_*`, `WEBHOOK_VERIFY_TOKEN`, `FRONTEND_ORIGINS` y `ANTHROPIC_API_KEY` cuando correspondan
+
+`FRONTEND_ORIGINS` es una lista separada por comas de orígenes permitidos por CORS. En producción debe contener únicamente orígenes HTTPS, por ejemplo `https://smartmarket-b37ce.web.app` y, si aplica, `https://app.example.com`. No configures `*`: el frontend usa autenticación cross-origin y el backend lo ignora de forma segura.
 
 ---
 
@@ -47,6 +50,9 @@ firebase use --add TU-PROJECT-ID
 
 ### Opción A: Solo Hosting (Frontend)
 ```powershell
+# Configurar VITE_BACKEND_URL en el entorno de build antes de ejecutar el comando.
+# La URL se incorpora al bundle de Vite; debe ser la URL pública HTTPS del backend.
+$env:VITE_BACKEND_URL = 'https://api.example.com'
 npm run deploy:hosting
 ```
 Este comando:
@@ -55,8 +61,10 @@ Este comando:
 
 ### Opción B: Reglas de Firestore
 ```powershell
+npm run test:rules
 npm run deploy:rules
 ```
+`firestore.rules` en la raíz es la única fuente canónica. No publiques copias desde `docs/`.
 
 ### Opción C: Índices de Firestore
 ```powershell
@@ -67,6 +75,21 @@ npm run deploy:indexes
 ```powershell
 npm run deploy:all
 ```
+
+Este comando no despliega `backend/whatsapp-webhook.js`. Firebase Hosting solo
+publica `web/dist/`; el servidor Express requiere un despliegue separado.
+El frontend en producción solo funcionará contra el backend configurado en
+`VITE_BACKEND_URL`; no se debe publicar un bundle de producción con una URL local.
+
+### Opción E: Backend Express (prerrequisito separado)
+
+Antes de declarar la release operativa:
+
+1. Desplegar `backend/whatsapp-webhook.js` en un servicio Node/Express separado.
+2. Configurar allí el service account y las variables backend; nunca copiarlas al bundle frontend.
+3. Configurar `VITE_BACKEND_URL` en el entorno de build del frontend con la URL pública HTTPS de ese servicio.
+4. Verificar `GET /api/health` y el webhook HMAC desde el objetivo desplegado.
+5. Conservar el artefacto anterior y su procedimiento de rollback del servicio backend.
 
 ---
 
@@ -84,11 +107,18 @@ npm run deploy:all
 
 ## Rollback
 
-Si algo falla, reverte a la versión anterior:
+### Firebase Hosting
+
+Si falla una release del frontend, abre Firebase Console > Hosting > historial de releases, selecciona la release anterior y usa la opción de rollback disponible allí.
+
+Como alternativa, vuelve a desplegar un artefacto de frontend previamente preservado: restaura ese artefacto en `web/dist/` y ejecuta:
 ```powershell
-firebase hosting:rollback
+firebase deploy --only hosting
 ```
-Selecciona la versión anterior del listado.
+
+### Backend Express
+
+El rollback del backend depende del servicio Node/Express elegido. Usa el mecanismo de releases/versiones de ese proveedor y conserva siempre el artefacto o la imagen anterior antes de desplegar una nueva versión. Firebase Hosting no revierte el servidor Express.
 
 ---
 
@@ -131,12 +161,16 @@ cd web && npm run build
 Verifica que no hay errores de TypeScript.
 
 ### Error: "Permission denied" en Firestore
-Revisa `firestore.rules` - los permisos están abiertos para desarrollo.
-**Antes de producción, ajustar a:**
-```
-allow read: if isSignedIn();
-allow write: if isAdmin();
-```
+Revisa la regla concreta en `firestore.rules` y ejecuta `npm run test:rules`.
+Las operaciones requieren un usuario activo en `/users/{uid}` y el rol vigente del documento.
+
+La política POS vigente permite a cajeros actualizar únicamente `stock` en
+productos existentes, sin aumentar el valor ni editar otros campos. Las ventas
+requieren `date`, `total`, `payment_method`, `items` y `createdAt`; el total y
+los importes son no negativos, el método es `cash|card|other` y cada línea
+validada requiere producto, cantidad positiva, precio y subtotal no negativos.
+Las reglas validan hasta 20 líneas por venta porque Firestore Rules no dispone
+de iteración de listas; los carritos mayores se rechazan.
 
 ---
 
@@ -156,11 +190,11 @@ allow write: if isAdmin();
 ## Checklist Pre-Producción
 
 - [ ] `.firebaserc` configurado con project ID real
-- [ ] `web/.env.local` con credenciales de producción
-- [ ] `firestore.rules` ajustado (no dejar abierto)
+- [ ] Variables de build de `web/` con credenciales Firebase de producción y `VITE_BACKEND_URL` HTTPS público (sin `localhost`)
+- [ ] Reglas verificadas: `npm run test:rules`
 - [ ] Tests pasan: `npm run test`
 - [ ] Build exitoso: `npm run build:web`
-- [ ] Variables de entorno verdes
+- [ ] Variables de entorno verdes en frontend y backend, con despliegues separados verificados
 - [ ] Dominio personalizado (opcional)
 
 ---

@@ -48,7 +48,7 @@
   - Procesamiento de eventos
   - Guardado en Firestore
   - Envío de mensajes
-  - Respuesta automática
+   - Respuesta automática de recepción opcional (no es confirmación de orden)
   - Logging de eventos
 
 ### **5. Documentación** 📚
@@ -134,12 +134,11 @@ Cliente: "Quiero 2 arroz y 1 leche, llevar a Calle 5 #123"
                           ↓
         ✅ Click en "Confirmar Orden"
         ✅ Status: "confirmed"
-                          ↓
+                           ↓
                 RESPUESTA AL CLIENTE
-                          ↓
-        ✅ Envía mensaje: "Orden confirmada. Llegará hoy"
-        ✅ Guarda respuesta en historial
-        ✅ Actualiza timestamp de conversación
+                           ↓
+         ⏳ La confirmación automática de la orden está pendiente.
+         ✅ El administrador puede enviar la confirmación manualmente desde el chat
 ```
 
 ---
@@ -376,7 +375,8 @@ Para problemas o preguntas:
 
 ## 📝 Notas Finales
 
-- ✅ **Producción Ready**: Código limpio y documentado
+- ✅ **Preparación técnica**: Código limpio y documentado
+- ⏳ **Producción**: Pendiente de despliegue, credenciales, HTTPS y QA operativo final
 - ✅ **Escalable**: Estructura preparada para crecer
 - ✅ **Seguro**: Validaciones y rules implementadas
 - ✅ **Extensible**: Fácil agregar features nuevas
@@ -391,6 +391,6 @@ npm run whatsapp:init    # Verificar
 npm run dev:all          # Iniciar
 ```
 
-**Status**: ✅ Completamente implementado  
+**Status**: Implementación técnica completada; no es una confirmación de despliegue ni de readiness productivo
 **Fecha**: 2024  
 **Versión**: 1.0.0

@@ -22,12 +22,16 @@ const ALLOWED_TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
   cancelled: [],
 };
 
-function isFirebaseConfigured(): boolean {
-  return !!(db && typeof db === 'object' && import.meta.env.VITE_FIREBASE_PROJECT_ID);
+function isMockMode(): boolean {
+  return import.meta.env.VITE_USE_MOCK_DATA === 'true';
+}
+
+function getErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : '';
 }
 
 export async function getSuppliers(): Promise<Supplier[]> {
-  if (!isFirebaseConfigured()) {
+  if (isMockMode()) {
     return mockSuppliers.map((s) => ({ ...s }));
   }
 
@@ -44,16 +48,16 @@ export async function getSuppliers(): Promise<Supplier[]> {
     });
 
     return suppliers;
-  } catch (error) {
-    console.error('Error getting suppliers:', error);
-    return [];
+  } catch {
+    console.error('Error getting suppliers from Firebase');
+    throw new Error('Error al cargar proveedores');
   }
 }
 
 export async function addSupplier(
   data: Omit<Supplier, 'id' | 'totalOrders' | 'totalSpentCents' | 'createdAt'>
 ): Promise<Supplier> {
-  if (!isFirebaseConfigured()) {
+  if (isMockMode()) {
     const newSupplier: Supplier = {
       id: `sup-${Date.now()}`,
       ...data,
@@ -79,9 +83,9 @@ export async function addSupplier(
       totalOrders: 0,
       totalSpentCents: 0,
     };
-  } catch (error: any) {
-    console.error('Error adding supplier:', error);
-    throw new Error(error.message || 'Error al crear proveedor');
+  } catch {
+    console.error('Error adding supplier to Firebase');
+    throw new Error('Error al crear proveedor');
   }
 }
 
@@ -89,7 +93,7 @@ export async function updateSupplier(
   id: string,
   data: Partial<Supplier>
 ): Promise<void> {
-  if (!isFirebaseConfigured()) {
+  if (isMockMode()) {
     const supplier = mockSuppliers.find((s) => s.id === id);
     if (supplier) {
       Object.assign(supplier, data);
@@ -99,9 +103,9 @@ export async function updateSupplier(
 
   try {
     await updateDoc(doc(db, 'suppliers', id), data);
-  } catch (error: any) {
-    console.error('Error updating supplier:', error);
-    throw new Error(error.message || 'Error al actualizar proveedor');
+  } catch {
+    console.error('Error updating supplier in Firebase');
+    throw new Error('Error al actualizar proveedor');
   }
 }
 
@@ -113,7 +117,7 @@ export async function toggleSupplierActive(
 }
 
 export async function deleteSupplier(id: string): Promise<void> {
-  if (!isFirebaseConfigured()) {
+  if (isMockMode()) {
     const supplier = mockSuppliers.find((s) => s.id === id);
     if (supplier && supplier.totalOrders > 0) {
       throw new Error('No se puede eliminar: tiene órdenes asociadas');
@@ -143,11 +147,11 @@ export async function deleteSupplier(id: string): Promise<void> {
 
     await deleteDoc(doc(db, 'suppliers', id));
   } catch (error: any) {
-    console.error('Error deleting supplier:', error);
-    if (error.message === 'No se puede eliminar: tiene órdenes asociadas') {
+    if (getErrorMessage(error) === 'No se puede eliminar: tiene órdenes asociadas') {
       throw error;
     }
-    throw new Error(error.message || 'Error al eliminar proveedor');
+    console.error('Error deleting supplier from Firebase');
+    throw new Error('Error al eliminar proveedor');
   }
 }
 
@@ -155,7 +159,7 @@ export async function getOrders(filters?: {
   status?: OrderStatus;
   supplierId?: string;
 }): Promise<PurchaseOrder[]> {
-  if (!isFirebaseConfigured()) {
+  if (isMockMode()) {
     let orders = mockOrders.map((o) => ({ ...o }));
     if (filters?.status) {
       orders = orders.filter((o) => o.status === filters.status);
@@ -185,9 +189,9 @@ export async function getOrders(filters?: {
       orders = orders.filter((o) => o.supplierId === filters.supplierId);
     }
     return orders;
-  } catch (error) {
-    console.error('Error getting orders:', error);
-    return [];
+  } catch {
+    console.error('Error getting orders from Firebase');
+    throw new Error('Error al cargar órdenes de compra');
   }
 }
 
@@ -219,7 +223,7 @@ export async function createOrder(data: {
     notes: data.notes,
   };
 
-  if (!isFirebaseConfigured()) {
+  if (isMockMode()) {
     const newOrder: PurchaseOrder = {
       id: `order-${Date.now()}`,
       ...orderData,
@@ -243,9 +247,9 @@ export async function createOrder(data: {
       date: new Date(),
       createdAt: new Date(),
     };
-  } catch (error: any) {
-    console.error('Error creating order:', error);
-    throw new Error(error.message || 'Error al crear orden de compra');
+  } catch {
+    console.error('Error creating order in Firebase');
+    throw new Error('Error al crear orden de compra');
   }
 }
 
@@ -253,7 +257,7 @@ export async function updateOrderStatus(
   orderId: string,
   newStatus: OrderStatus
 ): Promise<void> {
-  if (!isFirebaseConfigured()) {
+  if (isMockMode()) {
     const order = mockOrders.find((o) => o.id === orderId);
     if (!order) {
       throw new Error('Orden no encontrada');
@@ -293,11 +297,12 @@ export async function updateOrderStatus(
 
     await updateDoc(doc(db, 'purchase_orders', orderId), { status: newStatus });
   } catch (error: any) {
-    if (error.message && error.message.includes('no permitida')) {
+    const message = getErrorMessage(error);
+    if (message === 'Orden no encontrada' || message.includes('no permitida')) {
       throw error;
     }
-    console.error('Error updating order status:', error);
-    throw new Error(error.message || 'Error al actualizar estado de orden');
+    console.error('Error updating order status in Firebase');
+    throw new Error('Error al actualizar estado de orden');
   }
 }
 
@@ -311,7 +316,7 @@ export async function receiveOrderItems(
   orderId: string,
   receives: ReceiveItem[]
 ): Promise<PurchaseOrder> {
-  if (!isFirebaseConfigured()) {
+  if (isMockMode()) {
     const order = mockOrders.find((o) => o.id === orderId);
     if (!order) throw new Error('Orden no encontrada');
 
@@ -485,11 +490,20 @@ export async function receiveOrderItems(
     }
 
     return { ...order, ...updatePayload, receivedDate: allReceived ? new Date() : order.receivedDate };
+  }).catch((error: any) => {
+    const message = getErrorMessage(error);
+    if (message === 'Orden no encontrada' ||
+      message.includes('Ítem en índice') ||
+      message.includes('No se puede recibir más')) {
+      throw error;
+    }
+    console.error('Error receiving order in Firebase');
+    throw new Error('Error al recibir orden');
   });
 }
 
 export async function cancelOrder(orderId: string): Promise<void> {
-  if (!isFirebaseConfigured()) {
+  if (isMockMode()) {
     const order = mockOrders.find((o) => o.id === orderId);
     if (!order) throw new Error('Orden no encontrada');
     const hasReception = order.items.some((i) => i.received_quantity > 0);
@@ -515,10 +529,11 @@ export async function cancelOrder(orderId: string): Promise<void> {
     }
     await updateDoc(orderRef, { status: 'cancelled' });
   } catch (error: any) {
-    if (error.message && (error.message.includes('No se puede cancelar') || error.message.includes('no encontrada'))) {
+    const message = getErrorMessage(error);
+    if (message.includes('No se puede cancelar') || message.includes('no encontrada')) {
       throw error;
     }
-    console.error('Error canceling order:', error);
-    throw new Error(error.message || 'Error al cancelar orden');
+    console.error('Error canceling order in Firebase');
+    throw new Error('Error al cancelar orden');
   }
 }

@@ -32,7 +32,7 @@ Se ha integrado un **chatbot de WhatsApp** completamente funcional en tu sistema
 - `docs/WHATSAPP_IMPLEMENTATION.md` - Guía paso a paso
 - `docs/WHATSAPP_ARCHITECTURE.md` - Diagramas y flujos
 - `docs/WHATSAPP_BEST_PRACTICES.md` - Prácticas recomendadas
-- `docs/firestore.rules` - Reglas de seguridad Firebase
+- `firestore.rules` - Reglas canonicas de seguridad Firebase
 
 ### **Configuración**
 
@@ -87,6 +87,7 @@ http://localhost:5173
 ## 📋 Checklist de Configuración
 
 - [ ] Obtener credenciales de WhatsApp Business API
+- [ ] Configurar `WHATSAPP_APP_SECRET` con el App Secret de Meta
 - [ ] Configurar archivo `.env`
 - [ ] Descargar `serviceAccountKey.json` de Firebase
 - [ ] Instalar dependencias del backend
@@ -154,23 +155,27 @@ http://localhost:5173
    → Datos: Cliente, productos, dirección
 
 4. Admin confirma:
-   → Click en "Confirmar Orden"
-   → Se mueve a "Ventas"
-   → Respuesta automática al cliente
+    → Click en "Confirmar Orden"
+    → Se mueve a "Ventas"
+    → El estado se actualiza en Firestore; la respuesta al cliente queda pendiente/manual
 
 5. Cliente recibe:
-   "Perfecto, confirmo tu orden. Te llegará hoy"
+   La confirmación debe enviarse manualmente desde el chat hasta implementar ese flujo.
 ```
 
 ---
 
 ## 🔐 Seguridad
 
-- ✅ Validación de webhooks de WhatsApp
-- ✅ Encriptación de datos sensibles en Firestore
+- ✅ Verificación GET preservada con `WEBHOOK_VERIFY_TOKEN`
+- ✅ Verificación POST `X-Hub-Signature-256: sha256=...` sobre el cuerpo HTTP exacto
+- ✅ El POST rechaza con `401` si falta el App Secret, la firma es inválida o está malformada
+- ✅ Límite fijo y acotado de 100 POST por IP cada 60 segundos; las entradas expiran y el mapa tiene máximo 10.000 entradas por proceso
+- ✅ HTTPS para el transporte y controles de acceso de Firestore por usuario activo y rol
+- ℹ️ Firestore cifra datos en reposo como servicio; no se declara cifrado adicional a nivel de aplicación
 - ✅ Autenticación requerida para admins
 - ✅ Rate limiting en API
-- ✅ Tokens de acceso seguros
+- ✅ Tokens y secretos permanecen en el backend y no se exponen con prefijo `VITE_`
 
 ---
 
@@ -257,8 +262,9 @@ http://localhost:5173
 ### **Webhook no se conecta**
 
 1. Verifica que el `WEBHOOK_VERIFY_TOKEN` sea correcto
-2. Usa ngrok para probar localmente
-3. Revisa los logs del servidor
+2. Verifica que `WHATSAPP_APP_SECRET` sea el App Secret de la aplicación de Meta
+3. Usa ngrok para probar localmente
+4. Revisa los logs del servidor sin registrar cuerpos, firmas, teléfonos ni tokens
 
 ### **No recibo mensajes**
 
@@ -286,12 +292,15 @@ http://localhost:5173
 
 ## 📝 Notas Importantes
 
-1. **Production**: Antes de desplegar, implementa:
-   - Autenticación de usuarios
+1. **Production**: Antes de una release operativa, verifica:
+   - Autenticación de usuarios y autorización por rol
    - Rate limiting
    - Backups automáticos
    - Monitoreo y alertas
-   - SSL/HTTPS
+    - SSL/HTTPS
+    - Despliegue separado de `backend/whatsapp-webhook.js`, health check `/api/health` y plan de rollback
+
+   El backend actual ya exige `WHATSAPP_APP_SECRET` y la firma HMAC de Meta para cada POST. El límite de webhook es local al proceso; una instalación con varias réplicas necesita almacenamiento compartido antes de considerarse lista para producción.
 
 2. **Costos**: Considera:
    - Firebase (almacenamiento y transacciones)
@@ -302,7 +311,8 @@ http://localhost:5173
 3. **Seguridad**: Mantén:
    - Credenciales en `.env` (nunca en git)
    - Firestore rules actualizadas
-   - Backend protegido con API keys
+   - Rutas WhatsApp protegidas con Firebase ID tokens y roles activos
+   - API keys reservadas para integraciones backend-to-backend
    - Logs de auditoría
 
 ---
@@ -314,10 +324,10 @@ npm run whatsapp:init
 npm run dev:all
 ```
 
-Luego accede a `http://localhost:5173` y navega a la pestaña "💬 WhatsApp"
+Luego accede a `http://localhost:5173`; la pestaña "💬 WhatsApp" solo aparece para administradores y gerentes.
 
 ---
 
 **Creado**: 2024  
 **Stack**: React + TypeScript + Firebase + Express + WhatsApp API  
-**Status**: ✅ Funcional y listo para producción
+**Status**: Funcional; requiere despliegue, configuración de producción y QA operativo final antes de una release

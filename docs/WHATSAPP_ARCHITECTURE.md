@@ -205,10 +205,13 @@ Webhook POST /api/webhooks/whatsapp
 ```
 POST /api/whatsapp/send
 {
-  "phoneNumber": "5491234567890",
+  "conversationId": "doc_id",
   "message": "Perfecto, confirmo tu orden",
-  "conversationId": "doc_id"
+  "messageType": "text"
 }
+
+Authorization: Bearer <Firebase ID token>
+// Usuario activo con rol admin o manager requerido.
 
 Response:
 {
@@ -299,7 +302,7 @@ firestore/
                │ Autenticación
                ↓
 ┌──────────────────────────────────┐
-│   BACKEND (API Key / JWT)        │
+│   BACKEND (Firebase Bearer)      │
 └──────────────┬───────────────────┘
                │ Firestore Rules
                ↓
@@ -317,13 +320,25 @@ firestore/
 ├── FIREBASE_SERVICE_ACCOUNT_PATH ──→ Firebase Admin SDK
 ├── WHATSAPP_API_TOKEN ─────────────→ WhatsApp API
 ├── WHATSAPP_PHONE_NUMBER_ID ───────→ WhatsApp API
-└── WEBHOOK_VERIFY_TOKEN ──────────→ Validación de webhook
+├── WHATSAPP_APP_SECRET ─────────────→ Firma HMAC del webhook
+├── WEBHOOK_VERIFY_TOKEN ───────────→ Validación GET del webhook
+└── WHATSAPP_REQUEST_TIMEOUT_MS ─────→ Timeout de llamadas al proveedor
 
 .env.local (Frontend)
 ├── VITE_FIREBASE_API_KEY ────────→ Firebase Web SDK
 ├── VITE_FIREBASE_PROJECT_ID ─────→ Firestore
 └── VITE_BACKEND_URL ──────────────→ Servidor Express
 ```
+
+El frontend autentica las rutas administrativas con `Authorization: Bearer <Firebase ID token>`.
+El token bearer del proveedor, el App Secret, el Verify Token y la service account son exclusivamente
+del backend; no deben tener prefijo `VITE_` ni aparecer en el bundle del frontend.
+
+Las rutas autenticadas `POST /api/whatsapp/send` y `POST /api/whatsapp/test` comparten un único límite
+de proceso de 10 solicitudes por clave usuario/ruta cada 60 segundos, con un máximo total de 1.000
+entradas expirables. Cuando se excede, responden `429` con `Retry-After`. Las llamadas
+al proveedor tienen un timeout finito de 10 segundos por defecto, configurable con
+`WHATSAPP_REQUEST_TIMEOUT_MS`; los fallos devuelven una respuesta genérica y solo generan logs estáticos.
 
 ---
 
@@ -338,7 +353,7 @@ firestore/
      ↓                                           ↓
 ┌──────────────────────┐            ┌──────────────────────┐
 │   Frontend Static    │            │  Backend API        │
-│  (Firebase Hosting)  │            │ (Cloud Functions)   │
+│  (Firebase Hosting)  │            │ (Express backend)   │
 │  tu-dominio.com      │            │ api.tu-dominio.com  │
 └──────────────────────┘            └──────────────────────┘
                                              │

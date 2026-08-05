@@ -6,6 +6,7 @@ import { StockAlert, checkLowStock, getStockAlertCount, getCriticalAlertCount } 
 const StockAlerts = () => {
   const [alerts, setAlerts] = useState<StockAlert[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [threshold, setThreshold] = useState(10);
 
   useEffect(() => {
@@ -15,11 +16,13 @@ const StockAlerts = () => {
   const loadAlerts = async () => {
     try {
       setLoading(true);
+      setError(null);
       const products = await getProducts();
       const stockAlerts = checkLowStock(products, threshold);
       setAlerts(stockAlerts);
-    } catch (err) {
-      console.error('Error loading alerts:', err);
+    } catch {
+      console.error('Error loading alerts.');
+      setError('No se pudieron cargar las alertas de stock.');
     } finally {
       setLoading(false);
     }
@@ -54,6 +57,14 @@ const StockAlerts = () => {
     return (
       <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200">
         <div className="text-center text-gray-500">Cargando alertas...</div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div role="alert" className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded">
+        {error}
       </div>
     );
   }

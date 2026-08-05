@@ -46,11 +46,17 @@ npm run whatsapp:init
 - `WHATSAPP_API_TOKEN` - WhatsApp Business API bearer token
 - `WHATSAPP_PHONE_NUMBER_ID` - WhatsApp phone number ID
 - `WEBHOOK_VERIFY_TOKEN` - Webhook verification token
+- `WHATSAPP_APP_SECRET` - WhatsApp webhook signing secret
+- `ANTHROPIC_API_KEY` - Anthropic API key, backend-only
+- `ADMIN_API_KEY` - Backend-only key for explicitly internal proxy routes
 
 **`web/.env.local`** (frontend):
 - `VITE_FIREBASE_*` - Firebase web config
-- `VITE_ANTHROPIC_API_KEY` - Claude API key (optional)
 - `VITE_BACKEND_URL` - Backend URL (default: http://localhost:3000)
+
+Anthropic and WhatsApp credentials are backend-only. They must not use a `VITE_`
+prefix or be exposed in the frontend bundle. The frontend authenticates user-facing
+backend routes with Firebase ID-token Bearer authorization.
 
 ## Code Conventions
 

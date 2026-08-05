@@ -2,57 +2,61 @@
 
 ## 1. Seguridad
 
-### ✅ Autenticación
+### ✅ Autenticación y secretos
 
-- [ ] Implementar JWT en el backend
-- [ ] Validar requests con tokens
+- [x] Validar webhooks con HMAC `X-Hub-Signature-256`
+- [x] Exigir usuario Firebase activo y rol vigente en Firestore Rules
+- [x] Proteger endpoints administrativos del Express backend
 - [ ] Usar HTTPS en producción
-- [ ] Encriptar API keys en .env
+- [ ] Gestionar secretos con el entorno del backend o un secret manager
 
-```javascript
-// Validar API key
-const verifyApiKey = (req, res, next) => {
-  const apiKey = req.headers["x-api-key"];
-  if (apiKey !== process.env.API_KEY) {
-    return res.status(401).json({ error: "Unauthorized" });
-  }
-  next();
-};
-
-app.use("/api/whatsapp/", verifyApiKey);
-```
+No se deben poner bearer tokens, App Secret, Verify Token ni credenciales de
+Firebase en variables `VITE_` o en el bundle. No se afirma cifrado adicional de
+API keys en `.env`; la protección depende del entorno/secret manager y de los
+permisos del sistema operativo.
 
 ### ✅ Validación de Webhooks
 
 ```javascript
-// Verificar firma del webhook de WhatsApp
+// El parser debe conservar el cuerpo exacto antes de analizar JSON.
+app.use(express.json({ verify: (req, res, buffer) => {
+  req.rawBody = Buffer.from(buffer);
+} }));
+
+// Verificar firma del webhook de WhatsApp sin comparación vulnerable.
 const crypto = require("crypto");
 
 function verifyWebhook(req, appSecret) {
   const body = req.rawBody;
   const signature = req.headers["x-hub-signature-256"];
+  if (!appSecret || !Buffer.isBuffer(body) || !/^sha256=[0-9a-f]{64}$/i.test(signature || "")) {
+    return false;
+  }
 
-  const hash = crypto
+  const expected = crypto
     .createHmac("sha256", appSecret)
     .update(body)
-    .digest("hex");
+    .digest();
+  const provided = Buffer.from(signature.slice("sha256=".length), "hex");
 
-  return `sha256=${hash}` === signature;
+  return provided.length === expected.length && crypto.timingSafeEqual(provided, expected);
 }
 ```
 
 ### ✅ Rate Limiting
 
 ```javascript
-const rateLimit = require("express-rate-limit");
-
-const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutos
-  max: 100, // límite de 100 requests
+// El backend canónico usa un límite fijo, expiración y máximo de entradas.
+const limiter = createWebhookRateLimiter({
+  limit: 100,
+  windowMs: 60 * 1000,
+  maxEntries: 10_000,
 });
 
-app.use("/api/", limiter);
+app.post("/api/webhooks/whatsapp", limiter, verifyWebhookMiddleware, handler);
 ```
+
+El límite es por IP y local al proceso. Para varias réplicas se necesita almacenamiento compartido; no se debe declarar despliegue listo solo por tener este límite local.
 
 ---
 
@@ -61,21 +65,14 @@ app.use("/api/", limiter);
 ### ✅ Estructura uniforme de errores
 
 ```javascript
-class ApiError extends Error {
-  constructor(statusCode, message) {
-    super(message);
-    this.statusCode = statusCode;
-  }
-}
+// El backend usa respuestas allowlisted y no devuelve error.message.
+const SAFE_ERRORS = {
+  badRequest: 'Solicitud inválida',
+  unauthorized: 'No autorizado',
+  internal: 'Error interno del servidor',
+};
 
-app.use((err, req, res, next) => {
-  const statusCode = err.statusCode || 500;
-  res.status(statusCode).json({
-    error: err.message,
-    status: statusCode,
-    timestamp: new Date().toISOString(),
-  });
-});
+res.status(500).json({ error: SAFE_ERRORS.internal });
 ```
 
 ### ✅ Logging
@@ -83,15 +80,15 @@ app.use((err, req, res, next) => {
 ```javascript
 const fs = require("fs");
 
-function logEvent(level, message, data) {
+function logEvent(level, message) {
   const timestamp = new Date().toISOString();
-  const logEntry = `[${timestamp}] ${level}: ${message} ${JSON.stringify(data)}\n`;
+  const logEntry = `[${timestamp}] ${level}: ${message}\n`;
 
   fs.appendFileSync("logs/app.log", logEntry);
   console.log(logEntry);
 }
 
-logEvent("INFO", "Mensaje recibido", { phoneNumber, message });
+logEvent("INFO", "Mensaje recibido");
 ```
 
 ---
@@ -192,16 +189,12 @@ messageQueue.process(async (job) => {
 });
 ```
 
-### ✅ Usar Cloud Functions (Firebase)
+### ✅ Despliegue del backend Express
 
 ```javascript
-// Reemplaza el servidor Express con Cloud Functions
-const functions = require("firebase-functions");
-
-exports.whatsappWebhook = functions.https.onRequest(async (req, res) => {
-  // Mismo código del webhook
-  // Ejecuta automáticamente y escala
-});
+// Firebase Hosting no despliega este proceso.
+// Ejecutar backend/whatsapp-webhook.js en un servicio separado,
+// comprobar GET /api/health y conservar un artefacto anterior para rollback.
 ```
 
 ---
@@ -321,16 +314,20 @@ async function saveMessage(phoneNumber, message) {
 /**
  * POST /api/whatsapp/send
  *
- * Envía un mensaje a un cliente
+ * Envía un mensaje a un cliente después de verificar Firebase y el rol
  *
  * Body:
  * {
- *   "phoneNumber": "5491234567890",
+ *   "conversationId": "doc_id",
  *   "message": "Tu mensaje",
- *   "conversationId": "doc_id"
+ *   "messageType": "text"
  * }
  *
  * Response: { success: true, data: {...} }
+ * Requiere Authorization: Bearer <Firebase ID token> de un usuario activo
+ * admin o manager. El número de teléfono se obtiene de la conversación.
+ * Límite: 10 solicitudes por usuario y ruta cada 60 segundos; el exceso responde
+ * 429 con Retry-After. El proveedor tiene un timeout finito y sus fallos son genéricos.
  */
 ```
 
@@ -353,10 +350,9 @@ async function saveMessage(phoneNumber, message) {
 
 | Opción                   | Pros                     | Contras                |
 | ------------------------ | ------------------------ | ---------------------- |
-| Firebase Cloud Functions | Serverless, auto-scaling | Costo por invocación   |
-| Heroku                   | Fácil deployment         | Caro en producción     |
-| Google Cloud Run         | Containerizado           | Requiere Docker        |
-| AWS Lambda               | Escalable                | Complejo de configurar |
+| Express en un servicio administrado | Modelo actual y control explícito | Requiere operación separada |
+| Google Cloud Run                    | Contenerizado                     | Requiere imagen y configuración |
+| VM o plataforma Node                | Flexible                          | Requiere health check y rollback |
 
 ---
 

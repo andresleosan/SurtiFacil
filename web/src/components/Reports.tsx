@@ -29,6 +29,7 @@ const Reports = () => {
   const [dailySales, setDailySales] = useState<DailySales[]>([]);
   const [topProducts, setTopProducts] = useState<TopProduct[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [dateRange, setDateRange] = useState<7 | 14 | 30>(7);
 
   useEffect(() => {
@@ -38,6 +39,7 @@ const Reports = () => {
   const loadReportData = async () => {
     try {
       setLoading(true);
+      setError(null);
       const [summaryData, dailyData, topData] = await Promise.all([
         getSalesSummary(),
         getDailySales(dateRange),
@@ -46,8 +48,9 @@ const Reports = () => {
       setSummary(summaryData);
       setDailySales(dailyData);
       setTopProducts(topData);
-    } catch (error) {
-      console.error('Error loading reports:', error);
+    } catch {
+      console.error('Error loading reports.');
+      setError('No se pudieron cargar los reportes.');
     } finally {
       setLoading(false);
     }
@@ -77,6 +80,17 @@ const Reports = () => {
       <section className="space-y-4">
         <h2 className="text-2xl font-bold text-sf-text">📊 Reportes</h2>
         <div className="text-center py-8 text-gray-500">Cargando reportes...</div>
+      </section>
+    );
+  }
+
+  if (error) {
+    return (
+      <section className="space-y-4">
+        <h2 className="text-2xl font-bold text-sf-text">📊 Reportes</h2>
+        <div role="alert" className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded">
+          {error}
+        </div>
       </section>
     );
   }

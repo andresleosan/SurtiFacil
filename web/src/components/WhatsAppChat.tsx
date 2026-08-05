@@ -58,8 +58,8 @@ export default function WhatsAppChat() {
     try {
       const data = await getConversations();
       setConversations(data);
-    } catch (error) {
-      console.error("Error loading conversations:", error);
+    } catch {
+      console.error("Error loading conversations.");
     }
   };
 
@@ -67,8 +67,8 @@ export default function WhatsAppChat() {
     try {
       const data = await getMessages(conversationId);
       setMessages(data);
-    } catch (error) {
-      console.error("Error loading messages:", error);
+    } catch {
+      console.error("Error loading messages.");
     }
   };
 
@@ -76,8 +76,8 @@ export default function WhatsAppChat() {
     try {
       const data = await getWhatsAppOrders();
       setOrders(data);
-    } catch (error) {
-      console.error("Error loading orders:", error);
+    } catch {
+      console.error("Error loading orders.");
     }
   };
 
@@ -131,8 +131,8 @@ export default function WhatsAppChat() {
       setNewMessage("");
       loadMessages(selectedConversation.id);
       loadOrders();
-    } catch (error) {
-      console.error("Error sending message:", error);
+    } catch {
+      console.error("Error sending message.");
       alert("Error al enviar mensaje");
     } finally {
       setLoading(false);
@@ -145,8 +145,8 @@ export default function WhatsAppChat() {
       await archiveConversation(selectedConversation.id);
       loadConversations();
       setSelectedConversation(null);
-    } catch (error) {
-      console.error("Error archiving conversation:", error);
+    } catch {
+      console.error("Error archiving conversation.");
     }
   };
 
@@ -154,8 +154,8 @@ export default function WhatsAppChat() {
     try {
       await updateOrderStatus(orderId, "confirmed");
       loadOrders();
-    } catch (error) {
-      console.error("Error confirming order:", error);
+    } catch {
+      console.error("Error confirming order.");
     }
   };
 
@@ -378,16 +378,16 @@ export default function WhatsAppChat() {
               <ul className="space-y-2 text-xs text-blue-900">
                 <li className="flex items-start gap-2">
                   <span className="text-blue-500 mt-0.5">•</span>
-                  <span>Backend con webhooks de Twilio configurado</span>
+                  <span>Backend con webhooks de Meta configurado</span>
                 </li>
                 <li className="flex items-start gap-2">
                   <span className="text-blue-500 mt-0.5">•</span>
-                  <span>Número de WhatsApp Business verificado en Twilio</span>
+                  <span>Número de WhatsApp Business verificado en Meta</span>
                 </li>
                 <li className="flex items-start gap-2">
                   <span className="text-blue-500 mt-0.5">•</span>
                   <span>
-                    Credenciales de Twilio configuradas en variables de entorno
+                    Credenciales de Meta Graph API / WhatsApp Cloud API configuradas en variables de entorno
                   </span>
                 </li>
                 <li className="flex items-start gap-2">

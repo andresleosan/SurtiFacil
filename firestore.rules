@@ -1,60 +1,143 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    
-    // Productos - lectura autenticados, escritura admin/manager
-    match /products/{productId} {
-      allow read: if request.auth != null;
-      allow create, update: if request.auth != null && (request.auth.token.admin == true || request.auth.token.manager == true);
-      allow delete: if request.auth != null && request.auth.token.admin == true;
+    function isActiveUser() {
+      return request.auth != null
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.active == true
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['admin', 'manager', 'cashier'];
     }
 
-    // Ventas - lectura autenticados, escritura autenticados (cajeros registran ventas)
+    function isAdminUser() {
+      return isActiveUser()
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+    }
+
+    function isManagerUser() {
+      return isActiveUser()
+        && (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin'
+            || get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'manager');
+    }
+
+    function isValidSaleItem(item) {
+      return item is map
+        && item.keys().hasAll(['product_id', 'quantity', 'price_cents', 'subtotal'])
+        && item.product_id is string
+        && item.product_id.size() > 0
+        && item.quantity is int
+        && item.quantity > 0
+        && item.price_cents is int
+        && item.price_cents >= 0
+        && item.subtotal is int
+        && item.subtotal >= 0;
+    }
+
+    // Rules cannot iterate a list; validate every supported POS line explicitly.
+    // Larger carts are rejected rather than bypassing item validation.
+    function isValidSaleItems(items) {
+      return items is list
+        && items.size() > 0
+        && items.size() <= 20
+        && isValidSaleItem(items[0])
+        && (items.size() <= 1 || isValidSaleItem(items[1]))
+        && (items.size() <= 2 || isValidSaleItem(items[2]))
+        && (items.size() <= 3 || isValidSaleItem(items[3]))
+        && (items.size() <= 4 || isValidSaleItem(items[4]))
+        && (items.size() <= 5 || isValidSaleItem(items[5]))
+        && (items.size() <= 6 || isValidSaleItem(items[6]))
+        && (items.size() <= 7 || isValidSaleItem(items[7]))
+        && (items.size() <= 8 || isValidSaleItem(items[8]))
+        && (items.size() <= 9 || isValidSaleItem(items[9]))
+        && (items.size() <= 10 || isValidSaleItem(items[10]))
+        && (items.size() <= 11 || isValidSaleItem(items[11]))
+        && (items.size() <= 12 || isValidSaleItem(items[12]))
+        && (items.size() <= 13 || isValidSaleItem(items[13]))
+        && (items.size() <= 14 || isValidSaleItem(items[14]))
+        && (items.size() <= 15 || isValidSaleItem(items[15]))
+        && (items.size() <= 16 || isValidSaleItem(items[16]))
+        && (items.size() <= 17 || isValidSaleItem(items[17]))
+        && (items.size() <= 18 || isValidSaleItem(items[18]))
+        && (items.size() <= 19 || isValidSaleItem(items[19]));
+    }
+
+    function isValidSaleCreate() {
+      return request.resource.data.keys().hasAll(['date', 'total', 'payment_method', 'items', 'createdAt'])
+        && request.resource.data.date is timestamp
+        && request.resource.data.createdAt is timestamp
+        && request.resource.data.total is int
+        && request.resource.data.total >= 0
+        && request.resource.data.payment_method is string
+        && request.resource.data.payment_method in ['cash', 'card', 'other']
+        && isValidSaleItems(request.resource.data.items);
+    }
+
+    match /users/{userId} {
+      allow read: if request.auth != null
+        && (request.auth.uid == userId
+            || isAdminUser());
+      allow create, delete: if isAdminUser();
+      allow update: if isActiveUser()
+        && (isAdminUser()
+            && (request.auth.uid != userId
+                || request.resource.data.role == resource.data.role)
+            || (request.auth.uid == userId
+                && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['lastLogin'])));
+    }
+
+    // Productos - lectura autenticados, escritura admin/manager
+    match /products/{productId} {
+      allow read: if isActiveUser();
+      allow create: if isManagerUser();
+      allow update: if isManagerUser();
+      allow delete: if isAdminUser();
+    }
+
+    // Ventas - el backend Admin SDK crea ventas tras validar el stock atomico.
     match /sales/{saleId} {
-      allow read: if request.auth != null;
-      allow create: if request.auth != null;
-      allow update, delete: if request.auth != null && request.auth.token.admin == true;
+      allow read: if isActiveUser();
+      allow create: if isActiveUser() && false;
+      allow update, delete: if isAdminUser();
     }
 
     // Roles - solo admins
     match /roles/{roleId} {
-      allow read: if request.auth != null;
-      allow write: if request.auth != null && request.auth.token.admin == true;
+      allow read: if isActiveUser();
+      allow write: if isAdminUser();
     }
 
-    // Conversaciones de WhatsApp - lectura admin/manager, escritura autenticados
+    // Conversaciones de WhatsApp - lectura/escritura admin/manager
     match /whatsapp_conversations/{conversationId} {
-      allow read: if request.auth != null && (request.auth.token.admin == true || request.auth.token.manager == true);
-      allow create, update: if request.auth != null;
-      allow delete: if request.auth != null && request.auth.token.admin == true;
+      allow read: if isManagerUser();
+      allow create, update: if isManagerUser();
+      allow delete: if isAdminUser();
     }
 
-    // Mensajes de WhatsApp - lectura admin/manager, escritura autenticados
+    // Mensajes de WhatsApp - lectura/escritura admin/manager
     match /whatsapp_messages/{messageId} {
-      allow read: if request.auth != null && (request.auth.token.admin == true || request.auth.token.manager == true);
-      allow create: if request.auth != null;
-      allow update, delete: if request.auth != null && request.auth.token.admin == true;
+      allow read: if isManagerUser();
+      allow create: if isManagerUser();
+      allow update, delete: if isAdminUser();
     }
 
-    // Órdenes de WhatsApp - lectura admin/manager, escritura autenticados
+    // Órdenes de WhatsApp - lectura/escritura admin/manager
     match /whatsapp_orders/{orderId} {
-      allow read: if request.auth != null && (request.auth.token.admin == true || request.auth.token.manager == true);
-      allow create, update: if request.auth != null;
-      allow delete: if request.auth != null && request.auth.token.admin == true;
+      allow read: if isManagerUser();
+      allow create, update: if isManagerUser();
+      allow delete: if isAdminUser();
     }
 
     // Proveedores - lectura admin/manager, escritura admin/manager
     match /suppliers/{supplierId} {
-      allow read: if request.auth != null && (request.auth.token.admin == true || request.auth.token.manager == true);
-      allow create, update: if request.auth != null && (request.auth.token.admin == true || request.auth.token.manager == true);
-      allow delete: if request.auth != null && request.auth.token.admin == true;
+      allow read: if isManagerUser();
+      allow create, update: if isManagerUser();
+      allow delete: if isAdminUser();
     }
 
     // Órdenes de compra - lectura admin/manager, escritura admin/manager (cajeros no gestionan ordenes)
     match /purchase_orders/{orderId} {
-      allow read: if request.auth != null && (request.auth.token.admin == true || request.auth.token.manager == true);
-      allow create, update: if request.auth != null && (request.auth.token.admin == true || request.auth.token.manager == true);
-      allow delete: if request.auth != null && request.auth.token.admin == true;
+      allow read: if isManagerUser();
+      allow create, update: if isManagerUser();
+      allow delete: if isAdminUser();
     }
   }
 }

@@ -1,33 +1,25 @@
 import {
   collection,
   getDocs,
-  serverTimestamp,
-  doc,
-  runTransaction,
 } from 'firebase/firestore';
+import { getAuth } from 'firebase/auth';
 import { db } from '../firebase/config';
 import { Product, SaleItem, Sale } from '../firebase/db';
 import { mockProducts, addLocalSale, getLocalSales } from './mockData';
 
-// Variable global para rastrear si Firebase está disponible
-let firebaseAvailable = false;
-
-// Inicializar Firebase availability check
-try {
-  if (db && typeof db === 'object') {
-    firebaseAvailable = true;
-  }
-} catch {
-  firebaseAvailable = false;
+function isMockMode(): boolean {
+  return import.meta.env.VITE_USE_MOCK_DATA === 'true';
 }
+
+const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3000';
+const auth = getAuth();
 
 /**
  * Obtiene la lista de productos desde Firestore
- * Si Firebase no está disponible, usa datos mock
+ * Solo usa datos mock cuando el modo está habilitado explícitamente.
  */
 export async function getProducts(): Promise<Product[]> {
-  // Si Firebase no está configurado, usa datos mock
-  if (!firebaseAvailable || !import.meta.env.VITE_FIREBASE_PROJECT_ID) {
+  if (isMockMode()) {
     console.log('ℹ️ Usando datos mock - Firebase no configurado');
     return mockProducts;
   }
@@ -45,16 +37,14 @@ export async function getProducts(): Promise<Product[]> {
     });
 
     return products;
-  } catch (error) {
-    console.error('Error getting products from Firebase:', error);
-    console.log('ℹ️ Fallback a datos mock');
-    // Fallback a datos mock si hay error
-    return mockProducts;
+  } catch {
+    console.error('Error getting products from Firebase');
+    throw new Error('Error al cargar productos');
   }
 }
 
 /**
- * Crea una nueva venta en Firestore (o datos mock si no está configurado)
+ * Crea una nueva venta mediante el backend (o datos mock en modo explícito).
  */
 export async function createSale(
   cartItems: SaleItem[],
@@ -64,70 +54,47 @@ export async function createSale(
     throw new Error('El carrito está vacío');
   }
 
-  // Si Firebase no está configurado, usar datos mock locales
-  if (!firebaseAvailable || !import.meta.env.VITE_FIREBASE_PROJECT_ID) {
+  if (isMockMode()) {
     console.log('ℹ️ Creando venta en datos mock (Firebase no configurado)');
     return createMockSale(cartItems, paymentMethod);
   }
 
+  const user = auth.currentUser;
+  if (!user) throw new Error('Debes iniciar sesión para crear la venta');
+
   try {
-    const saleId = await runTransaction(db, async (transaction) => {
-      const currentProducts = new Map<string, Product>();
-
-      // Solo cargar los productos que están en el carrito
-      for (const item of cartItems) {
-        const productRef = doc(db, 'products', item.product_id);
-        const productSnapshot = await transaction.get(productRef);
-        if (!productSnapshot.exists()) {
-          throw new Error(`Producto ${item.product_id} no encontrado`);
-        }
-        const productData = {
-          id: productSnapshot.id,
-          ...productSnapshot.data(),
-        } as Product;
-        currentProducts.set(item.product_id, productData);
-      }
-
-      // Validar stock de cada producto
-      for (const item of cartItems) {
-        const product = currentProducts.get(item.product_id)!;
-        if (item.quantity > product.stock) {
-          throw new Error(
-            `Stock insuficiente de "${product.name}". Intenta vender ${item.quantity} pero solo hay ${product.stock}`
-          );
-        }
-      }
-
-      // Crear documento de venta
-      const salesRef = collection(db, 'sales');
-      const newSaleRef = doc(salesRef);
-      const total = cartItems.reduce((sum, item) => sum + item.subtotal, 0);
-
-      const saleData: Omit<Sale, 'id'> = {
-        date: serverTimestamp(),
-        total,
+    const idToken = await user.getIdToken();
+    const response = await fetch(`${BACKEND_URL}/api/sales/create`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${idToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        items: cartItems.map(({ product_id, quantity }) => ({ product_id, quantity })),
         payment_method: paymentMethod,
-        items: cartItems,
-        createdAt: serverTimestamp(),
-      };
-
-      transaction.set(newSaleRef, saleData);
-
-      // Actualizar stock de cada producto
-      for (const item of cartItems) {
-        const productRef = doc(db, 'products', item.product_id);
-        const productData = currentProducts.get(item.product_id)!;
-        const newStock = productData.stock - item.quantity;
-        transaction.update(productRef, { stock: newStock });
-      }
-
-      return newSaleRef.id;
+      }),
     });
-
-    return saleId;
-  } catch (error: any) {
-    console.error('Error creating sale:', error);
-    throw new Error(error.message || 'Error al crear la venta');
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(typeof result.error === 'string' ? result.error : 'Error al crear la venta');
+    }
+    if (typeof result.saleId !== 'string' || result.saleId.length === 0) {
+      throw new Error('Error al crear la venta');
+    }
+    return result.saleId;
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : '';
+    const safeMessages = new Set([
+      'Debes iniciar sesión para crear la venta',
+      'Solicitud inválida',
+      'No autorizado',
+      'Recurso no encontrado',
+      'Demasiadas solicitudes',
+    ]);
+    if (safeMessages.has(message)) throw error;
+    console.error('Error creating sale through backend');
+    throw new Error('Error al crear la venta');
   }
 }
 
@@ -179,11 +146,10 @@ function createMockSale(
 }
 
 /**
- * Obtiene el historial de ventas desde Firestore (o datos mock si no está configurado)
+ * Obtiene el historial de ventas desde Firestore (o datos mock en modo explícito)
  */
 export async function getSales(): Promise<Sale[]> {
-  // Si Firebase no está configurado, usar datos mock locales
-  if (!firebaseAvailable || !import.meta.env.VITE_FIREBASE_PROJECT_ID) {
+  if (isMockMode()) {
     console.log('ℹ️ Usando historial de ventas mock (Firebase no configurado)');
     const sales = getLocalSales();
     // Ordenar por fecha descendente
@@ -214,15 +180,8 @@ export async function getSales(): Promise<Sale[]> {
     });
 
     return sales;
-  } catch (error) {
-    console.error('Error getting sales from Firebase:', error);
-    console.log('ℹ️ Fallback a datos mock');
-    // Fallback a datos mock
-    const sales = getLocalSales();
-    return sales.sort((a, b) => {
-      const timeA = new Date(a.date).getTime();
-      const timeB = new Date(b.date).getTime();
-      return timeB - timeA;
-    });
+  } catch {
+    console.error('Error getting sales from Firebase');
+    throw new Error('Error al cargar ventas');
   }
 }
