@@ -77,6 +77,8 @@ describe('marginService - getMarginSummary', () => {
   });
 
   it('agrega ventas correctamente por rango (hoy/semana/mes)', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 7, 26, 12, 0, 0));
     const products = [makeProduct('p1', 1000, 400), makeProduct('p2', 500, 200)];
     const items = [
       { product_id: 'p1', product_name: 'P1', quantity: 2, price_cents: 1000, subtotal: 2000 },
@@ -90,16 +92,20 @@ describe('marginService - getMarginSummary', () => {
     mockedGetSales.mockResolvedValue(sales);
     mockedGetProducts.mockResolvedValue(products);
 
-    const summary = await getMarginSummary();
+    try {
+      const summary = await getMarginSummary();
 
-    const expectedItemCost = 2 * 400 + 3 * 200;
-    expect(summary.today.revenue_cents).toBe(3500);
-    expect(summary.today.cost_cents).toBe(expectedItemCost);
-    expect(summary.today.margin_cents).toBe(3500 - expectedItemCost);
-    expect(summary.thisWeek.revenue_cents).toBe(7000);
-    expect(summary.thisWeek.cost_cents).toBe(expectedItemCost * 2);
-    expect(summary.thisMonth.revenue_cents).toBe(7000);
-    expect(summary.estimatedCostCount).toBe(0);
+      const expectedItemCost = 2 * 400 + 3 * 200;
+      expect(summary.today.revenue_cents).toBe(3500);
+      expect(summary.today.cost_cents).toBe(expectedItemCost);
+      expect(summary.today.margin_cents).toBe(3500 - expectedItemCost);
+      expect(summary.thisWeek.revenue_cents).toBe(7000);
+      expect(summary.thisWeek.cost_cents).toBe(expectedItemCost * 2);
+      expect(summary.thisMonth.revenue_cents).toBe(7000);
+      expect(summary.estimatedCostCount).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('retorna ceros cuando no hay ventas', async () => {
