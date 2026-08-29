@@ -176,6 +176,7 @@ function saleFields(overrides = {}) {
   await seedDocument('whatsapp_orders', 'rules-order', { status: { stringValue: 'draft' } });
   await seedDocument('suppliers', 'rules-supplier', { name: { stringValue: 'Rules Supplier' } });
   await seedDocument('purchase_orders', 'rules-order', { status: { stringValue: 'draft' } });
+  await seedDocument('user_audit', 'rules-user-audit', { action: { stringValue: 'user.deactivated' } });
 
   expectStatus('unauthenticated user read', await read('products', 'rules-product'), 403);
   expectStatus('active invalid-role user cannot read a product', await read('products', 'rules-product', invalidRole.idToken), 403);
@@ -193,7 +194,10 @@ function saleFields(overrides = {}) {
   expectStatus('inactive admin cannot create a user document', await create('users', 'rules-inactive-created-user', activeUserFields('cashier'), inactive.idToken), 403);
   expectStatus('admin cannot change its own role', await update('users', admin.uid, { role: { stringValue: 'cashier' } }, admin.idToken), 403);
   expectStatus('active admin can update a user document', await update('users', roleTarget.uid, { role: { stringValue: 'manager' } }, admin.idToken), 200);
-  expectStatus('active admin can delete a user document', await remove('users', 'rules-created-user', admin.idToken), 200);
+  expectStatus('active admin cannot delete a user document directly', await remove('users', 'rules-created-user', admin.idToken), 403);
+  expectStatus('admin can read user lifecycle audit', await read('user_audit', 'rules-user-audit', admin.idToken), 200);
+  expectStatus('manager cannot read user lifecycle audit', await read('user_audit', 'rules-user-audit', manager.idToken), 403);
+  expectStatus('admin cannot write user lifecycle audit from a client', await create('user_audit', 'rules-client-audit', { action: { stringValue: 'forged' } }, admin.idToken), 403);
 
   expectStatus('admin changes target role to cashier', await update('users', roleTarget.uid, { role: { stringValue: 'cashier' } }, admin.idToken), 200);
   expectStatus('stale admin claim cannot read manager-only data after cashier change', await read('suppliers', 'rules-supplier', roleTarget.idToken), 403);

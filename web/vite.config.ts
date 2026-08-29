@@ -17,28 +17,15 @@ export default defineConfig(({ mode }) => {
         manifest: false,
         workbox: {
           globPatterns: ['**/*.{js,css,html,ico,png,svg}'],
+          cleanupOutdatedCaches: true,
           runtimeCaching: [
             {
               urlPattern: /^https:\/\/.*\.googleapis\.com\/.*/i,
-              handler: 'NetworkFirst',
-              options: {
-                cacheName: 'googleapis-cache',
-                expiration: {
-                  maxEntries: 10,
-                  maxAgeSeconds: 60 * 60 * 24,
-                },
-              },
+              handler: 'NetworkOnly',
             },
             {
               urlPattern: /^https:\/\/.*\.firebaseio\.com\/.*/i,
-              handler: 'NetworkFirst',
-              options: {
-                cacheName: 'firebase-cache',
-                expiration: {
-                  maxEntries: 50,
-                  maxAgeSeconds: 60 * 60 * 24,
-                },
-              },
+              handler: 'NetworkOnly',
             },
           ],
         },

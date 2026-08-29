@@ -460,14 +460,17 @@ No se aplico migracion ni despliegue remoto. Evidence: `docs/task-18-financial-i
 
 ### Task 19: Autorizacion coherente, usuarios y privacidad PWA
 
-- [ ] Definir matriz de permisos por ruta para empleados, proveedores, ordenes, reportes, margenes, reposicion y WhatsApp.
-- [ ] Aplicar guards de UI coherentes con backend y Firestore Rules, incluidos deep links.
-- [ ] Reemplazar la eliminacion solo-Firestore por un flujo backend consistente para Auth y documento de usuario, con auditoria y rollback.
-- [ ] Restringir Workbox para no cachear respuestas autenticadas de `googleapis.com`/`firebaseio.com` en dispositivos POS compartidos.
-- [ ] Agregar pruebas de rol, usuario inactivo, acceso directo por URL, logout y ausencia de datos sensibles en caches.
-- [ ] Ejecutar autocritica de seguridad y pruebas completas antes de aprobar.
+- [x] Definir matriz de permisos por ruta para empleados, proveedores, ordenes, reportes, margenes, reposicion y WhatsApp.
+- [x] Aplicar guards de UI coherentes con backend y Firestore Rules, incluidos deep links.
+- [x] Reemplazar la eliminacion solo-Firestore por un flujo backend consistente para Auth y documento de usuario, con auditoria y rollback.
+- [x] Restringir Workbox para no cachear respuestas autenticadas de `googleapis.com`/`firebaseio.com` en dispositivos POS compartidos.
+- [x] Agregar pruebas de rol, usuario inactivo, acceso directo por URL, logout y ausencia de datos sensibles en caches.
+- [x] Ejecutar autocritica de seguridad y pruebas completas antes de aprobar.
 
-Status: pendiente. Prioridad: P0 / RC1.
+Status: aprobada. Matriz y deep links centralizados, baja reversible Auth/Firestore con auditoria,
+caches privados eliminados y Workbox `NetworkOnly`. Backend 75/75, frontend 216/216, E2E 4/4,
+build, reglas, emulador transaccional e imagen Docker pasan. Sin despliegue ni migracion remota.
+Evidence: `docs/task-19-authorization-and-pwa-privacy.md`.
 
 ### Task 20: Idempotencia y resiliencia de WhatsApp
 

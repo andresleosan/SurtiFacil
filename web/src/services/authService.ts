@@ -12,7 +12,6 @@ import {
   onSnapshot,
   updateDoc,
   doc,
-  deleteDoc,
   serverTimestamp
 } from 'firebase/firestore';
 import { db } from '../firebase/config';
@@ -482,7 +481,7 @@ export async function getCurrentUser(): Promise<User | null> {
  */
 export async function getUsers(): Promise<User[]> {
   if (isMockMode()) {
-    return mockUsers;
+    return mockUsers.filter((user) => !user.deletedAt);
   }
 
   requireFirebaseConfiguration();
@@ -493,10 +492,11 @@ export async function getUsers(): Promise<User[]> {
     const users: User[] = [];
 
     snapshot.forEach((doc) => {
-      users.push({
+      const user = {
         id: doc.id,
         ...(doc.data() as Omit<User, 'id'>),
-      });
+      };
+      if (!user.deletedAt) users.push(user);
     });
 
     return users;
@@ -557,14 +557,25 @@ export async function toggleUserActive(userId: string, active: boolean): Promise
  */
 export async function deleteUser(userId: string): Promise<void> {
   if (isMockMode()) {
-    mockUsers = mockUsers.filter(u => u.id !== userId);
+    if (currentUser?.id === userId) throw new Error('No puedes eliminar tu propio usuario');
+    mockUsers = mockUsers.map((user) => user.id === userId
+      ? { ...user, active: false, deletedAt: new Date(), deletedByUid: currentUser?.id || 'mock-admin' }
+      : user);
     return;
   }
 
   requireFirebaseConfiguration();
 
   try {
-    await deleteDoc(doc(db, 'users', userId));
+    const firebaseUser = auth.currentUser;
+    if (!firebaseUser) throw new Error('No hay una sesion administrativa activa.');
+    const idToken = await firebaseUser.getIdToken();
+    const backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3000';
+    const response = await fetch(`${backendUrl}/api/auth/users/${encodeURIComponent(userId)}`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${idToken}` },
+    });
+    if (!response.ok) throw new Error('Unable to deactivate user');
   } catch {
     console.error('Error deleting user.');
     throw new Error('Error al eliminar usuario');

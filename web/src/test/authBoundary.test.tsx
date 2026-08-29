@@ -37,8 +37,14 @@ vi.mock('../components/WhatsAppChat', () => ({
   default: () => <h2>Gestor de WhatsApp montado</h2>,
 }));
 
+vi.mock('../components/Suppliers', () => ({
+  default: () => <h2>Proveedores montado</h2>,
+}));
+
 describe('auth boundary', () => {
   beforeEach(() => {
+    vi.unstubAllGlobals();
+    window.history.replaceState(null, '', '#/dashboard');
     authMock.currentUser = null;
     authMock.authStateListener = null;
     authMock.loginUser.mockReset();
@@ -164,6 +170,39 @@ describe('auth boundary', () => {
     expect(screen.queryByText('Gestor de WhatsApp montado')).not.toBeInTheDocument();
   });
 
+  it('blocks a forbidden cashier deep link without mounting the protected component', async () => {
+    window.history.replaceState(null, '', '#/suppliers');
+    authMock.currentUser = {
+      id: 'cashier-1',
+      email: 'cashier@example.com',
+      displayName: 'Cajero',
+      role: 'cashier',
+      active: true,
+    };
+
+    render(<App />);
+
+    expect(await screen.findByRole('heading', { name: 'Acceso restringido' })).toBeInTheDocument();
+    expect(screen.queryByText('Proveedores montado')).not.toBeInTheDocument();
+    expect(window.location.hash).toBe('#/suppliers');
+  });
+
+  it('normalizes an unknown deep link to the dashboard', async () => {
+    window.history.replaceState(null, '', '#/not-a-page');
+    authMock.currentUser = {
+      id: 'admin-1',
+      email: 'admin@example.com',
+      displayName: 'Administrador',
+      role: 'admin',
+      active: true,
+    };
+
+    render(<App />);
+
+    expect(await screen.findByText('Panel de Control')).toBeInTheDocument();
+    expect(window.location.hash).toBe('#/dashboard');
+  });
+
   it('renders Login after logout through the auth listener', async () => {
     authMock.currentUser = {
       id: 'admin-1',
@@ -180,6 +219,25 @@ describe('auth boundary', () => {
 
     expect(await screen.findByRole('heading', { name: 'Iniciar sesión' })).toBeInTheDocument();
     expect(authMock.logoutUser).toHaveBeenCalledOnce();
+  });
+
+  it('clears historical private runtime caches again when the user logs out', async () => {
+    const removeCache = vi.fn().mockResolvedValue(true);
+    vi.stubGlobal('caches', { delete: removeCache });
+    authMock.currentUser = {
+      id: 'admin-1',
+      email: 'admin@example.com',
+      displayName: 'Administrador',
+      role: 'admin',
+      active: true,
+    };
+
+    render(<App />);
+    await waitFor(() => expect(removeCache).toHaveBeenCalledTimes(2));
+    removeCache.mockClear();
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Cerrar sesión' }));
+
+    expect(removeCache.mock.calls.map(([name]) => name)).toEqual(['googleapis-cache', 'firebase-cache']);
   });
 
   it('shows a safe error when logout fails', async () => {

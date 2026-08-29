@@ -31,6 +31,8 @@ export interface User {
   active: boolean;
   createdAt?: any;
   lastLogin?: any;
+  deletedAt?: any;
+  deletedByUid?: string;
 }
 
 /**

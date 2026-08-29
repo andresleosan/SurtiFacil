@@ -93,13 +93,19 @@ service cloud.firestore {
       allow read: if request.auth != null
         && (request.auth.uid == userId
             || isAdminUser());
-      allow create, delete: if isAdminUser();
+      allow create: if isAdminUser();
+      allow delete: if false;
       allow update: if isActiveUser()
         && (isAdminUser()
             && (request.auth.uid != userId
                 || request.resource.data.role == resource.data.role)
             || (request.auth.uid == userId
                 && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['lastLogin'])));
+    }
+
+    match /user_audit/{eventId} {
+      allow read: if isAdminUser();
+      allow write: if false;
     }
 
     // Productos - lectura autenticados, escritura admin/manager

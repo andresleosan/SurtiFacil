@@ -2,6 +2,11 @@ import { defineConfig, devices } from '@playwright/test';
 import path from 'node:path';
 
 const rootDir = process.cwd();
+const requestedPort = Number(process.env.QA_PORT || 4173);
+const qaPort = Number.isInteger(requestedPort) && requestedPort >= 1024 && requestedPort <= 65535
+  ? requestedPort
+  : 4173;
+const qaBaseUrl = `http://127.0.0.1:${qaPort}`;
 
 export default defineConfig({
   testDir: path.resolve(rootDir, 'qa/tests'),
@@ -15,7 +20,7 @@ export default defineConfig({
     ['html', { outputFolder: path.resolve(rootDir, 'qa/reports'), open: 'never' }],
   ],
   use: {
-    baseURL: 'http://127.0.0.1:4173',
+    baseURL: qaBaseUrl,
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
     video: 'retain-on-failure',
@@ -27,9 +32,9 @@ export default defineConfig({
     },
   ],
   webServer: {
-    command: 'npm --prefix web run preview -- --host 127.0.0.1 --port 4173',
+    command: `npm --prefix web run preview -- --host 127.0.0.1 --port ${qaPort}`,
     cwd: rootDir,
-    url: 'http://127.0.0.1:4173',
+    url: qaBaseUrl,
     reuseExistingServer: false,
     timeout: 120_000,
   },

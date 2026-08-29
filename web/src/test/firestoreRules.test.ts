@@ -84,7 +84,14 @@ describe('Firestore authorization rules', () => {
   it('allows inactive users to read only their own document and gates all user mutations by active admin state', () => {
     const users = getCollectionBlock('users');
     expect(users).toMatch(/allow read: if request\.auth != null\s*&&\s*\(request\.auth\.uid == userId\s*\|\|\s*isAdminUser\(\)\);/);
-    expect(users).toMatch(/allow create, delete: if isAdminUser\(\);/);
+    expect(users).toMatch(/allow create: if isAdminUser\(\);/);
+    expect(users).toMatch(/allow delete: if false;/);
     expect(users).toMatch(/allow update: if isActiveUser\(\)\s*&&\s*\(isAdminUser\(\)\s*&&\s*\(request\.auth\.uid != userId\s*\|\|\s*request\.resource\.data\.role == resource\.data\.role\)\s*\|\|\s*\(request\.auth\.uid == userId\s*&&\s*request\.resource\.data\.diff\(resource\.data\)\.affectedKeys\(\)\.hasOnly\(\['lastLogin'\]\)\)\);/);
+  });
+
+  it('keeps lifecycle audit data server-written and admin-readable', () => {
+    const audit = getCollectionBlock('user_audit');
+    expect(audit).toMatch(/allow read: if isAdminUser\(\);/);
+    expect(audit).toMatch(/allow write: if false;/);
   });
 });

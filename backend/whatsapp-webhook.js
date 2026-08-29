@@ -13,6 +13,7 @@ const admin = require('firebase-admin');
 const { Timestamp, getFirestore } = require('firebase-admin/firestore');
 const cors = require('cors');
 const { createProvisionUserHandler, createRateLimiter } = require('./userProvisioning');
+const { createDeactivateUserHandler } = require('./userLifecycle');
 const { getSafeApiError, getSafeApiLogMessage } = require('./apiErrorContract');
 const { createSyncClaimsHandler, createWhatsAppTestHandler } = require('./apiRoutes');
 const {
@@ -77,6 +78,14 @@ const syncClaims = createSyncClaimsHandler({
   get db() {
     return db;
   },
+});
+
+const deactivateUser = createDeactivateUserHandler({
+  admin,
+  get db() {
+    return db;
+  },
+  rateLimiter: createRateLimiter({ limit: 10, windowMs: 60_000 }),
 });
 
 // ============ FUNCIONES AUXILIARES ============
@@ -198,6 +207,8 @@ app.get('/api/health', (req, res) => {
 app.post('/api/auth/provision-user', provisionUser);
 
 app.post('/api/auth/sync-claims', syncClaims);
+
+app.delete('/api/auth/users/:uid', deactivateUser);
 
 /**
  * POST /api/whatsapp/test - Test endpoint

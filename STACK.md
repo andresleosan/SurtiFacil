@@ -145,11 +145,11 @@ alertas 50/80/100%, y APIs externas deshabilitadas hasta aprobar sus presupuesto
 
 | Alcance | Herramienta/comando | Baseline validada el 2026-08-28 |
 |---|---|---|
-| Frontend unitario | `npm test` dentro de `web/` | 200/200 pasan |
-| Backend unitario | `npm test` dentro de `backend/` | 68/68 pasan |
+| Frontend unitario | `npm test` dentro de `web/` | 216/216 pasan |
+| Backend unitario | `npm test` dentro de `backend/` | 75/75 pasan |
 | Reglas | Firebase Emulator Suite + `qa/tests/firestore-rules.cjs` | Pasa con Java 21 |
 | Venta transaccional | Emulador Firestore + `qa/tests/sales-transaction.cjs` | Pasa |
-| E2E | Playwright | 2 pasan; 1 queda omitida por falta de usuario QA |
+| E2E | Playwright | 4/4 pasan con cuentas mock locales dedicadas; no requiere secretos ni servicios pagos |
 | Build | TypeScript + Vite | Pasa con advertencias de chunks |
 
 Antes de una release Nivel 3 se requieren tambien cobertura medible, casos de contrato, carga sobre

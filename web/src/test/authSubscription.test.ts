@@ -57,7 +57,7 @@ vi.mock('firebase/firestore', () => ({
   serverTimestamp: vi.fn(() => new Date()),
 }));
 
-import { hasRole, isAdmin, loginUser, logoutUser, subscribeToAuthState } from '../services/authService';
+import { deleteUser, hasRole, isAdmin, loginUser, logoutUser, subscribeToAuthState } from '../services/authService';
 
 describe('configured auth subscription', () => {
   beforeEach(() => {
@@ -276,6 +276,21 @@ describe('configured auth subscription', () => {
       code: 'logout',
       message: 'No se pudo cerrar sesión. Inténtalo de nuevo.',
     });
+  });
+
+  it('deactivates a user through the authenticated backend instead of deleting Firestore directly', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await deleteUser('target-user');
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining('/api/auth/users/target-user'),
+      expect.objectContaining({
+        method: 'DELETE',
+        headers: { Authorization: 'Bearer token' },
+      }),
+    );
   });
 
   it('does not sign out a newer Firebase session when an older login flow fails', async () => {
