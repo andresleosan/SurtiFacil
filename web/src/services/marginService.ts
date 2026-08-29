@@ -1,4 +1,4 @@
-import { getSales, getProducts } from './saleService';
+import { getSales } from './saleService';
 import { Sale, Product, SaleItem } from '../firebase/db';
 
 /**
@@ -92,21 +92,37 @@ function finalizeBucket(revenue: number, cost: number): MarginBucket {
   };
 }
 
-function itemCost(
-  item: SaleItem,
-  productsById: Map<string, Product>
-): { cost: number; estimated: boolean; product: Product | undefined } {
-  const product = productsById.get(item.product_id);
-  if (!product) {
-    return { cost: 0, estimated: false, product: undefined };
+function itemCost(item: SaleItem): { cost: number; estimated: boolean } {
+  if (Number.isSafeInteger(item.unit_cost_cents) && item.unit_cost_cents! >= 0) {
+    const cost = item.unit_cost_cents! * item.quantity;
+    if (!Number.isSafeInteger(cost)) throw new Error('Invalid historical sale cost');
+    if (
+      item.cost_subtotal_cents !== undefined
+      && (!Number.isSafeInteger(item.cost_subtotal_cents) || item.cost_subtotal_cents !== cost)
+    ) throw new Error('Invalid historical sale cost');
+    return {
+      cost,
+      estimated: item.cost_is_estimated ?? item.cost_source !== 'purchase',
+    };
   }
-  const { costCents, isEstimated } = resolveCost(product);
-  return { cost: costCents * item.quantity, estimated: isEstimated, product };
+
+  if (
+    !Number.isSafeInteger(item.price_cents)
+    || item.price_cents < 0
+    || !Number.isSafeInteger(item.quantity)
+    || item.quantity <= 0
+  ) throw new Error('Invalid legacy sale cost');
+  const cost = Math.floor(item.price_cents / 2) * item.quantity;
+  if (!Number.isSafeInteger(cost)) throw new Error('Invalid legacy sale cost');
+  return { cost, estimated: true };
+}
+
+function itemCategory(item: SaleItem): string {
+  return item.category?.trim() || 'Sin categoría';
 }
 
 export async function getMarginSummary(): Promise<MarginSummary> {
-  const [sales, products] = await Promise.all([getSales(), getProducts()]);
-  const productsById = new Map(products.map((p) => [p.id, p]));
+  const sales = await getSales();
 
   const now = new Date();
   const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -133,7 +149,7 @@ export async function getMarginSummary(): Promise<MarginSummary> {
     let saleRevenue = 0;
     let saleCost = 0;
     for (const item of sale.items || []) {
-      const { cost, estimated } = itemCost(item, productsById);
+      const { cost, estimated } = itemCost(item);
       saleRevenue += item.subtotal;
       saleCost += cost;
       if (estimated) estimatedCostCount += 1;
@@ -161,8 +177,7 @@ export async function getMarginSummary(): Promise<MarginSummary> {
 
 export async function getMarginDaily(days: number = 30): Promise<MarginDaily[]> {
   const safeDays = Math.min(Math.max(Math.floor(days), 1), 365);
-  const [sales, products] = await Promise.all([getSales(), getProducts()]);
-  const productsById = new Map(products.map((p) => [p.id, p]));
+  const sales = await getSales();
   const result: MarginDaily[] = [];
   const now = new Date();
 
@@ -181,7 +196,7 @@ export async function getMarginDaily(days: number = 30): Promise<MarginDaily[]> 
       const saleDate = getSaleDate(sale);
       if (saleDate >= date && saleDate < nextDate) {
         for (const item of sale.items || []) {
-          const { cost: itemC } = itemCost(item, productsById);
+          const { cost: itemC } = itemCost(item);
           revenue += item.subtotal;
           cost += itemC;
         }
@@ -208,8 +223,7 @@ export async function getTopProductsByMargin(
   sortBy: 'absolute' | 'percent' = 'absolute'
 ): Promise<ProductMargin[]> {
   const safeLimit = Math.min(Math.max(Math.floor(limit), 1), 100);
-  const [sales, products] = await Promise.all([getSales(), getProducts()]);
-  const productsById = new Map(products.map((p) => [p.id, p]));
+  const sales = await getSales();
 
   const totals = new Map<
     string,
@@ -218,14 +232,12 @@ export async function getTopProductsByMargin(
 
   for (const sale of sales) {
     for (const item of sale.items || []) {
-      const product = productsById.get(item.product_id);
-      if (!product) continue;
-      const { cost, estimated } = itemCost(item, productsById);
+      const { cost, estimated } = itemCost(item);
       const existing = totals.get(item.product_id) || {
         revenue: 0,
         cost: 0,
         units: 0,
-        name: product.name,
+        name: item.product_name,
         isEstimated: false,
       };
       existing.revenue += item.subtotal;
@@ -264,17 +276,14 @@ export async function getTopProductsByMargin(
 }
 
 export async function getMarginByCategory(): Promise<CategoryMargin[]> {
-  const [sales, products] = await Promise.all([getSales(), getProducts()]);
-  const productsById = new Map(products.map((p) => [p.id, p]));
+  const sales = await getSales();
 
   const buckets = new Map<string, { revenue: number; cost: number }>();
 
   for (const sale of sales) {
     for (const item of sale.items || []) {
-      const product = productsById.get(item.product_id);
-      if (!product) continue;
-      const category = product.category || 'Sin categoría';
-      const { cost } = itemCost(item, productsById);
+      const category = itemCategory(item);
+      const { cost } = itemCost(item);
       const existing = buckets.get(category) || { revenue: 0, cost: 0 };
       existing.revenue += item.subtotal;
       existing.cost += cost;

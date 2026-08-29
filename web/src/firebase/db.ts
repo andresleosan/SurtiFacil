@@ -42,6 +42,11 @@ export interface SaleItem {
   quantity: number;
   price_cents: number;
   subtotal: number; // quantity * price_cents
+  unit_cost_cents?: number;
+  cost_subtotal_cents?: number;
+  cost_source?: 'purchase' | 'fallback_price';
+  cost_is_estimated?: boolean;
+  category?: string;
 }
 
 /**
@@ -54,6 +59,10 @@ export interface Sale {
   payment_method: "cash" | "card" | "other";
   items: SaleItem[];
   createdAt?: any;
+  schema_version?: 2;
+  created_by_uid?: string;
+  created_by_role?: UserRole;
+  total_cost_cents?: number;
 }
 
 export type OrderStatus = 'draft' | 'ordered' | 'partial' | 'received' | 'cancelled';

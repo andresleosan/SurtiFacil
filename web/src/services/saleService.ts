@@ -118,17 +118,39 @@ function createMockSale(
     }
   }
 
-  // Si pasó validación, proceder a actualizar
-  const total = cartItems.reduce((sum, item) => sum + item.subtotal, 0);
+  const snapshotItems: SaleItem[] = cartItems.map((item) => {
+    const product = mockProducts.find((candidate) => candidate.id === item.product_id)!;
+    const hasCost = Number.isSafeInteger(product.last_cost_cents) && product.last_cost_cents! >= 0;
+    const unitCost = hasCost ? product.last_cost_cents! : Math.floor(product.price_cents / 2);
+    const costSource = hasCost ? (product.last_cost_source || 'purchase') : 'fallback_price';
+    return {
+      product_id: product.id,
+      product_name: product.name,
+      quantity: item.quantity,
+      price_cents: product.price_cents,
+      subtotal: product.price_cents * item.quantity,
+      unit_cost_cents: unitCost,
+      cost_subtotal_cents: unitCost * item.quantity,
+      cost_source: costSource,
+      cost_is_estimated: costSource === 'fallback_price',
+      category: product.category?.trim() || 'Sin categoría',
+    };
+  });
+  const total = snapshotItems.reduce((sum, item) => sum + item.subtotal, 0);
+  const totalCost = snapshotItems.reduce((sum, item) => sum + (item.cost_subtotal_cents || 0), 0);
   const saleId = `sale_${Date.now()}`;
 
   const newSale: Sale = {
     id: saleId,
     date: new Date(),
     total,
+    total_cost_cents: totalCost,
     payment_method: paymentMethod,
-    items: cartItems,
+    items: snapshotItems,
     createdAt: new Date(),
+    schema_version: 2,
+    created_by_uid: 'mock-user',
+    created_by_role: 'cashier',
   };
 
   // Actualizar stock en datos mock

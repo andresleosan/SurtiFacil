@@ -27,12 +27,18 @@ function createAnthropicRateLimiter() {
 
 function createAnthropicHandler({
   kind,
+  enabled,
   apiKey,
+  model,
   fetchImpl = globalThis.fetch,
   requestTimeoutMs = ANTHROPIC_REQUEST_TIMEOUT_MS,
 }) {
   return async function analyze(req, res) {
-    if (!apiKey) return sendApiError(res, 503, 'notConfigured');
+    const configuredApiKey = apiKey?.trim();
+    const configuredModel = model?.trim();
+    if (enabled !== true || !configuredApiKey || !configuredModel) {
+      return sendApiError(res, 503, 'notConfigured');
+    }
 
     const value = kind === 'image' ? req.body?.imageBase64 : req.body?.transcribedText;
     const maxLength = kind === 'image' ? MAX_IMAGE_BASE64_LENGTH : MAX_AUDIO_TEXT_LENGTH;
@@ -64,12 +70,12 @@ Responde SOLO con el JSON.`;
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'x-api-key': apiKey,
+          'x-api-key': configuredApiKey,
           'anthropic-version': '2023-06-01',
         },
         signal: controller.signal,
         body: JSON.stringify({
-          model: 'claude-sonnet-4-20250514',
+          model: configuredModel,
           max_tokens: 1024,
           messages: [{ role: 'user', content }],
         }),
@@ -94,7 +100,9 @@ Responde SOLO con el JSON.`;
 function createAnthropicRouter({
   admin,
   db,
+  enabled = false,
   apiKey,
+  model,
   fetchImpl,
   requestTimeoutMs,
   rateLimiter = createAnthropicRateLimiter(),
@@ -104,8 +112,8 @@ function createAnthropicRouter({
   const limitImage = createAuthenticatedRateLimitMiddleware({ route: 'anthropic-image', rateLimiter });
   const limitAudio = createAuthenticatedRateLimitMiddleware({ route: 'anthropic-audio', rateLimiter });
 
-  router.post('/analyze-image', requireAdminRole, limitImage, createAnthropicHandler({ kind: 'image', apiKey, fetchImpl, requestTimeoutMs }));
-  router.post('/analyze-audio', requireAdminRole, limitAudio, createAnthropicHandler({ kind: 'audio', apiKey, fetchImpl, requestTimeoutMs }));
+  router.post('/analyze-image', requireAdminRole, limitImage, createAnthropicHandler({ kind: 'image', enabled, apiKey, model, fetchImpl, requestTimeoutMs }));
+  router.post('/analyze-audio', requireAdminRole, limitAudio, createAnthropicHandler({ kind: 'audio', enabled, apiKey, model, fetchImpl, requestTimeoutMs }));
   return router;
 }
 

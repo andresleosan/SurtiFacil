@@ -37,8 +37,8 @@ describe('Firestore authorization rules', () => {
 
       expect(allows.length, `${collection} should define operational permissions`).toBeGreaterThan(0);
       expect(
-        allows.every((allow) => /isActiveUser\(\)|isManagerUser\(\)|isAdminUser\(\)/.test(allow)),
-        `${collection} has an allow expression without isActiveUser(): ${allows.join(' | ')}`,
+        allows.every((allow) => /isActiveUser\(\)|isManagerUser\(\)|isAdminUser\(\)|if false/.test(allow)),
+        `${collection} has an allow expression without an active-role gate or an explicit deny: ${allows.join(' | ')}`,
       ).toBe(true);
     }
   });
@@ -56,9 +56,12 @@ describe('Firestore authorization rules', () => {
 
     const sales = getCollectionBlock('sales');
     expect(sales).toMatch(/allow create: if isActiveUser\(\) && false;/);
-    expect(sales).toMatch(/allow update, delete: if isAdminUser\(\);/);
+    expect(sales).toMatch(/allow update, delete: if false;/);
     expect(rules).toMatch(/payment_method in \['cash', 'card', 'other'\]/);
     expect(rules).toMatch(/items\.size\(\) > 0/);
+    expect(rules).toMatch(/schema_version == 2/);
+    expect(rules).toMatch(/unit_cost_cents is int/);
+    expect(rules).toMatch(/created_by_uid is string/);
 
     const roles = getCollectionBlock('roles');
     expect(roles).toMatch(/allow write: if isAdminUser\(\);/);

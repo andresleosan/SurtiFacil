@@ -36,6 +36,39 @@ describe('saleService', () => {
     expect(getDocs).not.toHaveBeenCalled();
   });
 
+  it('crea ventas mock con el mismo snapshot financiero v2', async () => {
+    const product = mockProducts[0];
+    const stockBefore = product.stock;
+    try {
+      const saleId = await createSale([{
+        product_id: product.id,
+        product_name: 'forged',
+        quantity: 1,
+        price_cents: 1,
+        subtotal: 1,
+      }], 'cash');
+      const sale = (await getSales()).find((candidate) => candidate.id === saleId);
+      const expectedCost = product.last_cost_cents ?? Math.floor(product.price_cents / 2);
+
+      expect(sale).toMatchObject({
+        schema_version: 2,
+        created_by_uid: 'mock-user',
+        created_by_role: 'cashier',
+        total: product.price_cents,
+        total_cost_cents: expectedCost,
+      });
+      expect(sale?.items[0]).toMatchObject({
+        product_id: product.id,
+        product_name: product.name,
+        price_cents: product.price_cents,
+        unit_cost_cents: expectedCost,
+        cost_subtotal_cents: expectedCost,
+      });
+    } finally {
+      product.stock = stockBefore;
+    }
+  });
+
   it('no usa productos mock cuando el flag explícito está desactivado', async () => {
     vi.stubEnv('VITE_USE_MOCK_DATA', 'false');
     await expect(getProducts()).rejects.toThrow('Error al cargar productos');

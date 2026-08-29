@@ -8,13 +8,15 @@ function resolveTimeoutMs(timeoutMs) {
 
 function createWhatsAppMessageSender({
   fetchImpl = DEFAULT_FETCH,
+  enabled = false,
   token = process.env.WHATSAPP_API_TOKEN,
   phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID,
   timeoutMs = process.env.WHATSAPP_REQUEST_TIMEOUT_MS,
   logError = () => undefined,
 } = {}) {
   return async function sendWhatsAppMessage(phoneNumber, message) {
-    if (typeof token !== 'string' || token.length === 0
+    if (enabled !== true
+      || typeof token !== 'string' || token.trim().length === 0
       || typeof phoneNumberId !== 'string' || phoneNumberId.length === 0
       || typeof fetchImpl !== 'function') {
       logError('WhatsApp credentials');
@@ -30,7 +32,7 @@ function createWhatsAppMessageSender({
         {
           method: 'POST',
           headers: {
-            Authorization: `Bearer ${token}`,
+            Authorization: `Bearer ${token.trim()}`,
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({

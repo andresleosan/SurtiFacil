@@ -1,10 +1,20 @@
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 const test = require('node:test');
 
 const { createWhatsAppMessageSender, DEFAULT_FETCH } = require('../whatsappProvider');
 
+const serverSource = fs.readFileSync(path.join(__dirname, '..', 'whatsapp-webhook.js'), 'utf8');
+
+test('server keeps WhatsApp provider and automatic responses behind the explicit feature flag', () => {
+  assert.match(serverSource, /enabled: process\.env\.WHATSAPP_ENABLED === 'true'/);
+  assert.match(serverSource, /isAutoResponseEnabled: \(\) => process\.env\.WHATSAPP_ENABLED === 'true'/);
+});
+
 test('default sender uses an available Node 16-compatible fetch without injection', () => {
   const sender = createWhatsAppMessageSender({
+    enabled: true,
     token: 'backend-token',
     phoneNumberId: 'phone-id',
   });
@@ -13,12 +23,32 @@ test('default sender uses an available Node 16-compatible fetch without injectio
   assert.equal(typeof sender, 'function');
 });
 
+test('does not call the paid provider while WhatsApp is disabled', async () => {
+  let calls = 0;
+  const sendWhatsAppMessage = createWhatsAppMessageSender({
+    enabled: false,
+    fetchImpl: async () => {
+      calls += 1;
+      throw new Error('provider must not be called');
+    },
+    token: 'configured-token',
+    phoneNumberId: 'configured-phone-id',
+  });
+
+  await assert.rejects(
+    sendWhatsAppMessage('5551234567', 'Hola'),
+    (error) => error.message === 'WhatsApp provider request failed',
+  );
+  assert.equal(calls, 0);
+});
+
 test('converts a provider timeout into a generic failure and static log', async () => {
   const logs = [];
   const fetchImpl = (_url, { signal }) => new Promise((_resolve, reject) => {
     signal.addEventListener('abort', () => reject(new Error('provider token secret')), { once: true });
   });
   const sendWhatsAppMessage = createWhatsAppMessageSender({
+    enabled: true,
     fetchImpl,
     token: 'backend-token',
     phoneNumberId: 'phone-id',
@@ -36,6 +66,7 @@ test('converts a provider timeout into a generic failure and static log', async 
 test('converts provider failures into a generic error without exposing the payload', async () => {
   const logs = [];
   const sendWhatsAppMessage = createWhatsAppMessageSender({
+    enabled: true,
     fetchImpl: async () => ({
       ok: false,
       json: async () => ({ error: { message: 'provider token secret' } }),
@@ -56,6 +87,7 @@ test('preserves the successful WhatsApp provider response contract', async () =>
   const responseData = { messages: [{ id: 'wamid-1' }] };
   let request;
   const sendWhatsAppMessage = createWhatsAppMessageSender({
+    enabled: true,
     fetchImpl: async (url, options) => {
       request = { url, options };
       return { ok: true, json: async () => responseData };

@@ -118,9 +118,15 @@ const activeUserFields = (role) => ({
 function saleItemFields(overrides = {}) {
   return {
     product_id: { stringValue: 'rules-product' },
+    product_name: { stringValue: 'Rules Product' },
     quantity: { integerValue: '1' },
     price_cents: { integerValue: '100' },
     subtotal: { integerValue: '100' },
+    unit_cost_cents: { integerValue: '40' },
+    cost_subtotal_cents: { integerValue: '40' },
+    cost_source: { stringValue: 'purchase' },
+    cost_is_estimated: { booleanValue: false },
+    category: { stringValue: 'Rules Category' },
     ...overrides,
   };
 }
@@ -128,10 +134,14 @@ function saleItemFields(overrides = {}) {
 function saleFields(overrides = {}) {
   return {
     date: { timestampValue: '2026-08-04T00:00:00Z' },
+    createdAt: { timestampValue: '2026-08-04T00:00:00Z' },
+    schema_version: { integerValue: '2' },
+    created_by_uid: { stringValue: 'rules-cashier' },
+    created_by_role: { stringValue: 'cashier' },
     total: { integerValue: '100' },
+    total_cost_cents: { integerValue: '40' },
     payment_method: { stringValue: 'cash' },
     items: { arrayValue: { values: [{ mapValue: { fields: saleItemFields() } }] } },
-    createdAt: { timestampValue: '2026-08-04T00:00:00Z' },
     ...overrides,
   };
 }
@@ -204,6 +214,9 @@ function saleFields(overrides = {}) {
     expectStatus(`${user.uid} cannot create direct sales`, await create('sales', `rules-sale-${user.uid}`, saleFields(), user.idToken), 403);
     expectStatus(`${user.uid} can read roles`, await read('roles', 'rules-role', user.idToken), 200);
   }
+
+  expectStatus('admin cannot mutate an immutable sale', await update('sales', 'rules-sale', { total: { integerValue: '1' } }, admin.idToken), 403);
+  expectStatus('admin cannot delete an immutable sale', await remove('sales', 'rules-sale', admin.idToken), 403);
 
   expectStatus('cashier cannot decrement product stock directly', await update('products', 'rules-product', { stock: { integerValue: '7' } }, cashier.idToken), 403);
   expectStatus('cashier cannot increase product stock', await update('products', 'rules-product', { stock: { integerValue: '8' } }, cashier.idToken), 403);

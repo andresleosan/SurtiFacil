@@ -174,8 +174,7 @@ export async function getSalesByCategory(): Promise<SalesByCategory[]> {
 
   sales.forEach(sale => {
     sale.items?.forEach(item => {
-      // Intentar obtener categoría del nombre del producto o usar "Sin categoría"
-      const category = 'General';
+      const category = item.category?.trim() || 'Sin categoría';
       const current = categoryMap.get(category) || 0;
       categoryMap.set(category, current + item.subtotal);
       totalRevenue += item.subtotal;

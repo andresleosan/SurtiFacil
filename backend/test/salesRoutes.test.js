@@ -143,7 +143,9 @@ test('sales endpoint rejects forged totals and extra client-owned sale fields', 
 test('sales endpoint calculates the sale from authoritative product data and returns only its ID', async () => {
   const dependencies = createSalesDependencies({
     products: {
-      p1: { name: 'Arroz', price_cents: 250, stock: 4 },
+      p1: {
+        name: 'Arroz', price_cents: 250, stock: 4, category: 'Abarrotes', last_cost_cents: 100,
+      },
       p2: { name: 'Leche', price_cents: 375, stock: 8 },
     },
   });
@@ -164,17 +166,104 @@ test('sales endpoint calculates the sale from authoritative product data and ret
       data: {
         date: 'server-timestamp',
         createdAt: 'server-timestamp',
+        schema_version: 2,
+        created_by_uid: 'cashier-1',
+        created_by_role: 'cashier',
         total: 875,
+        total_cost_cents: 387,
         payment_method: 'cash',
         items: [
-          { product_id: 'p1', product_name: 'Arroz', quantity: 2, price_cents: 250, subtotal: 500 },
-          { product_id: 'p2', product_name: 'Leche', quantity: 1, price_cents: 375, subtotal: 375 },
+          {
+            product_id: 'p1',
+            product_name: 'Arroz',
+            quantity: 2,
+            price_cents: 250,
+            subtotal: 500,
+            unit_cost_cents: 100,
+            cost_subtotal_cents: 200,
+            cost_source: 'purchase',
+            cost_is_estimated: false,
+            category: 'Abarrotes',
+          },
+          {
+            product_id: 'p2',
+            product_name: 'Leche',
+            quantity: 1,
+            price_cents: 375,
+            subtotal: 375,
+            unit_cost_cents: 187,
+            cost_subtotal_cents: 187,
+            cost_source: 'fallback_price',
+            cost_is_estimated: true,
+            category: 'Sin categoría',
+          },
         ],
       },
     },
     { type: 'update', id: 'p1', data: { stock: 2 } },
     { type: 'update', id: 'p2', data: { stock: 7 } },
   ]);
+});
+
+test('sales endpoint rejects invalid cost snapshots without writing partial financial data', async () => {
+  const dependencies = createSalesDependencies({
+    products: {
+      p1: { name: 'Arroz', price_cents: 250, stock: 4, last_cost_cents: -1 },
+    },
+  });
+  const result = await requestRoute(routerFor(dependencies), {
+    headers: { Authorization: 'Bearer cashierToken' },
+    body: { items: [{ product_id: 'p1', quantity: 1 }], payment_method: 'cash' },
+  });
+
+  assert.equal(result.status, 500);
+  assert.deepEqual(result.body, { error: 'Error interno del servidor' });
+  assert.equal(dependencies.writes.length, 0);
+});
+
+test('sales endpoint preserves a zero unit cost as an exact non-estimated snapshot', async () => {
+  const dependencies = createSalesDependencies({
+    products: {
+      p1: { name: 'Muestra', price_cents: 250, stock: 4, last_cost_cents: 0 },
+    },
+  });
+  const result = await requestRoute(routerFor(dependencies), {
+    headers: { Authorization: 'Bearer cashierToken' },
+    body: { items: [{ product_id: 'p1', quantity: 2 }], payment_method: 'cash' },
+  });
+
+  assert.equal(result.status, 201);
+  assert.equal(dependencies.writes[0].data.total_cost_cents, 0);
+  assert.deepEqual(dependencies.writes[0].data.items[0], {
+    product_id: 'p1',
+    product_name: 'Muestra',
+    quantity: 2,
+    price_cents: 250,
+    subtotal: 500,
+    unit_cost_cents: 0,
+    cost_subtotal_cents: 0,
+    cost_source: 'purchase',
+    cost_is_estimated: false,
+    category: 'Sin categoría',
+  });
+});
+
+test('sales endpoint rejects cost multiplication outside the safe integer range', async () => {
+  const dependencies = createSalesDependencies({
+    products: {
+      p1: {
+        name: 'Costo extremo', price_cents: 1, stock: 2, last_cost_cents: Number.MAX_SAFE_INTEGER,
+      },
+    },
+  });
+  const result = await requestRoute(routerFor(dependencies), {
+    headers: { Authorization: 'Bearer cashierToken' },
+    body: { items: [{ product_id: 'p1', quantity: 2 }], payment_method: 'cash' },
+  });
+
+  assert.equal(result.status, 500);
+  assert.deepEqual(result.body, { error: 'Error interno del servidor' });
+  assert.equal(dependencies.writes.length, 0);
 });
 
 test('sales endpoint returns generic errors for missing products and insufficient stock', async () => {

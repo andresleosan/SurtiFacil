@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import {
   getSalesSummary,
   getDailySales,
+  getSalesByCategory,
   getTopProducts,
   formatCurrency,
   formatNumber,
@@ -203,6 +204,36 @@ describe('reportService', () => {
       mockedGetSales.mockResolvedValue([]);
       const top = await getTopProducts(10);
       expect(top).toHaveLength(0);
+    });
+  });
+
+  describe('getSalesByCategory', () => {
+    it('usa la categoria historica del item y no una categoria actual de producto', async () => {
+      mockedGetSales.mockResolvedValue([makeSale(0, 1500, [
+        {
+          product_id: 'p1', product_name: 'Producto A', quantity: 1, price_cents: 1000,
+          subtotal: 1000, category: 'Abarrotes',
+        },
+        {
+          product_id: 'p2', product_name: 'Producto B', quantity: 1, price_cents: 500,
+          subtotal: 500, category: 'Bebidas',
+        },
+      ])]);
+
+      await expect(getSalesByCategory()).resolves.toEqual([
+        { category: 'Abarrotes', total: 1000, percentage: 1000 / 1500 * 100 },
+        { category: 'Bebidas', total: 500, percentage: 500 / 1500 * 100 },
+      ]);
+    });
+
+    it('clasifica items legacy sin categoria como desconocidos', async () => {
+      mockedGetSales.mockResolvedValue([makeSale(0, 100, [
+        { product_id: 'legacy', product_name: 'Legacy', quantity: 1, price_cents: 100, subtotal: 100 },
+      ])]);
+
+      await expect(getSalesByCategory()).resolves.toEqual([
+        { category: 'Sin categoría', total: 100, percentage: 100 },
+      ]);
     });
   });
 });

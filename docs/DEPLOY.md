@@ -11,7 +11,7 @@
 
 3. **Variables de entorno** configuradas:
    - Variables de build de producción para `web/` con `VITE_FIREBASE_*` completos y `VITE_BACKEND_URL` apuntando a la URL HTTPS pública del backend Express (no `localhost`)
-   - Entorno separado del backend con service account, `WHATSAPP_*`, `WEBHOOK_VERIFY_TOKEN`, `FRONTEND_ORIGINS` y `ANTHROPIC_API_KEY` cuando correspondan
+   - Entorno separado del backend con identidad de servicio/ADC, `WHATSAPP_*`, `WEBHOOK_VERIFY_TOKEN`, `FRONTEND_ORIGINS` y Anthropic solo cuando correspondan
 
 `FRONTEND_ORIGINS` es una lista separada por comas de orígenes permitidos por CORS. En producción debe contener únicamente orígenes HTTPS, por ejemplo `https://smartmarket-b37ce.web.app` y, si aplica, `https://app.example.com`. No configures `*`: el frontend usa autenticación cross-origin y el backend lo ignora de forma segura.
 
@@ -85,11 +85,23 @@ El frontend en producción solo funcionará contra el backend configurado en
 
 Antes de declarar la release operativa:
 
-1. Desplegar `backend/whatsapp-webhook.js` en un servicio Node/Express separado.
-2. Configurar allí el service account y las variables backend; nunca copiarlas al bundle frontend.
-3. Configurar `VITE_BACKEND_URL` en el entorno de build del frontend con la URL pública HTTPS de ese servicio.
-4. Verificar `GET /api/health` y el webhook HMAC desde el objetivo desplegado.
-5. Conservar el artefacto anterior y su procedimiento de rollback del servicio backend.
+1. Construir el contenedor reproducible desde la raíz con `npm run build:backend-container`.
+2. Desplegarlo en Cloud Run con `min-instances=0`, primero como revisión de staging sin tráfico.
+3. Asignar una identidad de servicio con mínimo privilegio. Firebase Admin usa Application Default Credentials; no copies `serviceAccountKey.json` dentro de la imagen.
+4. Configurar los secretos backend en el gestor de secretos; nunca copiarlos al bundle frontend.
+5. Mantener `ANTHROPIC_ENABLED=false` y `WHATSAPP_ENABLED=false` hasta aprobar modelos, presupuestos y credenciales. Si Anthropic se habilita, `ANTHROPIC_MODEL` y `ANTHROPIC_API_KEY` son obligatorios.
+6. Configurar `VITE_BACKEND_URL` en el entorno de build del frontend con la URL pública HTTPS de ese servicio. El build de producción falla si falta, usa HTTP o apunta a localhost.
+7. Verificar `GET /api/health`, autenticación, CORS y webhook HMAC desde el objetivo desplegado.
+8. Conservar la revisión anterior y probar su procedimiento de rollback.
+
+Para desarrollo local puede configurarse explícitamente `FIREBASE_SERVICE_ACCOUNT_PATH` con una
+ruta a un JSON ignorado y almacenado fuera del repositorio. Si no se configura, el backend usa ADC.
+No existe fallback automático a `./serviceAccountKey.json`.
+
+Para pruebas locales sin llaves JSON puede usarse el modo emulador explícito con
+`FIREBASE_EMULATOR_MODE=true`, `FIREBASE_PROJECT_ID`, `FIRESTORE_EMULATOR_HOST` y
+`FIREBASE_AUTH_EMULATOR_HOST`. Este modo exige ambos emuladores configurados y solo se acepta con
+`NODE_ENV=development` o `test`; Cloud Run debe usar ADC y nunca el modo emulador.
 
 ---
 

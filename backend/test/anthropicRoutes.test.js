@@ -39,7 +39,9 @@ function createDependencies({ role = 'admin', active = true, fetchImpl } = {}) {
   return {
     admin,
     db,
+    enabled: true,
     apiKey: 'anthropic-test-key',
+    model: 'claude-sonnet-5',
     fetchImpl,
     rateLimiter: { consume: () => ({ allowed: true, retryAfterMs: 0 }) },
   };
@@ -63,10 +65,41 @@ test('Anthropic routes return generic 401/403 responses at request level', async
   assert.deepEqual(cashier.body, { error: 'No autorizado' });
 });
 
-test('Anthropic routes apply a bounded per-user rate limit with Retry-After', async () => {
+test('Anthropic routes degrade with 503 when the paid integration is disabled or incomplete', async () => {
   let calls = 0;
   const fetchImpl = async () => {
     calls += 1;
+    throw new Error('provider must not be called');
+  };
+  const disabledDependencies = createDependencies({ fetchImpl });
+  disabledDependencies.enabled = false;
+  const disabled = await requestRoute(createAnthropicRouter(disabledDependencies), {
+    path: '/analyze-image',
+    headers: { Authorization: 'Bearer valid-token' },
+    body: { imageBase64: 'image' },
+  });
+
+  const missingModelDependencies = createDependencies({ fetchImpl });
+  missingModelDependencies.model = '';
+  const missingModel = await requestRoute(createAnthropicRouter(missingModelDependencies), {
+    path: '/analyze-audio',
+    headers: { Authorization: 'Bearer valid-token' },
+    body: { transcribedText: 'leche' },
+  });
+
+  assert.equal(disabled.status, 503);
+  assert.deepEqual(disabled.body, { error: 'Servicio no configurado' });
+  assert.equal(missingModel.status, 503);
+  assert.deepEqual(missingModel.body, { error: 'Servicio no configurado' });
+  assert.equal(calls, 0);
+});
+
+test('Anthropic routes apply a bounded per-user rate limit with Retry-After', async () => {
+  let calls = 0;
+  let providerRequest;
+  const fetchImpl = async (_url, options) => {
+    calls += 1;
+    providerRequest = JSON.parse(options.body);
     return new Response(JSON.stringify({ content: [{ text: '{"nombre":"Arroz"}' }] }), { status: 200 });
   };
   let consumed = 0;
@@ -95,6 +128,7 @@ test('Anthropic routes apply a bounded per-user rate limit with Retry-After', as
   assert.equal(second.headers.get('Retry-After'), '3');
   assert.deepEqual(second.body, { error: 'Demasiadas solicitudes' });
   assert.equal(calls, 1);
+  assert.equal(providerRequest.model, 'claude-sonnet-5');
 });
 
 test('Anthropic routes reject oversized image and audio inputs before calling the provider', async () => {

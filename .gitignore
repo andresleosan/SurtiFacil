@@ -40,7 +40,6 @@ coverage/
 qa/reports/
 playwright-report/
 test-results/
-.playwright-mcp/
 
 # Editor / sistema operativo
 .DS_Store
@@ -54,11 +53,3 @@ Thumbs.db
 
 # Backups que dejan los scripts de la agencia al actualizar
 *.bak-*
-
-# Herramientas de agencia / opencode — config local, no del proyecto SurtiFacil
-.agencia-version
-opencode.json
-.opencode/
-
-# Knowledge graph de graphify — salida local, se regenera
-graphify-out/

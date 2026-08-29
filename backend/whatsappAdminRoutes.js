@@ -80,6 +80,7 @@ function createFirebaseActiveRoleMiddleware({ admin, db, roles = ['admin', 'mana
       }
 
       req.user = decoded;
+      req.authContext = { uid: decoded.uid, role: user.role };
       return next();
     } catch {
       console.error(getSafeApiLogMessage('WhatsApp authorization'));

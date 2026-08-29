@@ -12,13 +12,11 @@ import { Product, Sale } from '../firebase/db';
 
 vi.mock('../services/saleService', () => ({
   getSales: vi.fn(),
-  getProducts: vi.fn(),
 }));
 
-import { getSales, getProducts } from '../services/saleService';
+import { getSales } from '../services/saleService';
 
 const mockedGetSales = vi.mocked(getSales);
-const mockedGetProducts = vi.mocked(getProducts);
 
 const makeSale = (daysAgo: number, total: number, items: any[]): Sale => {
   const date = new Date();
@@ -79,7 +77,6 @@ describe('marginService - getMarginSummary', () => {
   it('agrega ventas correctamente por rango (hoy/semana/mes)', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(2026, 7, 26, 12, 0, 0));
-    const products = [makeProduct('p1', 1000, 400), makeProduct('p2', 500, 200)];
     const items = [
       { product_id: 'p1', product_name: 'P1', quantity: 2, price_cents: 1000, subtotal: 2000 },
       { product_id: 'p2', product_name: 'P2', quantity: 3, price_cents: 500, subtotal: 1500 },
@@ -90,19 +87,18 @@ describe('marginService - getMarginSummary', () => {
       makeSale(60, 3500, items),
     ];
     mockedGetSales.mockResolvedValue(sales);
-    mockedGetProducts.mockResolvedValue(products);
 
     try {
       const summary = await getMarginSummary();
 
-      const expectedItemCost = 2 * 400 + 3 * 200;
+      const expectedItemCost = 2 * 500 + 3 * 250;
       expect(summary.today.revenue_cents).toBe(3500);
       expect(summary.today.cost_cents).toBe(expectedItemCost);
       expect(summary.today.margin_cents).toBe(3500 - expectedItemCost);
       expect(summary.thisWeek.revenue_cents).toBe(7000);
       expect(summary.thisWeek.cost_cents).toBe(expectedItemCost * 2);
       expect(summary.thisMonth.revenue_cents).toBe(7000);
-      expect(summary.estimatedCostCount).toBe(0);
+      expect(summary.estimatedCostCount).toBe(4);
     } finally {
       vi.useRealTimers();
     }
@@ -110,7 +106,6 @@ describe('marginService - getMarginSummary', () => {
 
   it('retorna ceros cuando no hay ventas', async () => {
     mockedGetSales.mockResolvedValue([]);
-    mockedGetProducts.mockResolvedValue([]);
 
     const summary = await getMarginSummary();
 
@@ -124,18 +119,38 @@ describe('marginService - getMarginSummary', () => {
   });
 
   it('cuenta productos que usan fallback price_cents/2', async () => {
-    const products = [makeProduct('p1', 1000), makeProduct('p2', 500, 200)];
     const items = [
       { product_id: 'p1', product_name: 'P1', quantity: 1, price_cents: 1000, subtotal: 1000 },
       { product_id: 'p2', product_name: 'P2', quantity: 1, price_cents: 500, subtotal: 500 },
     ];
     mockedGetSales.mockResolvedValue([makeSale(0, 1500, items)]);
-    mockedGetProducts.mockResolvedValue(products);
 
     const summary = await getMarginSummary();
 
-    expect(summary.estimatedCostCount).toBe(1);
-    expect(summary.today.cost_cents).toBe(500 + 200);
+    expect(summary.estimatedCostCount).toBe(2);
+    expect(summary.today.cost_cents).toBe(500 + 250);
+  });
+
+  it('usa el snapshot de costo aunque el precio historico implique otro fallback', async () => {
+    const items = [{
+      product_id: 'p1',
+      product_name: 'P1',
+      quantity: 2,
+      price_cents: 1000,
+      subtotal: 2000,
+      unit_cost_cents: 300,
+      cost_subtotal_cents: 600,
+      cost_source: 'purchase' as const,
+      cost_is_estimated: false,
+      category: 'Historica',
+    }];
+    mockedGetSales.mockResolvedValue([makeSale(0, 2000, items)]);
+
+    const summary = await getMarginSummary();
+
+    expect(summary.today.cost_cents).toBe(600);
+    expect(summary.today.margin_cents).toBe(1400);
+    expect(summary.estimatedCostCount).toBe(0);
   });
 });
 
@@ -146,7 +161,6 @@ describe('marginService - getMarginDaily', () => {
 
   it('retorna 7 puntos en orden ascendente cuando days=7', async () => {
     mockedGetSales.mockResolvedValue([]);
-    mockedGetProducts.mockResolvedValue([]);
 
     const daily = await getMarginDaily(7);
 
@@ -156,7 +170,6 @@ describe('marginService - getMarginDaily', () => {
 
   it('retorna 30 puntos cuando days=30', async () => {
     mockedGetSales.mockResolvedValue([]);
-    mockedGetProducts.mockResolvedValue([]);
 
     const daily = await getMarginDaily(30);
 
@@ -165,7 +178,6 @@ describe('marginService - getMarginDaily', () => {
 
   it('retorna 30 puntos por defecto', async () => {
     mockedGetSales.mockResolvedValue([]);
-    mockedGetProducts.mockResolvedValue([]);
 
     const daily = await getMarginDaily();
 
@@ -173,18 +185,16 @@ describe('marginService - getMarginDaily', () => {
   });
 
   it('calcula margen diario correctamente', async () => {
-    const products = [makeProduct('p1', 1000, 400)];
     const items = [
       { product_id: 'p1', product_name: 'P1', quantity: 5, price_cents: 1000, subtotal: 5000 },
     ];
     mockedGetSales.mockResolvedValue([makeSale(0, 5000, items)]);
-    mockedGetProducts.mockResolvedValue(products);
 
     const daily = await getMarginDaily(7);
 
     expect(daily[6].revenue_cents).toBe(5000);
-    expect(daily[6].cost_cents).toBe(5 * 400);
-    expect(daily[6].margin_cents).toBe(5000 - 5 * 400);
+    expect(daily[6].cost_cents).toBe(5 * 500);
+    expect(daily[6].margin_cents).toBe(5000 - 5 * 500);
   });
 });
 
@@ -194,11 +204,6 @@ describe('marginService - getTopProductsByMargin', () => {
   });
 
   it('ordena por margin_cents desc cuando sortBy="absolute"', async () => {
-    const products = [
-      makeProduct('p1', 1000, 200),
-      makeProduct('p2', 2000, 800),
-      makeProduct('p3', 500, 100),
-    ];
     const itemsA = [
       { product_id: 'p1', product_name: 'P1', quantity: 5, price_cents: 1000, subtotal: 5000 },
     ];
@@ -213,7 +218,6 @@ describe('marginService - getTopProductsByMargin', () => {
       makeSale(1, 10000, itemsB),
       makeSale(2, 2500, itemsC),
     ]);
-    mockedGetProducts.mockResolvedValue(products);
 
     const top = await getTopProductsByMargin(10, 'absolute');
 
@@ -225,11 +229,6 @@ describe('marginService - getTopProductsByMargin', () => {
   });
 
   it('filtra productos con revenue_cents < 1000 cuando sortBy="percent"', async () => {
-    const products = [
-      makeProduct('p1', 1000, 100),
-      makeProduct('p2', 1000, 100),
-      makeProduct('p3', 1000, 100),
-    ];
     const itemsBig = [
       { product_id: 'p1', product_name: 'P1', quantity: 5, price_cents: 1000, subtotal: 5000 },
     ];
@@ -244,7 +243,6 @@ describe('marginService - getTopProductsByMargin', () => {
       makeSale(1, 500, itemsTinyA),
       makeSale(2, 500, itemsTinyB),
     ]);
-    mockedGetProducts.mockResolvedValue(products);
 
     const top = await getTopProductsByMargin(10, 'percent');
 
@@ -256,18 +254,12 @@ describe('marginService - getTopProductsByMargin', () => {
   });
 
   it('respeta el parametro limit', async () => {
-    const products = [
-      makeProduct('p1', 1000, 100),
-      makeProduct('p2', 1000, 200),
-      makeProduct('p3', 1000, 300),
-    ];
     const items = [
       { product_id: 'p1', product_name: 'P1', quantity: 5, price_cents: 1000, subtotal: 5000 },
       { product_id: 'p2', product_name: 'P2', quantity: 5, price_cents: 1000, subtotal: 5000 },
       { product_id: 'p3', product_name: 'P3', quantity: 5, price_cents: 1000, subtotal: 5000 },
     ];
     mockedGetSales.mockResolvedValue([makeSale(0, 15000, items)]);
-    mockedGetProducts.mockResolvedValue(products);
 
     const top = await getTopProductsByMargin(2, 'absolute');
 
@@ -275,12 +267,14 @@ describe('marginService - getTopProductsByMargin', () => {
   });
 
   it('reporta margen negativo correctamente', async () => {
-    const products = [makeProduct('p1', 1000, 2000)];
     const items = [
-      { product_id: 'p1', product_name: 'P1', quantity: 2, price_cents: 1000, subtotal: 2000 },
+      {
+        product_id: 'p1', product_name: 'P1', quantity: 2, price_cents: 1000, subtotal: 2000,
+        unit_cost_cents: 2000, cost_subtotal_cents: 4000, cost_source: 'purchase' as const,
+        cost_is_estimated: false, category: 'Abarrotes',
+      },
     ];
     mockedGetSales.mockResolvedValue([makeSale(0, 2000, items)]);
-    mockedGetProducts.mockResolvedValue(products);
 
     const top = await getTopProductsByMargin(10, 'absolute');
 
@@ -296,26 +290,20 @@ describe('marginService - getMarginByCategory', () => {
   });
 
   it('agrupa productos por categoria correctamente', async () => {
-    const products = [
-      { ...makeProduct('p1', 1000, 200), category: 'Abarrotes' },
-      { ...makeProduct('p2', 1000, 300), category: 'Bebidas' },
-      { ...makeProduct('p3', 1000, 400), category: 'Abarrotes' },
-    ];
     const itemsA = [
-      { product_id: 'p1', product_name: 'P1', quantity: 5, price_cents: 1000, subtotal: 5000 },
+      { product_id: 'p1', product_name: 'P1', quantity: 5, price_cents: 1000, subtotal: 5000, unit_cost_cents: 200, category: 'Abarrotes' },
     ];
     const itemsB = [
-      { product_id: 'p2', product_name: 'P2', quantity: 5, price_cents: 1000, subtotal: 5000 },
+      { product_id: 'p2', product_name: 'P2', quantity: 5, price_cents: 1000, subtotal: 5000, unit_cost_cents: 300, category: 'Bebidas' },
     ];
     const itemsC = [
-      { product_id: 'p3', product_name: 'P3', quantity: 5, price_cents: 1000, subtotal: 5000 },
+      { product_id: 'p3', product_name: 'P3', quantity: 5, price_cents: 1000, subtotal: 5000, unit_cost_cents: 400, category: 'Abarrotes' },
     ];
     mockedGetSales.mockResolvedValue([
       makeSale(0, 5000, itemsA),
       makeSale(1, 5000, itemsB),
       makeSale(2, 5000, itemsC),
     ]);
-    mockedGetProducts.mockResolvedValue(products);
 
     const byCategory = await getMarginByCategory();
 
@@ -329,22 +317,17 @@ describe('marginService - getMarginByCategory', () => {
     expect(bebidas!.revenue_cents).toBe(5000);
   });
 
-  it('usa "Sin categoría" cuando el producto no tiene categoria', async () => {
-    const products = [
-      makeProduct('p1', 1000, 200),
-      { ...makeProduct('p2', 1000, 300), category: 'Abarrotes' },
-    ];
+  it('usa "Sin categoría" cuando el item legacy no tiene categoria', async () => {
     const itemsA = [
       { product_id: 'p1', product_name: 'P1', quantity: 5, price_cents: 1000, subtotal: 5000 },
     ];
     const itemsB = [
-      { product_id: 'p2', product_name: 'P2', quantity: 5, price_cents: 1000, subtotal: 5000 },
+      { product_id: 'p2', product_name: 'P2', quantity: 5, price_cents: 1000, subtotal: 5000, unit_cost_cents: 300, category: 'Abarrotes' },
     ];
     mockedGetSales.mockResolvedValue([
       makeSale(0, 5000, itemsA),
       makeSale(1, 5000, itemsB),
     ]);
-    mockedGetProducts.mockResolvedValue(products);
 
     const byCategory = await getMarginByCategory();
 
@@ -355,7 +338,6 @@ describe('marginService - getMarginByCategory', () => {
 
   it('retorna lista vacia cuando no hay ventas', async () => {
     mockedGetSales.mockResolvedValue([]);
-    mockedGetProducts.mockResolvedValue([]);
 
     const byCategory = await getMarginByCategory();
 

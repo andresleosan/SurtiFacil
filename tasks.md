@@ -409,3 +409,136 @@ Status: revisión. Report: `docs/final-review-2026-08-04.md`
 - [x] Fallo controlado con valores ficticios conserva únicamente un contexto con campos vacíos; no genera captura, video ni traza.
 - [ ] La ejecución CLI autenticada sigue requiriendo inyectar `QA_TEST_EMAIL` y `QA_TEST_PASSWORD` como variables de proceso desde un mecanismo seguro.
 - [x] La cuenta temporal fue eliminada de Authentication y su documento Firestore fue borrado (confirmado en consola).
+
+---
+
+## Plan de estabilizacion y release - 2026-08-28
+
+Este plan conserva el historial anterior y reemplaza sus conteos de auditoria como baseline vigente.
+Cada tarea se ejecuta de forma atomica. Ninguna pasa a `aprobada` sin autocritica de seguridad y
+evidencia real de pruebas. Los despliegues y cualquier gasto mantienen confirmacion separada.
+
+### Task 16: Arquitectura y costo free-tier-first
+
+- [x] Documentar el stack real y clasificar el proyecto como Nivel 3.
+- [x] Aceptar Cloud Run para un unico backend Express, manteniendo monolito modular.
+- [x] Comparar Cloud Run, Render Free y Cloudflare Workers Free con fuentes oficiales.
+- [x] Fijar objetivo de staging en USD 0, `min-instances=0`, techo Cloud Run USD 10/mes y presupuesto GCP USD 25/mes.
+- [x] Registrar la decision aceptada en `docs/adr/0002-cloud-run-para-backend.md`.
+- [x] Mantener sin autorizar la creacion de infraestructura, facturacion o despliegue.
+
+Status: aprobada documentalmente por el operador el 2026-08-28. Evidence: `STACK.md`, ADR-0002.
+
+### Task 17: Backend portable para staging sin llaves JSON
+
+- [x] Extraer la inicializacion de Firebase Admin y usar Application Default Credentials en entornos Google.
+- [x] Conservar un mecanismo local seguro y explicito, sin empaquetar `serviceAccountKey.json`.
+- [x] Crear contenedor reproducible con Node fijado, usuario no privilegiado, health check y `.dockerignore`.
+- [x] Agregar una verificacion que rechace builds de produccion con `VITE_BACKEND_URL` vacio o `localhost`.
+- [x] Hacer configurable el modelo Anthropic, sustituir el modelo retirado y permitir deshabilitar IA sin romper el resto del backend.
+- [x] Mantener Anthropic y WhatsApp deshabilitados por defecto en staging hasta aprobar sus presupuestos.
+- [x] Verificar unit tests, emuladores, build del contenedor y `/api/health` local; documentar evidencia y rollback.
+- [x] No crear proyecto cloud ni desplegar dentro de esta tarea.
+
+Status: aprobada. Unit/frontend/emuladores/build e imagen real pasan; el contenedor queda healthy,
+`/api/health` responde 200 y el operador autorizo el cierre tras la rotacion operativa. Evidence:
+`docs/task-17-staging-backend.md`.
+
+### Task 18: Integridad financiera historica de ventas
+
+- [x] Aplicar `database-design` antes de modificar el esquema.
+- [x] Definir snapshot inmutable por item de `unit_cost_cents`, categoria y datos necesarios para margen historico.
+- [x] Registrar el actor autenticado y timestamps server-side en cada venta.
+- [x] Documentar migracion, backfill posible, datos no recuperables y rollback antes de aplicar cambios.
+- [x] Cambiar margenes/reportes para no depender del costo actual del producto.
+- [x] Cubrir ventas nuevas, ventas legacy, cambios posteriores de costo, concurrencia y redondeo monetario.
+- [x] Ejecutar pruebas backend/frontend, reglas y emulador transaccional con evidencia.
+
+Status: aprobada. Snapshot financiero v2, actor autoritativo e inmutabilidad implementados; pruebas
+backend 68/68, frontend 200/200, build, reglas, transaccion en emulador e imagen Docker pasan.
+No se aplico migracion ni despliegue remoto. Evidence: `docs/task-18-financial-integrity.md`.
+
+### Task 19: Autorizacion coherente, usuarios y privacidad PWA
+
+- [ ] Definir matriz de permisos por ruta para empleados, proveedores, ordenes, reportes, margenes, reposicion y WhatsApp.
+- [ ] Aplicar guards de UI coherentes con backend y Firestore Rules, incluidos deep links.
+- [ ] Reemplazar la eliminacion solo-Firestore por un flujo backend consistente para Auth y documento de usuario, con auditoria y rollback.
+- [ ] Restringir Workbox para no cachear respuestas autenticadas de `googleapis.com`/`firebaseio.com` en dispositivos POS compartidos.
+- [ ] Agregar pruebas de rol, usuario inactivo, acceso directo por URL, logout y ausencia de datos sensibles en caches.
+- [ ] Ejecutar autocritica de seguridad y pruebas completas antes de aprobar.
+
+Status: pendiente. Prioridad: P0 / RC1.
+
+### Task 20: Idempotencia y resiliencia de WhatsApp
+
+- [ ] Deduplicar mensajes entrantes usando el `message.id` del proveedor con escritura atomica.
+- [ ] Evitar la carrera query+add al crear conversaciones mediante clave determinista o transaccion.
+- [ ] Diseñar idempotencia/outbox para que un exito del proveedor seguido de fallo Firestore no duplique reintentos.
+- [ ] Hacer configurable y verificable la version de Graph API; no conservar una version retirada hardcodeada.
+- [ ] Sustituir o acotar los rate limiters process-local antes de permitir multiples replicas.
+- [ ] Agregar contract tests de duplicados, reintentos, concurrencia, timeouts y respuestas del proveedor.
+
+Status: pendiente. Prioridad: P0 / RC1 antes de trafico WhatsApp real.
+
+### Task 21: Rendimiento y costo de Firestore
+
+- [ ] Medir baseline de lecturas, latencia y bundle antes de optimizar.
+- [ ] Eliminar el refresco completo del dashboard cada 10 segundos.
+- [ ] Acotar ventas por rango/limite, agregar paginacion y evitar descargar colecciones completas.
+- [ ] Reutilizar consultas/agregados entre dashboard, reportes y margenes cuando el contrato lo permita.
+- [ ] Corregir chunks vacios y revisar bundles mayores de 500 KB con evidencia de impacto.
+- [ ] Definir presupuesto de lecturas para staging y alertas de crecimiento.
+- [ ] Ejecutar pruebas de carga y regresion funcional despues de cada cambio.
+
+Status: pendiente. Prioridad: P1 / RC2 antes de produccion.
+
+### Task 22: CI y estrategia QA Nivel 3
+
+- [ ] Crear CI reproducible para frontend, backend, build, auditorias y emuladores con Java 21.
+- [ ] Fijar umbrales iniciales de cobertura basados en el baseline medido, no en una cifra inventada.
+- [ ] Ejecutar E2E autenticado con una cuenta QA gestionada de forma segura y sin capturar secretos en artefactos.
+- [ ] Agregar pruebas de contrato frontend/backend y casos de autorizacion por rol.
+- [ ] Agregar carga para venta transaccional, dashboard y webhook; documentar limites observados.
+- [ ] Mantener la release bloqueada si falla una prueba requerida o existe un hallazgo critico.
+
+Status: pendiente. Prioridad: P1 / RC2.
+
+### Task 23: Exactitud funcional, dependencias y documentacion
+
+- [ ] Corregir la categoria fija `General` de reportes y probar categorias reales/legacy.
+- [ ] Alinear el logging de actividad documentado con el actor de venta realmente persistido.
+- [ ] Actualizar README, rutas, comandos y estado de despliegue para eliminar lenguaje de scaffold o claims obsoletos.
+- [ ] Repetir auditorias: resolver el hallazgo web actual de `nanoid` por una ruta compatible y documentar los 6 moderados backend sin `--force` destructivo.
+- [ ] Fijar `firebase-tools` en el repositorio y agregar chequeo claro de Java 21 para emuladores.
+- [ ] Sincronizar conteos y evidencia de `tasks.md` solo despues de las corridas reales.
+
+Status: pendiente. Prioridad: P1 / RC2.
+
+### Task 24: Staging aislado y verificacion de release candidate
+
+- [ ] Solicitar confirmacion explicita antes de habilitar facturacion o crear recursos.
+- [ ] Confirmar ubicacion de Firestore y elegir region Cloud Run compatible con latencia/egreso.
+- [ ] Crear proyecto staging separado, IAM de minimo privilegio, secretos, objetivo USD 0 y controles de costo aprobados.
+- [ ] Desplegar primero una revision sin trafico y verificar health, Auth, CORS, reglas, ventas y webhook HMAC.
+- [ ] Construir frontend staging con URL HTTPS correcta y ejecutar E2E autenticado completo.
+- [ ] Probar rollback a revision anterior y conservar artefactos/evidencia.
+
+Status: pendiente y bloqueada por checkpoint de infraestructura. Prioridad: P0 operacional.
+
+### Task 25: Gate de produccion
+
+- [ ] Cerrar Tasks 17-24 sin hallazgos criticos y con evidencia aprobada.
+- [ ] Verificar backup y rollback; cualquier migracion destructiva requiere confirmacion adicional.
+- [ ] Confirmar presupuestos de Anthropic y WhatsApp o mantener esas funciones deshabilitadas.
+- [ ] Ejecutar performance baseline y E2E autenticado sobre la release candidata exacta.
+- [ ] Solicitar confirmacion explicita del operador para desplegar produccion.
+- [ ] Verificar post-deploy y registrar revision, resultados y ruta de rollback.
+
+Status: pendiente. No autorizado para despliegue.
+
+### Fuera de alcance hasta post-release
+
+- [ ] Multi-tenant/SaaS.
+- [ ] Separacion en microservicios.
+- [ ] Arquitectura event-driven general.
+- [ ] Nuevas funciones predictivas o de IA sin metrica, presupuesto y necesidad demostrados.

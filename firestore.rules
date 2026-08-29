@@ -21,15 +21,26 @@ service cloud.firestore {
 
     function isValidSaleItem(item) {
       return item is map
-        && item.keys().hasAll(['product_id', 'quantity', 'price_cents', 'subtotal'])
+        && item.keys().hasAll(['product_id', 'product_name', 'quantity', 'price_cents', 'subtotal', 'unit_cost_cents', 'cost_subtotal_cents', 'cost_source', 'cost_is_estimated', 'category'])
+        && item.keys().hasOnly(['product_id', 'product_name', 'quantity', 'price_cents', 'subtotal', 'unit_cost_cents', 'cost_subtotal_cents', 'cost_source', 'cost_is_estimated', 'category'])
         && item.product_id is string
         && item.product_id.size() > 0
+        && item.product_name is string
+        && item.product_name.size() > 0
         && item.quantity is int
         && item.quantity > 0
         && item.price_cents is int
         && item.price_cents >= 0
         && item.subtotal is int
-        && item.subtotal >= 0;
+        && item.subtotal >= 0
+        && item.unit_cost_cents is int
+        && item.unit_cost_cents >= 0
+        && item.cost_subtotal_cents is int
+        && item.cost_subtotal_cents >= 0
+        && item.cost_source in ['purchase', 'fallback_price']
+        && item.cost_is_estimated is bool
+        && item.category is string
+        && item.category.size() > 0;
     }
 
     // Rules cannot iterate a list; validate every supported POS line explicitly.
@@ -61,11 +72,18 @@ service cloud.firestore {
     }
 
     function isValidSaleCreate() {
-      return request.resource.data.keys().hasAll(['date', 'total', 'payment_method', 'items', 'createdAt'])
+      return request.resource.data.keys().hasAll(['date', 'createdAt', 'schema_version', 'created_by_uid', 'created_by_role', 'total', 'total_cost_cents', 'payment_method', 'items'])
+        && request.resource.data.keys().hasOnly(['date', 'createdAt', 'schema_version', 'created_by_uid', 'created_by_role', 'total', 'total_cost_cents', 'payment_method', 'items'])
         && request.resource.data.date is timestamp
         && request.resource.data.createdAt is timestamp
+        && request.resource.data.schema_version == 2
+        && request.resource.data.created_by_uid is string
+        && request.resource.data.created_by_uid.size() > 0
+        && request.resource.data.created_by_role in ['admin', 'manager', 'cashier']
         && request.resource.data.total is int
         && request.resource.data.total >= 0
+        && request.resource.data.total_cost_cents is int
+        && request.resource.data.total_cost_cents >= 0
         && request.resource.data.payment_method is string
         && request.resource.data.payment_method in ['cash', 'card', 'other']
         && isValidSaleItems(request.resource.data.items);
@@ -96,7 +114,7 @@ service cloud.firestore {
     match /sales/{saleId} {
       allow read: if isActiveUser();
       allow create: if isActiveUser() && false;
-      allow update, delete: if isAdminUser();
+      allow update, delete: if false;
     }
 
     // Roles - solo admins

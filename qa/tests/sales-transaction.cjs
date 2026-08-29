@@ -21,7 +21,14 @@ function responseRecorder() {
 (async () => {
   const productRef = db.collection('products').doc('transaction-product');
   const saleRef = db.collection('sales').doc('transaction-sale');
-  await productRef.set({ name: 'Emulator Product', price_cents: 125, stock: 3 });
+  await productRef.set({
+    name: 'Emulator Product',
+    price_cents: 125,
+    stock: 3,
+    category: 'Emulator Category',
+    last_cost_cents: 40,
+    last_cost_source: 'purchase',
+  });
   await saleRef.delete();
 
   const handler = createSalesHandler({
@@ -30,6 +37,7 @@ function responseRecorder() {
   });
   const response = responseRecorder();
   await handler({
+    authContext: { uid: 'emulator-cashier', role: 'cashier' },
     body: { items: [{ product_id: productRef.id, quantity: 2 }], payment_method: 'cash' },
   }, response);
 
@@ -45,8 +53,17 @@ function responseRecorder() {
     quantity: 2,
     price_cents: 125,
     subtotal: 250,
+    unit_cost_cents: 40,
+    cost_subtotal_cents: 80,
+    cost_source: 'purchase',
+    cost_is_estimated: false,
+    category: 'Emulator Category',
   }]);
   assert.equal(sale.data().total, 250);
+  assert.equal(sale.data().total_cost_cents, 80);
+  assert.equal(sale.data().schema_version, 2);
+  assert.equal(sale.data().created_by_uid, 'emulator-cashier');
+  assert.equal(sale.data().created_by_role, 'cashier');
 
   console.log('Sales Admin SDK transaction emulator scenario passed.');
 })().catch((error) => {

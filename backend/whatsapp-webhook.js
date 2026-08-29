@@ -24,6 +24,7 @@ const { createSalesRouter } = require('./salesRoutes');
 const { createAnthropicRouter } = require('./anthropicRoutes');
 const { createWhatsAppMessageSender } = require('./whatsappProvider');
 const { parseFrontendOrigins } = require('./corsConfig');
+const { initializeFirebaseAdmin } = require('./firebaseAdmin');
 const {
   createWhatsAppWebhookHandler,
   DEFAULT_AUTO_RESPONSE,
@@ -48,14 +49,7 @@ app.use(cors({
 // ============ INICIALIZAR FIREBASE ============
 let db;
 try {
-  const serviceAccountPath = process.env.FIREBASE_SERVICE_ACCOUNT_PATH || './serviceAccountKey.json';
-  const serviceAccount = require(serviceAccountPath);
-  
-  admin.initializeApp({
-    credential: admin.credential.cert(serviceAccount),
-  });
-
-  db = getFirestore();
+  db = initializeFirebaseAdmin({ admin, getFirestore });
   console.log('✅ Firebase initialized successfully');
 } catch (error) {
   console.error(getSafeApiLogMessage('Firebase initialization'));
@@ -133,6 +127,7 @@ async function updateConversationTimestamp(conversationId) {
 }
 
 const sendWhatsAppMessage = createWhatsAppMessageSender({
+  enabled: process.env.WHATSAPP_ENABLED === 'true',
   logError: (context) => logApiError(context),
 });
 
@@ -141,7 +136,8 @@ const handleWhatsAppWebhook = createWhatsAppWebhookHandler({
   saveMessage,
   updateConversationTimestamp,
   sendWhatsAppMessage,
-  isAutoResponseEnabled: () => process.env.AUTO_RESPONSE_ENABLED === 'true',
+  isAutoResponseEnabled: () => process.env.WHATSAPP_ENABLED === 'true'
+    && process.env.AUTO_RESPONSE_ENABLED === 'true',
   getAutoResponseMessage: () => process.env.AUTO_RESPONSE_MESSAGE || DEFAULT_AUTO_RESPONSE,
   logError: (context) => logApiError(context),
 });
@@ -224,7 +220,9 @@ app.use('/api/anthropic', createAnthropicRouter({
   get db() {
     return db;
   },
+  enabled: process.env.ANTHROPIC_ENABLED === 'true',
   apiKey: process.env.ANTHROPIC_API_KEY,
+  model: process.env.ANTHROPIC_MODEL,
 }));
 
 // ============ MANEJO DE ERRORES ============

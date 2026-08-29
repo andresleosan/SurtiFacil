@@ -11,5 +11,8 @@ test('Anthropic proxy routes use the Firebase admin/manager middleware', () => {
   assert.match(routeSource, /createFirebaseAdminRoleMiddleware/);
   assert.match(routeSource, /router\.post\('\/analyze-image', requireAdminRole, limitImage,/);
   assert.match(routeSource, /router\.post\('\/analyze-audio', requireAdminRole, limitAudio,/);
+  assert.match(webhookSource, /enabled: process\.env\.ANTHROPIC_ENABLED === 'true'/);
+  assert.match(webhookSource, /model: process\.env\.ANTHROPIC_MODEL/);
+  assert.doesNotMatch(routeSource, /claude-sonnet-4-20250514/);
   assert.doesNotMatch(webhookSource, /requireBackendApiKey/);
 });

@@ -11,6 +11,10 @@ const PAYMENT_METHODS = new Set(['cash', 'card', 'other']);
 const MAX_SALE_ITEMS = 20;
 const MAX_ITEM_QUANTITY = 1_000;
 const MAX_PRODUCT_ID_LENGTH = 128;
+const MAX_CATEGORY_LENGTH = 100;
+const ACTIVE_ROLES = new Set(['admin', 'manager', 'cashier']);
+const COST_SOURCES = new Set(['purchase', 'fallback_price']);
+const UNCATEGORIZED = 'Sin categor\u00eda';
 
 function sendApiError(res, status, code = 'internal') {
   return res.status(status).json(getSafeApiError(code));
@@ -48,12 +52,51 @@ function createSalesRateLimiter() {
   return createRateLimiter({ limit: 30, windowMs: 60_000, maxEntries: 1_000 });
 }
 
+function resolveProductFinancialSnapshot(product) {
+  if (product.category != null && typeof product.category !== 'string') {
+    throw new Error('Invalid product category');
+  }
+  const category = product.category?.trim() || UNCATEGORIZED;
+  if (category.length > MAX_CATEGORY_LENGTH) throw new Error('Invalid product category');
+
+  if (product.last_cost_cents != null) {
+    if (!Number.isSafeInteger(product.last_cost_cents) || product.last_cost_cents < 0) {
+      throw new Error('Invalid product cost');
+    }
+    if (product.last_cost_source != null && !COST_SOURCES.has(product.last_cost_source)) {
+      throw new Error('Invalid product cost source');
+    }
+    const costSource = product.last_cost_source || 'purchase';
+    return {
+      category,
+      unit_cost_cents: product.last_cost_cents,
+      cost_source: costSource,
+      cost_is_estimated: costSource === 'fallback_price',
+    };
+  }
+
+  return {
+    category,
+    unit_cost_cents: Math.floor(product.price_cents / 2),
+    cost_source: 'fallback_price',
+    cost_is_estimated: true,
+  };
+}
+
 function createSalesHandler({ admin, db }) {
   const serverTimestamp = () => admin.firestore?.FieldValue?.serverTimestamp?.()
     ?? FieldValue.serverTimestamp();
 
   return async function createSale(req, res) {
     if (!validateSaleRequest(req.body)) return sendApiError(res, 400, 'badRequest');
+    const actorUid = req.authContext?.uid;
+    const actorRole = req.authContext?.role;
+    if (
+      typeof actorUid !== 'string'
+      || actorUid.length === 0
+      || actorUid.length > 128
+      || !ACTIVE_ROLES.has(actorRole)
+    ) return sendApiError(res, 401, 'unauthorized');
 
     try {
       const saleId = await db.runTransaction(async (transaction) => {
@@ -86,6 +129,10 @@ function createSalesHandler({ admin, db }) {
             throw error;
           }
 
+          const financialSnapshot = resolveProductFinancialSnapshot(product);
+          const costSubtotal = financialSnapshot.unit_cost_cents * requestedItem.quantity;
+          if (!Number.isSafeInteger(costSubtotal)) throw new Error('Sale cost is out of range');
+
           authoritativeItems.push({
             ref: productRef,
             product_id: productSnapshot.id,
@@ -94,6 +141,8 @@ function createSalesHandler({ admin, db }) {
             stock: product.stock,
             quantity: requestedItem.quantity,
             subtotal: product.price_cents * requestedItem.quantity,
+            ...financialSnapshot,
+            cost_subtotal_cents: costSubtotal,
           });
         }
 
@@ -102,11 +151,17 @@ function createSalesHandler({ admin, db }) {
         const items = authoritativeItems.map(({ ref, stock, ...item }) => item);
         const total = items.reduce((sum, item) => sum + item.subtotal, 0);
         if (!Number.isSafeInteger(total)) throw new Error('Sale total is out of range');
+        const totalCost = items.reduce((sum, item) => sum + item.cost_subtotal_cents, 0);
+        if (!Number.isSafeInteger(totalCost)) throw new Error('Sale cost total is out of range');
 
         transaction.set(saleRef, {
           date: timestamp,
           createdAt: timestamp,
+          schema_version: 2,
+          created_by_uid: actorUid,
+          created_by_role: actorRole,
           total,
+          total_cost_cents: totalCost,
           payment_method: req.body.payment_method,
           items,
         });
@@ -141,5 +196,6 @@ module.exports = {
   createSalesHandler,
   createSalesRateLimiter,
   createSalesRouter,
+  resolveProductFinancialSnapshot,
   validateSaleRequest,
 };
