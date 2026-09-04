@@ -36,6 +36,46 @@ test('Firebase Admin uses Application Default Credentials when no local key path
   assert.equal(adcCalls, 1);
 });
 
+test('Firebase Admin accepts an inline service-account JSON secret before any path or ADC', () => {
+  const calls = [];
+  const credential = createFirebaseCredential({
+    admin: {
+      credential: {
+        applicationDefault: () => assert.fail('ADC must not be used with an inline secret'),
+        cert: (value) => {
+          calls.push(value);
+          return { source: 'certificate' };
+        },
+      },
+    },
+    env: {
+      FIREBASE_SERVICE_ACCOUNT_JSON: ' {"project_id":"vercel-project","private_key":"-----BEGIN PRIVATE KEY-----\\nabc\\n-----END PRIVATE KEY-----\\n"} ',
+      FIREBASE_SERVICE_ACCOUNT_PATH: 'ignored.json',
+    },
+    readFileSync: () => assert.fail('the filesystem must not be read'),
+  });
+
+  assert.deepEqual(credential, { source: 'certificate' });
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].project_id, 'vercel-project');
+  assert.match(calls[0].private_key, /BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----/);
+});
+
+test('Firebase Admin rejects a malformed inline service-account JSON without logging it', () => {
+  assert.throws(
+    () => createFirebaseCredential({
+      admin: { credential: { applicationDefault: () => assert.fail('must not fall back'), cert: () => assert.fail('must not cert') } },
+      env: { FIREBASE_SERVICE_ACCOUNT_JSON: '{not-json' },
+    }),
+    /FIREBASE_SERVICE_ACCOUNT_JSON must be valid JSON/,
+  );
+});
+
+test('server only listens when executed directly, so it can run as a serverless function', () => {
+  assert.match(serverSource, /if \(require\.main === module\) app\.listen\(PORT/);
+  assert.match(serverSource, /module\.exports = app;/);
+});
+
 test('Firebase Admin accepts an explicit local service-account path without a default key fallback', () => {
   const calls = [];
   const credential = createFirebaseCredential({

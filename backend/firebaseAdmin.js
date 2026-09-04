@@ -7,6 +7,19 @@ function createFirebaseCredential({
   readFileSync = fs.readFileSync,
   resolvePath = path.resolve,
 }) {
+  // Plataformas sin identidad de servicio (Vercel Functions): el JSON de la cuenta
+  // de servicio llega como secreto de entorno, nunca como archivo en el repo/imagen.
+  const inlineJson = env.FIREBASE_SERVICE_ACCOUNT_JSON?.trim();
+  if (inlineJson) {
+    let serviceAccount;
+    try {
+      serviceAccount = JSON.parse(inlineJson);
+    } catch {
+      throw new Error('FIREBASE_SERVICE_ACCOUNT_JSON must be valid JSON');
+    }
+    return admin.credential.cert(serviceAccount);
+  }
+
   const configuredPath = env.FIREBASE_SERVICE_ACCOUNT_PATH?.trim();
 
   if (!configuredPath) {

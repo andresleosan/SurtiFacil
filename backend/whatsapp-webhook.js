@@ -251,7 +251,9 @@ app.use((req, res) => {
 
 const PORT = process.env.PORT || 3000;
 
-app.listen(PORT, () => {
+// Como funcion serverless (Vercel) el modulo solo exporta la app; el servidor HTTP
+// se levanta unicamente cuando este archivo es el punto de entrada (contenedor/local).
+if (require.main === module) app.listen(PORT, () => {
   console.log('\n' + '='.repeat(50));
   console.log('🚀 WhatsApp Webhook Server Started');
   console.log('='.repeat(50));

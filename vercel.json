@@ -1,11 +1,17 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": null,
-  "installCommand": "npm --prefix web ci",
+  "installCommand": "npm --prefix backend ci --omit=dev --ignore-scripts && npm --prefix web ci",
   "buildCommand": "npm --prefix web run build",
   "outputDirectory": "web/dist",
+  "functions": {
+    "api/index.js": {
+      "maxDuration": 30
+    }
+  },
   "rewrites": [
-    { "source": "/((?!assets/|icons/|manifest.json|sw.js|registerSW.js|workbox-).*)", "destination": "/index.html" }
+    { "source": "/api/(.*)", "destination": "/api/index" },
+    { "source": "/((?!api/|assets/|icons/|manifest.json|sw.js|registerSW.js|workbox-).*)", "destination": "/index.html" }
   ],
   "headers": [
     {

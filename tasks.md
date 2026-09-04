@@ -528,6 +528,18 @@ Status: pendiente. Prioridad: P1 / RC2.
 
 Status: pendiente y bloqueada por checkpoint de infraestructura. Prioridad: P0 operacional.
 
+### Task 24b: Backend operativo en Vercel Functions (sin facturación GCP)
+
+- [x] Confirmar que `smartmarket-b37ce` no tiene facturación; Cloud Run queda bloqueado hasta decisión del operador (ADR-0003).
+- [x] `api/index.js` + `vercel.json` (rewrite `/api/*`, `maxDuration` 30 s, instalación de `backend/`).
+- [x] `firebaseAdmin.js` acepta `FIREBASE_SERVICE_ACCOUNT_JSON`; el servidor solo escucha como punto de entrada.
+- [x] Cuenta de servicio dedicada `surtifacil-backend` (datastore.user + firebaseauth.admin) con llave guardada solo como secreto de Vercel.
+- [x] `VITE_BACKEND_URL` y `FRONTEND_ORIGINS` apuntando a `https://surtifacil.vercel.app`; dominios de Vercel autorizados en Firebase Auth.
+- [x] Backend 78/78; verificación en vivo de `/api/health`, 401 sin token y venta transaccional (ver evidencia en `docs/DEPLOY.md`).
+- [ ] Rotar la llave y pasar a ADC al migrar a Cloud Run.
+
+Status: desplegado el 2026-09-04. Evidence: ADR-0003, `docs/DEPLOY.md`.
+
 ### Task 25: Gate de produccion
 
 - [ ] Cerrar Tasks 17-24 sin hallazgos criticos y con evidencia aprobada.

@@ -249,7 +249,8 @@ staging del frontend mientras el backend público no exista.
 
   ```powershell
   cd backend; npm ci; cd ..
-  $env:GOOGLE_APPLICATION_CREDENTIALS = "C:uta\serviceAccountKey.json"   # o gcloud auth application-default login
+  $env:GOOGLE_APPLICATION_CREDENTIALS = "C:
+uta\serviceAccountKey.json"   # o gcloud auth application-default login
   npm run provision:admin -- --email andres@example.com --name "Andrés"
   ```
 
@@ -257,3 +258,22 @@ staging del frontend mientras el backend público no exista.
   acceso), fija los claims derivados y escribe el documento con `role: admin` y `active: true`.
 - Los claims personalizados son cache derivada: si `/api/auth/sync-claims` no responde, el login
   continúa y se registra una advertencia. Reglas y backend leen siempre el documento del usuario.
+
+## Backend en Vercel Functions (ADR-0003)
+
+Mientras el proyecto GCP no tenga facturación, el backend Express corre como función serverless en
+el mismo proyecto de Vercel (`api/index.js` → `backend/whatsapp-webhook.js`). `vercel.json`
+reescribe `/api/*` a la función; frontend y backend comparten el origen `https://surtifacil.vercel.app`.
+
+Variables de entorno del backend en Vercel (Production y Preview):
+
+- `FIREBASE_SERVICE_ACCOUNT_JSON` (Secret): JSON de la cuenta de servicio dedicada
+  `surtifacil-backend@smartmarket-b37ce.iam.gserviceaccount.com` (roles `datastore.user` y
+  `firebaseauth.admin`). Rotar con `gcloud iam service-accounts keys create` y revocar la anterior.
+- `FRONTEND_ORIGINS`: `https://surtifacil.vercel.app` y el dominio de previews.
+- `VITE_BACKEND_URL`: `https://surtifacil.vercel.app` (mismo origen).
+- `WHATSAPP_ENABLED` y `ANTHROPIC_ENABLED` ausentes o `false` hasta aprobar presupuestos.
+
+Verificación tras cada deploy: `GET /api/health` → 200; `POST /api/sales/create` sin token → 401.
+Al aprobar facturación GCP, desplegar el contenedor en Cloud Run (ADR-0002) y cambiar
+`VITE_BACKEND_URL`.
