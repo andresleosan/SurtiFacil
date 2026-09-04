@@ -53,3 +53,6 @@ Thumbs.db
 
 # Backups que dejan los scripts de la agencia al actualizar
 *.bak-*
+
+# Vercel CLI (enlace local del proyecto)
+.vercel/
