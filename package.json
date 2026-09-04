@@ -25,7 +25,7 @@
     "docs": "echo 'See docs/run_instructions.md'"
   },
   "engines": {
-    "node": ">=18"
+    "node": "22.x"
   },
   "devDependencies": {
     "@playwright/test": "1.55.1",
