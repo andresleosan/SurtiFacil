@@ -54,6 +54,19 @@ try {
   console.log('✅ Firebase initialized successfully');
 } catch (error) {
   console.error(getSafeApiLogMessage('Firebase initialization'));
+  // Diagnostico sin secretos: tipo de error y forma del secreto (nunca su contenido).
+  const inlineSecret = process.env.FIREBASE_SERVICE_ACCOUNT_JSON || '';
+  console.error(
+    'Firebase initialization diagnostics:',
+    JSON.stringify({
+      errorName: error?.name || null,
+      errorCode: error?.code || null,
+      inlineSecretLength: inlineSecret.length,
+      inlineSecretLooksJson: inlineSecret.trim().startsWith('{') && inlineSecret.trim().endsWith('}'),
+      hasPathSecret: Boolean(process.env.FIREBASE_SERVICE_ACCOUNT_PATH),
+      emulatorMode: process.env.FIREBASE_EMULATOR_MODE === 'true',
+    }),
+  );
   process.exit(1);
 }
 
