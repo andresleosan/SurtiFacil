@@ -38,3 +38,12 @@ Ejecutar el mismo monolito Express (`backend/whatsapp-webhook.js`) como función
   activar WhatsApp real (Task 20).
 - Reversible: al aprobar facturación se despliega el mismo contenedor en Cloud Run y se cambia
   `VITE_BACKEND_URL`.
+
+## Notas de implementación
+
+- Verificado el 2026-09-04 desde fuera: `GET /api/health` 200 y `POST /api/sales/create` 401 sin
+  token (Firebase Admin inicializa con el secreto). Las rutas autenticadas se validaron con el
+  servidor local (ADC) y con tests; la primera venta real desde la app desplegada queda como
+  comprobación del operador.
+- Compatibilidad: `overrides.jwks-rsa = 3.1.0` (jose CommonJS) y `engines.node = 22.x`; ver
+  `docs/DEPLOY.md`.

@@ -277,3 +277,12 @@ Variables de entorno del backend en Vercel (Production y Preview):
 Verificación tras cada deploy: `GET /api/health` → 200; `POST /api/sales/create` sin token → 401.
 Al aprobar facturación GCP, desplegar el contenedor en Cloud Run (ADR-0002) y cambiar
 `VITE_BACKEND_URL`.
+
+Notas de compatibilidad del runtime de Vercel (2026-09-04):
+
+- El loader de funciones de Vercel no resuelve `require()` de módulos ESM. `firebase-admin` depende
+  de `jwks-rsa` 4 (que exige `jose` 6, solo ESM), por eso `backend/package.json` fija
+  `overrides.jwks-rsa = 3.1.0` (`jose` 4 con build CommonJS). Revisar al actualizar `firebase-admin`.
+- `package.json` raíz fija `engines.node = 22.x` para la función.
+- `firebase-admin` 14 solo exporta la API modular; `backend/firebaseAdmin.js` expone una fachada
+  (`createFirebaseAdminFacade`) con `credential`, `auth()` y `apps` para las rutas existentes.
