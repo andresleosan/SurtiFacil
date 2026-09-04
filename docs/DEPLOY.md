@@ -238,3 +238,22 @@ Pasos en el dashboard de Vercel (Settings del proyecto):
 
 Firebase Hosting sigue siendo el destino documentado para producción; Vercel es válido como
 staging del frontend mientras el backend público no exista.
+
+## Inicio de sesión con Google y cuenta administradora
+
+- El proveedor Google está habilitado en Firebase Authentication. El botón "Continuar con Google"
+  usa ventana emergente y cae a redirección cuando el navegador la bloquea (PWA instalada).
+- Google solo autentica; la autorización sigue en `/users/{uid}` (ADR-0001). Una cuenta de Google
+  sin documento activo se rechaza y se cierra su sesión.
+- Para dar de alta la primera cuenta administradora (o reparar una existente):
+
+  ```powershell
+  cd backend; npm ci; cd ..
+  $env:GOOGLE_APPLICATION_CREDENTIALS = "C:uta\serviceAccountKey.json"   # o gcloud auth application-default login
+  npm run provision:admin -- --email andres@example.com --name "Andrés"
+  ```
+
+  El script crea la cuenta en Auth con el correo verificado (así Google se vincula a ella al primer
+  acceso), fija los claims derivados y escribe el documento con `role: admin` y `active: true`.
+- Los claims personalizados son cache derivada: si `/api/auth/sync-claims` no responde, el login
+  continúa y se registra una advertencia. Reglas y backend leen siempre el documento del usuario.

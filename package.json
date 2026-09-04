@@ -6,6 +6,7 @@
     "seed:roles": "node scripts/seedRoles.js",
     "seed:products": "node scripts/seedProducts.js",
     "seed:all": "npm run seed:roles && npm run seed:products",
+    "provision:admin": "node scripts/provisionAdmin.js",
     "start:web": "cd web && npm run dev",
     "start:backend": "node backend/whatsapp-webhook.js",
     "dev:all": "concurrently \"npm run start:web\" \"npm run start:backend\"",

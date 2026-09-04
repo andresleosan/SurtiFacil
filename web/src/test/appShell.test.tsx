@@ -15,6 +15,7 @@ type AuthUser = {
 const authMock = vi.hoisted(() => ({
   currentUser: null as AuthUser | null,
   loginUser: vi.fn(),
+  loginWithGoogle: vi.fn(),
   logoutUser: vi.fn(),
   getSafeAuthErrorMessage: vi.fn((_: unknown, fallback?: string) => fallback || 'Error'),
   subscribeToAuthState: vi.fn(),

@@ -551,6 +551,7 @@ Status: pendiente. No autorizado para despliegue.
 - [x] PWA: `viewport-fit=cover`, `theme-color` de marca, favicon, `orientation: any`.
 - [x] Pruebas: unitarias nuevas para shell, POS, inventario, ventas, modales y servicios; proyectos Playwright `mobile-chromium` y `tablet-chromium` con `responsive-smoke.spec.ts`.
 - [ ] Acotar `reportService`/`marginService` y medir Lighthouse móvil sobre staging (queda en Task 21/24).
+- [x] Inicio de sesión con Google (`loginWithGoogle`, popup con fallback a redirect) y script `provision:admin` para la cuenta administradora; claims derivados no bloquean el login sin backend.
 - [ ] Corrida E2E autenticada en móvil y tablet con cuenta QA (`QA_TEST_EMAIL`/`QA_TEST_PASSWORD`).
 
 Status: implementado en el workspace el 2026-09-04, sin commit ni despliegue. Evidence:

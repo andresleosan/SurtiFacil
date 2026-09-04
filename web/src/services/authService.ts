@@ -1,6 +1,9 @@
 import {
   getAuth,
+  GoogleAuthProvider,
   signInWithEmailAndPassword,
+  signInWithPopup,
+  signInWithRedirect,
   signOut,
   onIdTokenChanged,
   User as FirebaseUser
@@ -96,8 +99,9 @@ async function syncCustomClaims(uid: string, expectedUser: FirebaseUser): Promis
     await expectedUser.getIdToken(true);
   } catch {
     if (auth.currentUser !== expectedUser) throw new Error(AUTH_LOGIN_STALE_ERROR);
+    // Los claims son cache derivada (ADR-0001): reglas y backend leen /users/{uid}.
+    // Sin backend disponible el login sigue siendo valido; solo se pierde la optimizacion.
     console.warn(CLAIMS_SYNC_ERROR);
-    throw createAuthStateError('infrastructure', CLAIMS_SYNC_ERROR);
   }
 }
 
@@ -373,70 +377,129 @@ export async function loginUser(email: string, password: string): Promise<User> 
   try {
     const userCredential = await signInWithEmailAndPassword(auth, email, password);
     firebaseUser = userCredential.user;
-
-    if (auth.currentUser !== firebaseUser || sequence !== authTransitionSequence) {
-      throw new Error(AUTH_LOGIN_STALE_ERROR);
-    }
-
-    // Obtener datos del usuario desde Firestore
-    const userRef = doc(db, 'users', firebaseUser.uid);
-    let snapshot;
-    try {
-      snapshot = await getDoc(userRef);
-    } catch {
-      throw createAuthStateError('infrastructure');
-    }
-
-    if (!snapshot.exists()) {
-      throw createAuthStateError('unauthenticated');
-    }
-
-    const userData = snapshot.data() as Omit<User, 'id'>;
-
-    if (userData.active !== true) {
-      throw createAuthStateError('unauthenticated');
-    }
-
-    if (!isValidUserRole(userData.role)) {
-      throw createAuthStateError('unauthenticated');
-    }
-
-    if (auth.currentUser !== firebaseUser || sequence !== authTransitionSequence) {
-      throw new Error(AUTH_LOGIN_STALE_ERROR);
-    }
-
-    // Actualizar último login
-    try {
-      await updateDoc(userRef, {
-        lastLogin: serverTimestamp(),
-      });
-    } catch {
-      throw createAuthStateError('infrastructure');
-    }
-
-    if (auth.currentUser !== firebaseUser || sequence !== authTransitionSequence) {
-      throw new Error(AUTH_LOGIN_STALE_ERROR);
-    }
-
-    // Claims are derived for backend optimization; Firestore rules use the user document role.
-    await syncCustomClaims(firebaseUser.uid, firebaseUser);
-
-    if (auth.currentUser !== firebaseUser || sequence !== authTransitionSequence) {
-      throw new Error(AUTH_LOGIN_STALE_ERROR);
-    }
-
-    const claimUser = await mapFirebaseUser(firebaseUser, userData);
-    if (!claimUser) {
-      throw createAuthStateError('unauthenticated');
-    }
-    currentUser = claimUser;
-
-    return currentUser;
+    return await completeFirebaseLogin(firebaseUser, sequence);
   } catch (error: any) {
     if (firebaseUser) await clearFirebaseSession(firebaseUser);
     console.error('Error logging in.');
     throw error;
   }
+}
+
+const GOOGLE_POPUP_FALLBACK_CODES = new Set([
+  'auth/popup-blocked',
+  'auth/operation-not-supported-in-this-environment',
+  'auth/web-storage-unsupported',
+]);
+const GOOGLE_CANCEL_CODES = new Set(['auth/popup-closed-by-user', 'auth/cancelled-popup-request']);
+
+function getFirebaseErrorCode(error: unknown): string {
+  return typeof error === 'object' && error !== null && 'code' in error ? String(error.code) : '';
+}
+
+/**
+ * Inicia sesión con Google. Devuelve `null` si la persona cerró la ventana sin
+ * completar el flujo. Cuando el navegador bloquea ventanas emergentes (PWA
+ * instalada, WebViews) cae al flujo de redirección y la sesión se resuelve al
+ * volver mediante `subscribeToAuthState`.
+ */
+export async function loginWithGoogle(): Promise<User | null> {
+  if (isMockMode()) {
+    const user = mockUsers.find((candidate) => candidate.role === 'admin' && candidate.active) ?? null;
+    currentUser = user;
+    notifyMockAuthState();
+    return user;
+  }
+
+  requireFirebaseConfiguration();
+
+  const provider = new GoogleAuthProvider();
+  provider.setCustomParameters({ prompt: 'select_account' });
+
+  const sequence = ++authTransitionSequence;
+  let firebaseUser: FirebaseUser | null = null;
+  try {
+    let userCredential;
+    try {
+      userCredential = await signInWithPopup(auth, provider);
+    } catch (popupError) {
+      const code = getFirebaseErrorCode(popupError);
+      if (GOOGLE_CANCEL_CODES.has(code)) return null;
+      if (GOOGLE_POPUP_FALLBACK_CODES.has(code)) {
+        await signInWithRedirect(auth, provider);
+        return null;
+      }
+      throw popupError;
+    }
+    firebaseUser = userCredential.user;
+    return await completeFirebaseLogin(firebaseUser, sequence);
+  } catch (error: any) {
+    if (firebaseUser) await clearFirebaseSession(firebaseUser);
+    console.error('Error logging in with Google.');
+    throw error;
+  }
+}
+
+/**
+ * Valida el documento autoritativo del usuario recién autenticado, registra el
+ * último acceso y sincroniza los claims derivados. Común a todos los proveedores.
+ */
+async function completeFirebaseLogin(firebaseUser: FirebaseUser, sequence: number): Promise<User> {
+  if (auth.currentUser !== firebaseUser || sequence !== authTransitionSequence) {
+    throw new Error(AUTH_LOGIN_STALE_ERROR);
+  }
+
+  const userRef = doc(db, 'users', firebaseUser.uid);
+  let snapshot;
+  try {
+    snapshot = await getDoc(userRef);
+  } catch {
+    throw createAuthStateError('infrastructure');
+  }
+
+  if (!snapshot.exists()) {
+    throw createAuthStateError('unauthenticated');
+  }
+
+  const userData = snapshot.data() as Omit<User, 'id'>;
+
+  if (userData.active !== true) {
+    throw createAuthStateError('unauthenticated');
+  }
+
+  if (!isValidUserRole(userData.role)) {
+    throw createAuthStateError('unauthenticated');
+  }
+
+  if (auth.currentUser !== firebaseUser || sequence !== authTransitionSequence) {
+    throw new Error(AUTH_LOGIN_STALE_ERROR);
+  }
+
+  try {
+    await updateDoc(userRef, {
+      lastLogin: serverTimestamp(),
+    });
+  } catch {
+    throw createAuthStateError('infrastructure');
+  }
+
+  if (auth.currentUser !== firebaseUser || sequence !== authTransitionSequence) {
+    throw new Error(AUTH_LOGIN_STALE_ERROR);
+  }
+
+  // Claims are derived for backend optimization; Firestore rules use the user document role.
+  await syncCustomClaims(firebaseUser.uid, firebaseUser);
+
+  if (auth.currentUser !== firebaseUser || sequence !== authTransitionSequence) {
+    throw new Error(AUTH_LOGIN_STALE_ERROR);
+  }
+
+  const claimUser = await mapFirebaseUser(firebaseUser, userData);
+  if (!claimUser) {
+    throw createAuthStateError('unauthenticated');
+  }
+  currentUser = claimUser;
+
+  return currentUser;
 }
 
 /**

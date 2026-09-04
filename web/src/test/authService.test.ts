@@ -7,6 +7,8 @@ const firebaseAuthMock = vi.hoisted(() => ({
 import {
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
+  signInWithPopup,
+  signInWithRedirect,
   signOut,
   updateProfile,
 } from 'firebase/auth';
@@ -22,6 +24,11 @@ vi.mock('firebase/auth', () => ({
   onIdTokenChanged: vi.fn(),
   createUserWithEmailAndPassword: vi.fn(),
   signInWithEmailAndPassword: vi.fn(),
+  signInWithPopup: vi.fn(),
+  signInWithRedirect: vi.fn(),
+  GoogleAuthProvider: vi.fn(function GoogleAuthProviderMock(this: any) {
+    this.setCustomParameters = vi.fn();
+  }),
   signOut: vi.fn(),
   updateProfile: vi.fn(),
 }));
@@ -43,6 +50,7 @@ vi.mock('firebase/firestore', () => ({
 import {
   registerUser,
   loginUser,
+  loginWithGoogle,
   logoutUser,
   getUsers,
   updateUserRole,
@@ -353,7 +361,7 @@ describe('authService', () => {
       consoleError.mockRestore();
     });
 
-    it('rechaza el login si el backend no sincroniza los custom claims', async () => {
+    it('completa el login aunque el backend no sincronice los custom claims', async () => {
       const firebaseUser = {
         uid: 'claims-rejected-1',
         getIdToken: vi.fn().mockResolvedValue('token'),
@@ -375,10 +383,16 @@ describe('authService', () => {
       vi.stubGlobal('fetch', fetchMock);
       vi.mocked(signOut).mockResolvedValue(undefined);
 
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+      // ADR-0001: el documento /users/{uid} es la autoridad; los claims son cache derivada,
+      // por lo que un backend caido no debe impedir el acceso.
       await expect(
         loginUser('claims-rejected@test.com', 'password123'),
-      ).rejects.toThrow('No se pudieron sincronizar custom claims.');
-      expect(signOut).toHaveBeenCalled();
+      ).resolves.toMatchObject({ id: 'claims-rejected-1', role: 'cashier', active: true });
+      expect(signOut).not.toHaveBeenCalled();
+      expect(warn).toHaveBeenCalledWith('No se pudieron sincronizar custom claims.');
+      warn.mockRestore();
       expect(fetchMock).toHaveBeenCalledWith(
         'http://localhost:3000/api/auth/sync-claims',
         expect.objectContaining({
@@ -389,6 +403,55 @@ describe('authService', () => {
           body: JSON.stringify({ uid: 'claims-rejected-1' }),
         }),
       );
+    });
+
+    it('inicia sesión con Google y valida el documento autoritativo del usuario', async () => {
+      const firebaseUser = { uid: 'google-1', getIdToken: vi.fn().mockResolvedValue('token') };
+      firebaseAuthMock.currentUser = firebaseUser;
+      vi.mocked(signInWithPopup).mockResolvedValue({ user: firebaseUser } as any);
+      vi.mocked(doc).mockReturnValue({ path: 'users/google-1' } as any);
+      vi.mocked(getDoc).mockResolvedValue({
+        exists: () => true,
+        data: () => ({ email: 'admin@example.com', displayName: 'Admin', role: 'admin', active: true }),
+      } as any);
+      vi.mocked(updateDoc).mockResolvedValue(undefined);
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true }));
+
+      await expect(loginWithGoogle()).resolves.toMatchObject({ id: 'google-1', role: 'admin', active: true });
+      expect(signInWithPopup).toHaveBeenCalledOnce();
+      expect(updateDoc).toHaveBeenCalledWith({ path: 'users/google-1' }, expect.objectContaining({ lastLogin: expect.anything() }));
+      expect(signOut).not.toHaveBeenCalled();
+    });
+
+    it('cierra la sesión de Google cuando la cuenta no tiene documento de usuario', async () => {
+      const firebaseUser = { uid: 'google-unknown', getIdToken: vi.fn().mockResolvedValue('token') };
+      firebaseAuthMock.currentUser = firebaseUser;
+      vi.mocked(signInWithPopup).mockResolvedValue({ user: firebaseUser } as any);
+      vi.mocked(doc).mockReturnValue({ path: 'users/google-unknown' } as any);
+      vi.mocked(getDoc).mockResolvedValue({ exists: () => false } as any);
+      vi.mocked(signOut).mockResolvedValue(undefined);
+      const errorLog = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+      await expect(loginWithGoogle()).rejects.toMatchObject({ code: 'unauthenticated' });
+      expect(signOut).toHaveBeenCalled();
+      expect(errorLog).toHaveBeenCalledWith('Error logging in with Google.');
+      errorLog.mockRestore();
+    });
+
+    it('devuelve null si la persona cierra la ventana de Google', async () => {
+      vi.mocked(signInWithPopup).mockRejectedValue(Object.assign(new Error('closed'), { code: 'auth/popup-closed-by-user' }));
+
+      await expect(loginWithGoogle()).resolves.toBeNull();
+      expect(signOut).not.toHaveBeenCalled();
+      expect(signInWithRedirect).not.toHaveBeenCalled();
+    });
+
+    it('cae al flujo de redirección cuando el navegador bloquea la ventana emergente', async () => {
+      vi.mocked(signInWithPopup).mockRejectedValue(Object.assign(new Error('blocked'), { code: 'auth/popup-blocked' }));
+      vi.mocked(signInWithRedirect).mockImplementation(() => Promise.resolve() as Promise<never>);
+
+      await expect(loginWithGoogle()).resolves.toBeNull();
+      expect(signInWithRedirect).toHaveBeenCalledOnce();
     });
 
     it('expone solo un mensaje seguro cuando falla el registro de Firebase', async () => {

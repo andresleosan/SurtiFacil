@@ -213,7 +213,7 @@ describe('configured auth subscription', () => {
     expect(user.role).toBe('cashier');
   });
 
-    it('rejects login on a non-OK claims sync without exposing response details', async () => {
+    it('completes login on a non-OK claims sync without exposing response details', async () => {
     authMock.signInWithEmailAndPassword.mockResolvedValue({ user: authMock.firebaseUser });
     authMock.getDoc.mockResolvedValue({
       exists: () => true,
@@ -223,16 +223,16 @@ describe('configured auth subscription', () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 500 }));
     const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
 
-    await expect(loginUser('admin@example.com', 'password')).rejects.toThrow(
-      'No se pudieron sincronizar custom claims.',
-    );
+    // ADR-0001: los claims son cache derivada; el documento activo sigue siendo la autoridad.
+    await expect(loginUser('admin@example.com', 'password')).resolves.toMatchObject({ role: 'cashier', active: true });
 
     expect(warning).toHaveBeenCalledWith('No se pudieron sincronizar custom claims.');
+    expect(warning.mock.calls.flat().join(' ')).not.toContain('500');
     expect(authMock.firebaseUser.getIdToken).not.toHaveBeenCalledWith(true);
-    expect(authMock.signOut).toHaveBeenCalled();
+    expect(authMock.signOut).not.toHaveBeenCalled();
     });
 
-  it('rejects login when claims sync is unavailable and clears the session', async () => {
+  it('completes login when claims sync is unavailable and keeps the session', async () => {
     authMock.signInWithEmailAndPassword.mockResolvedValue({ user: authMock.firebaseUser });
     authMock.getDoc.mockResolvedValue({
       exists: () => true,
@@ -242,12 +242,11 @@ describe('configured auth subscription', () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('network token=secret')));
     const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
 
-    await expect(loginUser('admin@example.com', 'password')).rejects.toThrow(
-      'No se pudieron sincronizar custom claims.',
-    );
+    await expect(loginUser('admin@example.com', 'password')).resolves.toMatchObject({ role: 'cashier', active: true });
 
     expect(warning).toHaveBeenCalledWith('No se pudieron sincronizar custom claims.');
-    expect(authMock.signOut).toHaveBeenCalled();
+    expect(warning.mock.calls.flat().join(' ')).not.toContain('secret');
+    expect(authMock.signOut).not.toHaveBeenCalled();
   });
 
   it('returns an explicit infrastructure auth error when Firestore cannot be read', async () => {

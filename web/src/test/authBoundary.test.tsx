@@ -15,6 +15,7 @@ const authMock = vi.hoisted(() => ({
   currentUser: null as AuthUser | null,
   authStateListener: null as ((user: AuthUser | null) => void) | null,
   loginUser: vi.fn(),
+  loginWithGoogle: vi.fn(),
   logoutUser: vi.fn(),
   getSafeAuthErrorMessage: vi.fn((error: unknown, fallback?: string) => error instanceof Error ? error.message : fallback || 'Error de autenticación'),
   subscribeToAuthState: vi.fn(),
@@ -48,6 +49,7 @@ describe('auth boundary', () => {
     authMock.currentUser = null;
     authMock.authStateListener = null;
     authMock.loginUser.mockReset();
+    authMock.loginWithGoogle.mockReset();
     authMock.logoutUser.mockReset();
     authMock.getSafeAuthErrorMessage.mockReset().mockImplementation((error: unknown, fallback?: string) => {
       if (typeof error === 'object' && error !== null && 'code' in error && error instanceof Error) return error.message;
@@ -87,6 +89,19 @@ describe('auth boundary', () => {
 
     expect(await screen.findByText('No se pudo iniciar sesión. Verifica tus datos e inténtalo nuevamente.')).toBeInTheDocument();
     expect(screen.queryByText(/Firebase|invalid-credential/)).not.toBeInTheDocument();
+  });
+
+  it('starts Google sign-in from the login screen and shows a safe error when it fails', async () => {
+    authMock.loginWithGoogle.mockReset().mockRejectedValueOnce(new Error('Firebase: Error (auth/unauthorized-domain).'));
+    const user = userEvent.setup();
+    render(<App />);
+
+    await screen.findByRole('heading', { name: 'Iniciar sesión' });
+    await user.click(screen.getByRole('button', { name: 'Continuar con Google' }));
+
+    expect(authMock.loginWithGoogle).toHaveBeenCalledOnce();
+    expect(await screen.findByRole('alert')).toHaveTextContent('No se pudo iniciar sesión. Verifica tus datos e inténtalo nuevamente.');
+    expect(screen.queryByText(/Firebase|unauthorized-domain/)).not.toBeInTheDocument();
   });
 
   it('shows a safe infrastructure error instead of the login screen', async () => {
