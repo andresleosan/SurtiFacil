@@ -1,6 +1,34 @@
 const fs = require('node:fs');
 const path = require('node:path');
 
+/**
+ * firebase-admin >= 13 solo exporta la API modular desde `require('firebase-admin')`
+ * (sin `admin.credential`, `admin.auth()` ni `admin.apps`). Esta fachada conserva la
+ * superficie que usan las rutas del backend sobre los modulos `firebase-admin/app`,
+ * `firebase-admin/auth` y `firebase-admin/firestore`.
+ */
+function createFirebaseAdminFacade({
+  appModule = require('firebase-admin/app'),
+  authModule = require('firebase-admin/auth'),
+  firestoreModule = require('firebase-admin/firestore'),
+} = {}) {
+  return {
+    initializeApp: (options) => appModule.initializeApp(options),
+    get apps() {
+      return appModule.getApps();
+    },
+    credential: {
+      cert: (serviceAccount) => appModule.cert(serviceAccount),
+      applicationDefault: () => appModule.applicationDefault(),
+    },
+    auth: () => authModule.getAuth(),
+    firestore: {
+      FieldValue: firestoreModule.FieldValue,
+      Timestamp: firestoreModule.Timestamp,
+    },
+  };
+}
+
 function createFirebaseCredential({
   admin,
   env = process.env,
@@ -85,6 +113,7 @@ function initializeFirebaseAdmin({
 }
 
 module.exports = {
+  createFirebaseAdminFacade,
   createFirebaseAppOptions,
   createFirebaseCredential,
   initializeFirebaseAdmin,

@@ -9,7 +9,6 @@
  */
 
 const express = require('express');
-const admin = require('firebase-admin');
 const { Timestamp, getFirestore } = require('firebase-admin/firestore');
 const cors = require('cors');
 const { createProvisionUserHandler, createRateLimiter } = require('./userProvisioning');
@@ -25,7 +24,7 @@ const { createSalesRouter } = require('./salesRoutes');
 const { createAnthropicRouter } = require('./anthropicRoutes');
 const { createWhatsAppMessageSender } = require('./whatsappProvider');
 const { parseFrontendOrigins } = require('./corsConfig');
-const { initializeFirebaseAdmin } = require('./firebaseAdmin');
+const { createFirebaseAdminFacade, initializeFirebaseAdmin } = require('./firebaseAdmin');
 const {
   createWhatsAppWebhookHandler,
   DEFAULT_AUTO_RESPONSE,
@@ -33,6 +32,7 @@ const {
 } = require('./whatsappWebhook');
 require('dotenv').config();
 
+const admin = createFirebaseAdminFacade();
 const app = express();
 
 // CORS configurado solo para los orígenes del frontend

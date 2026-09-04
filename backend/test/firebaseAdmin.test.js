@@ -4,6 +4,7 @@ const path = require('node:path');
 const test = require('node:test');
 
 const {
+  createFirebaseAdminFacade,
   createFirebaseAppOptions,
   createFirebaseCredential,
   initializeFirebaseAdmin,
@@ -192,4 +193,40 @@ test('Firebase Admin initializes once and returns Firestore without exposing cre
   assert.equal(first, db);
   assert.equal(second, db);
   assert.deepEqual(initialized, [{ credential: { source: 'adc' } }]);
+});
+
+test('the admin facade exposes the legacy surface over the modular firebase-admin 14 modules', () => {
+  const facade = createFirebaseAdminFacade();
+  assert.equal(typeof facade.initializeApp, 'function');
+  assert.equal(typeof facade.credential.cert, 'function');
+  assert.equal(typeof facade.credential.applicationDefault, 'function');
+  assert.equal(typeof facade.auth, 'function');
+  assert.ok(Array.isArray(facade.apps));
+  assert.equal(typeof facade.firestore.FieldValue.serverTimestamp, 'function');
+  assert.match(serverSource, /const admin = createFirebaseAdminFacade\(\);/);
+  assert.doesNotMatch(serverSource, /require\('firebase-admin'\)/);
+});
+
+test('the admin facade initializes with an inline service account and resolves auth lazily', () => {
+  const calls = [];
+  const facade = createFirebaseAdminFacade({
+    appModule: {
+      initializeApp: (options) => { calls.push(['init', options]); return { name: 'app' }; },
+      getApps: () => [],
+      cert: (value) => ({ certified: value.project_id }),
+      applicationDefault: () => assert.fail('ADC must not be used'),
+    },
+    authModule: { getAuth: () => ({ verifyIdToken: async () => ({ uid: 'u1' }) }) },
+    firestoreModule: { FieldValue: { serverTimestamp: () => 'ts' }, Timestamp: {} },
+  });
+
+  const firestore = initializeFirebaseAdmin({
+    admin: facade,
+    getFirestore: () => 'firestore',
+    env: { FIREBASE_SERVICE_ACCOUNT_JSON: '{"project_id":"p","client_email":"e","private_key":"k"}' },
+  });
+
+  assert.equal(firestore, 'firestore');
+  assert.deepEqual(calls, [['init', { credential: { certified: 'p' } }]]);
+  assert.equal(typeof facade.auth().verifyIdToken, 'function');
 });
