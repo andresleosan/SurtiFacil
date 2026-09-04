@@ -20,8 +20,13 @@ const VALID_ROLES = new Set(['admin', 'manager', 'cashier']);
 
 function loadFirebaseAdmin() {
   const candidates = [path.join(__dirname, '..', 'backend'), path.join(__dirname, '..')];
+  const load = (name) => require(require.resolve(name, { paths: candidates }));
   try {
-    return require(require.resolve('firebase-admin', { paths: candidates }));
+    return {
+      app: load('firebase-admin/app'),
+      auth: load('firebase-admin/auth'),
+      firestore: load('firebase-admin/firestore'),
+    };
   } catch {
     console.error('ERROR: falta `firebase-admin`. Ejecuta `npm ci` dentro de backend/ primero.');
     process.exit(1);
@@ -53,18 +58,21 @@ function parseArgs(argv) {
 async function main() {
   const { email, name, role } = parseArgs(process.argv.slice(2));
   const admin = loadFirebaseAdmin();
+  const { getApps, initializeApp, applicationDefault, cert } = admin.app;
+  const { getAuth } = admin.auth;
+  const { getFirestore, FieldValue } = admin.firestore;
 
-  if (!admin.apps.length) {
+  if (!getApps().length) {
     const serviceAccountPath = process.env.FIREBASE_SERVICE_ACCOUNT_PATH?.trim();
-    admin.initializeApp({
+    initializeApp({
       credential: serviceAccountPath
-        ? admin.credential.cert(require(path.resolve(serviceAccountPath)))
-        : admin.credential.applicationDefault(),
+        ? cert(require(path.resolve(serviceAccountPath)))
+        : applicationDefault(),
     });
   }
 
-  const auth = admin.auth();
-  const db = admin.firestore();
+  const auth = getAuth();
+  const db = getFirestore();
 
   let userRecord;
   let created = false;
@@ -84,7 +92,7 @@ async function main() {
 
   const userRef = db.collection('users').doc(userRecord.uid);
   const snapshot = await userRef.get();
-  const now = admin.firestore.FieldValue.serverTimestamp();
+  const now = FieldValue.serverTimestamp();
   await userRef.set(
     {
       email,
@@ -92,8 +100,8 @@ async function main() {
       role,
       active: true,
       ...(snapshot.exists ? {} : { createdAt: now }),
-      deletedAt: admin.firestore.FieldValue.delete(),
-      deletedByUid: admin.firestore.FieldValue.delete(),
+      deletedAt: FieldValue.delete(),
+      deletedByUid: FieldValue.delete(),
     },
     { merge: true },
   );
