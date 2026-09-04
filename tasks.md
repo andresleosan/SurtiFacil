@@ -540,6 +540,17 @@ Status: pendiente y bloqueada por checkpoint de infraestructura. Prioridad: P0 o
 
 Status: desplegado el 2026-09-04. Evidence: ADR-0003, `docs/DEPLOY.md`.
 
+### Task 27: Fiados (clientes con deuda)
+
+- [x] Modelo: `credit_customers` (nombre, teléfono, notas, `balance_cents`, `active`) y `credit_entries` inmutables (`debt`/`payment`, monto, descripción, `sale_id`, actor).
+- [x] Reglas: lectura para usuarios activos; alta/edición de clientes solo admin/manager; cajeros solo mueven el saldo junto con un movimiento válido firmado con su uid. Índice `credit_entries(customer_id, createdAt desc)`.
+- [x] Sección "Fiados" entre Empleados y WhatsApp (todos los roles): lista con deuda total, búsqueda, detalle con movimientos, anotar fiado y registrar abono (nunca por encima de la deuda).
+- [x] POS: método de pago "Fiado" con selector de cliente activo; el backend registra la deuda con el total autoritativo en la misma transacción de la venta.
+- [x] Backend 83/83, frontend 280/280. Reglas e índices desplegados a `smartmarket-b37ce`.
+- [ ] Escenarios de emulador para las reglas de fiados en `qa/tests/firestore-rules.cjs`.
+
+Status: implementado y desplegado el 2026-09-04.
+
 ### Task 25: Gate de produccion
 
 - [ ] Cerrar Tasks 17-24 sin hallazgos criticos y con evidencia aprobada.

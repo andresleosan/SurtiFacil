@@ -19,6 +19,7 @@ export const NAV_ITEMS: readonly NavItem[] = [
   { page: 'orders', label: 'Pedidos', icon: 'clipboard' },
   { page: 'suppliers', label: 'Proveedores', icon: 'truck' },
   { page: 'employees', label: 'Empleados', icon: 'users' },
+  { page: 'credits', label: 'Fiados', icon: 'wallet' },
   { page: 'whatsapp', label: 'WhatsApp', icon: 'chat' },
 ];
 

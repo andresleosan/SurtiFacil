@@ -40,6 +40,14 @@
         { "fieldPath": "stock", "order": "ASCENDING" }
       ]
     }
+    {
+      "collectionGroup": "credit_entries",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "customer_id", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    }
   ],
   "fieldOverrides": []
 }

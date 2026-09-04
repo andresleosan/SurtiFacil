@@ -26,7 +26,8 @@ export type IconName =
   | 'chevron-left'
   | 'menu'
   | 'alert'
-  | 'check';
+  | 'check'
+  | 'wallet';
 
 const PATHS: Record<IconName, string> = {
   home: 'M3 11.5 12 4l9 7.5M5 10v10h5v-6h4v6h5V10',
@@ -55,6 +56,7 @@ const PATHS: Record<IconName, string> = {
   menu: 'M4 7h16M4 12h16M4 17h16',
   alert: 'M12 9v4m0 4h.01M10.3 3.9 2.5 18a2 2 0 0 0 1.7 3h15.6a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z',
   check: 'M5 13l4 4L19 7',
+  wallet: 'M3 7a2 2 0 0 1 2-2h12v3M3 7v10a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7a1 1 0 0 0-1-1H5a2 2 0 0 1-2-2Zm13 6h2',
 };
 
 interface IconProps extends Omit<SVGProps<SVGSVGElement>, 'name'> {

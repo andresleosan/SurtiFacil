@@ -29,6 +29,7 @@ const PAYMENT_LABELS: Record<string, string> = {
   cash: '💵 Efectivo',
   card: '💳 Tarjeta',
   other: '📱 Otro',
+  credit: '📒 Fiado',
 };
 
 const getPaymentMethodLabel = (method: string) => PAYMENT_LABELS[method] ?? method;

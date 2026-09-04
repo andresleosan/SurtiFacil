@@ -14,8 +14,8 @@ import {
 } from 'firebase/firestore';
 import { getAuth } from 'firebase/auth';
 import { db } from '../firebase/config';
-import { Product, SaleItem, Sale } from '../firebase/db';
-import { mockProducts, addLocalSale, getLocalSales } from './mockData';
+import { PaymentMethod, Product, SaleItem, Sale } from '../firebase/db';
+import { mockProducts, addLocalSale, getLocalSales, mockCreditCustomers, addLocalCreditEntry } from './mockData';
 import { refreshProducts } from './productService';
 
 function isMockMode(): boolean {
@@ -59,15 +59,19 @@ export async function getProducts(): Promise<Product[]> {
  */
 export async function createSale(
   cartItems: SaleItem[],
-  paymentMethod: 'cash' | 'card' | 'other'
+  paymentMethod: PaymentMethod,
+  creditCustomerId?: string,
 ): Promise<string> {
   if (!cartItems || cartItems.length === 0) {
     throw new Error('El carrito está vacío');
   }
+  if (paymentMethod === 'credit' && !creditCustomerId) {
+    throw new Error('Selecciona el cliente al que se le fía');
+  }
 
   if (isMockMode()) {
     console.log('ℹ️ Creando venta en datos mock (Firebase no configurado)');
-    return createMockSale(cartItems, paymentMethod);
+    return createMockSale(cartItems, paymentMethod, creditCustomerId);
   }
 
   const user = auth.currentUser;
@@ -84,6 +88,7 @@ export async function createSale(
       body: JSON.stringify({
         items: cartItems.map(({ product_id, quantity }) => ({ product_id, quantity })),
         payment_method: paymentMethod,
+        ...(paymentMethod === 'credit' ? { credit_customer_id: creditCustomerId } : {}),
       }),
     });
     const result = await response.json().catch(() => ({}));
@@ -114,8 +119,15 @@ export async function createSale(
  */
 function createMockSale(
   cartItems: SaleItem[],
-  paymentMethod: 'cash' | 'card' | 'other'
+  paymentMethod: PaymentMethod,
+  creditCustomerId?: string,
 ): string {
+  const creditCustomer = paymentMethod === 'credit'
+    ? mockCreditCustomers.find((candidate) => candidate.id === creditCustomerId && candidate.active)
+    : undefined;
+  if (paymentMethod === 'credit' && !creditCustomer) {
+    throw new Error('Cliente de fiado no encontrado');
+  }
   // Validar stock disponible
   for (const item of cartItems) {
     const product = mockProducts.find((p) => p.id === item.product_id);
@@ -162,7 +174,24 @@ function createMockSale(
     schema_version: 2,
     created_by_uid: 'mock-user',
     created_by_role: 'cashier',
+    ...(creditCustomer ? { credit_customer_id: creditCustomer.id, credit_customer_name: creditCustomer.name } : {}),
   };
+
+  if (creditCustomer) {
+    creditCustomer.balance_cents += total;
+    creditCustomer.last_entry_at = new Date();
+    addLocalCreditEntry({
+      id: `entry_${Date.now()}`,
+      customer_id: creditCustomer.id,
+      type: 'debt',
+      amount_cents: total,
+      description: 'Venta fiada',
+      sale_id: saleId,
+      created_by_uid: 'mock-user',
+      created_by_role: 'cashier',
+      createdAt: new Date(),
+    });
+  }
 
   // Actualizar stock en datos mock
   mockProducts.forEach((product) => {

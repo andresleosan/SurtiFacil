@@ -7,7 +7,8 @@ const {
   createFirebaseActiveRoleMiddleware,
 } = require('./whatsappAdminRoutes');
 
-const PAYMENT_METHODS = new Set(['cash', 'card', 'other']);
+const PAYMENT_METHODS = new Set(['cash', 'card', 'other', 'credit']);
+const MAX_CREDIT_CUSTOMER_ID_LENGTH = 128;
 const MAX_SALE_ITEMS = 20;
 const MAX_ITEM_QUANTITY = 1_000;
 const MAX_PRODUCT_ID_LENGTH = 128;
@@ -27,9 +28,20 @@ function hasExactKeys(value, keys) {
 }
 
 function validateSaleRequest(body) {
-  if (!hasExactKeys(body, ['items', 'payment_method'])) return false;
-  if (!Array.isArray(body.items) || body.items.length === 0 || body.items.length > MAX_SALE_ITEMS) return false;
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return false;
   if (typeof body.payment_method !== 'string' || !PAYMENT_METHODS.has(body.payment_method)) return false;
+  if (body.payment_method === 'credit') {
+    // Una venta fiada exige el cliente al que se le anota la deuda.
+    if (!hasExactKeys(body, ['items', 'payment_method', 'credit_customer_id'])) return false;
+    if (
+      typeof body.credit_customer_id !== 'string'
+      || body.credit_customer_id.trim().length === 0
+      || body.credit_customer_id.length > MAX_CREDIT_CUSTOMER_ID_LENGTH
+    ) return false;
+  } else if (!hasExactKeys(body, ['items', 'payment_method'])) {
+    return false;
+  }
+  if (!Array.isArray(body.items) || body.items.length === 0 || body.items.length > MAX_SALE_ITEMS) return false;
 
   const ids = new Set();
   return body.items.every((item) => {
@@ -101,6 +113,32 @@ function createSalesHandler({ admin, db }) {
     try {
       const saleId = await db.runTransaction(async (transaction) => {
         const authoritativeItems = [];
+        const isCreditSale = req.body.payment_method === 'credit';
+        let creditCustomerRef = null;
+        let creditCustomer = null;
+
+        if (isCreditSale) {
+          creditCustomerRef = db.collection('credit_customers').doc(req.body.credit_customer_id);
+          const customerSnapshot = await transaction.get(creditCustomerRef);
+          if (!customerSnapshot.exists) {
+            const error = new Error('Credit customer not found');
+            error.code = 'creditCustomerNotFound';
+            throw error;
+          }
+          creditCustomer = customerSnapshot.data();
+          if (
+            typeof creditCustomer?.name !== 'string'
+            || creditCustomer.name.trim().length === 0
+            || (creditCustomer.balance_cents != null && !Number.isSafeInteger(creditCustomer.balance_cents))
+          ) {
+            throw new Error('Invalid credit customer data');
+          }
+          if (creditCustomer.active !== true) {
+            const error = new Error('Credit customer inactive');
+            error.code = 'creditCustomerInactive';
+            throw error;
+          }
+        }
 
         for (const requestedItem of req.body.items) {
           const productRef = db.collection('products').doc(requestedItem.product_id);
@@ -164,9 +202,35 @@ function createSalesHandler({ admin, db }) {
           total_cost_cents: totalCost,
           payment_method: req.body.payment_method,
           items,
+          ...(isCreditSale
+            ? { credit_customer_id: creditCustomerRef.id, credit_customer_name: creditCustomer.name }
+            : {}),
         });
         for (const item of authoritativeItems) {
           transaction.update(item.ref, { stock: item.stock - item.quantity });
+        }
+
+        if (isCreditSale) {
+          // La deuda se anota con el total autoritativo de la venta, en la misma transaccion.
+          const currentBalance = creditCustomer.balance_cents ?? 0;
+          const nextBalance = currentBalance + total;
+          if (!Number.isSafeInteger(nextBalance)) throw new Error('Credit balance is out of range');
+          const entryRef = db.collection('credit_entries').doc();
+          transaction.set(entryRef, {
+            customer_id: creditCustomerRef.id,
+            type: 'debt',
+            amount_cents: total,
+            description: 'Venta fiada',
+            sale_id: saleRef.id,
+            created_by_uid: actorUid,
+            created_by_role: actorRole,
+            createdAt: timestamp,
+          });
+          transaction.update(creditCustomerRef, {
+            balance_cents: nextBalance,
+            updatedAt: timestamp,
+            last_entry_at: timestamp,
+          });
         }
 
         return saleRef.id;
@@ -174,8 +238,8 @@ function createSalesHandler({ admin, db }) {
 
       return res.status(201).json({ saleId });
     } catch (error) {
-      if (error?.code === 'productNotFound') return sendApiError(res, 404, 'notFound');
-      if (error?.code === 'insufficientStock') return sendApiError(res, 400, 'badRequest');
+      if (error?.code === 'productNotFound' || error?.code === 'creditCustomerNotFound') return sendApiError(res, 404, 'notFound');
+      if (error?.code === 'insufficientStock' || error?.code === 'creditCustomerInactive') return sendApiError(res, 400, 'badRequest');
       console.error(getSafeApiLogMessage('Sale creation'));
       return sendApiError(res, 500);
     }

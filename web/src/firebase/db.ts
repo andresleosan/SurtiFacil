@@ -51,6 +51,8 @@ export interface SaleItem {
   category?: string;
 }
 
+export type PaymentMethod = 'cash' | 'card' | 'other' | 'credit';
+
 /**
  * Tipo para una venta en Firestore
  */
@@ -58,8 +60,10 @@ export interface Sale {
   id: string;
   date: any; // Firestore Timestamp
   total: number; // Total en centavos
-  payment_method: "cash" | "card" | "other";
+  payment_method: PaymentMethod;
   items: SaleItem[];
+  credit_customer_id?: string;
+  credit_customer_name?: string;
   createdAt?: any;
   schema_version?: 2;
   created_by_uid?: string;
@@ -107,5 +111,38 @@ export interface PurchaseOrder {
   expectedDate?: any;
   receivedDate?: any;
   notes?: string;
+  createdAt?: any;
+}
+
+/**
+ * Cliente al que la tienda le fía (se le anotan deudas y abonos)
+ */
+export interface CreditCustomer {
+  id: string;
+  name: string;
+  phone?: string;
+  notes?: string;
+  /** Saldo pendiente en centavos (cache de los movimientos; nunca negativo) */
+  balance_cents: number;
+  active: boolean;
+  createdAt?: any;
+  updatedAt?: any;
+  last_entry_at?: any;
+}
+
+export type CreditEntryType = 'debt' | 'payment';
+
+/**
+ * Movimiento del libro de fiados: deuda anotada o abono recibido
+ */
+export interface CreditEntry {
+  id: string;
+  customer_id: string;
+  type: CreditEntryType;
+  amount_cents: number;
+  description: string;
+  sale_id?: string;
+  created_by_uid: string;
+  created_by_role?: UserRole;
   createdAt?: any;
 }

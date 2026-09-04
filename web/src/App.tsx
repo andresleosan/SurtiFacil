@@ -14,6 +14,7 @@ const PAGE_COMPONENTS: Record<Page, ComponentType> = {
   sales: lazy(() => import('./components/Sales')),
   'create-sale': lazy(() => import('./components/CreateSale')),
   employees: lazy(() => import('./components/UserManagement')),
+  credits: lazy(() => import('./components/Credits')),
   suppliers: lazy(() => import('./components/Suppliers')),
   orders: lazy(() => import('./components/PurchaseOrders')),
   reports: lazy(() => import('./components/Reports')),

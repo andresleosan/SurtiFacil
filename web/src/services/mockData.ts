@@ -3,7 +3,7 @@
  * Se usan cuando Firebase no está configurado
  */
 
-import { Product, Sale, SaleItem, Supplier, PurchaseOrder } from '../firebase/db';
+import { Product, Sale, SaleItem, Supplier, PurchaseOrder, CreditCustomer, CreditEntry } from '../firebase/db';
 
 const baseProducts: Product[] = [
   {
@@ -173,3 +173,22 @@ export const mockSuppliers: Supplier[] = [
 ];
 
 export const mockOrders: PurchaseOrder[] = [];
+
+// ---- Fiados (clientes con deuda) ----
+export const mockCreditCustomers: CreditCustomer[] = [
+  { id: 'cc1', name: 'Doña Rosa', phone: '3001234567', balance_cents: 1550, active: true, createdAt: new Date(2026, 7, 1) },
+  { id: 'cc2', name: 'Don Carlos', phone: '3109876543', notes: 'Paga los viernes', balance_cents: 0, active: true, createdAt: new Date(2026, 7, 10) },
+];
+
+let localCreditEntries: CreditEntry[] = [
+  { id: 'ce1', customer_id: 'cc1', type: 'debt', amount_cents: 2550, description: 'Mercado semanal', created_by_uid: 'mock-user', createdAt: new Date(2026, 8, 1, 9, 0) },
+  { id: 'ce2', customer_id: 'cc1', type: 'payment', amount_cents: 1000, description: 'Abono', created_by_uid: 'mock-user', createdAt: new Date(2026, 8, 3, 17, 30) },
+];
+
+export function getLocalCreditEntries(): CreditEntry[] {
+  return [...localCreditEntries];
+}
+
+export function addLocalCreditEntry(entry: CreditEntry): void {
+  localCreditEntries = [entry, ...localCreditEntries];
+}

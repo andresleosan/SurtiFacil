@@ -123,6 +123,45 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
+    // Fiados - clientes con deuda. El saldo es cache de los movimientos; los
+    // cajeros solo pueden mover el saldo junto con un movimiento valido.
+    function isValidCreditCustomer(data) {
+      return data.keys().hasAll(['name', 'balance_cents', 'active'])
+        && data.keys().hasOnly(['name', 'phone', 'notes', 'balance_cents', 'active', 'createdAt', 'updatedAt', 'last_entry_at'])
+        && data.name is string && data.name.size() > 0 && data.name.size() <= 100
+        && (!('phone' in data) || (data.phone is string && data.phone.size() <= 30))
+        && (!('notes' in data) || (data.notes is string && data.notes.size() <= 300))
+        && data.balance_cents is int && data.balance_cents >= 0
+        && data.active is bool;
+    }
+
+    match /credit_customers/{customerId} {
+      allow read: if isActiveUser();
+      allow create: if isManagerUser() && isValidCreditCustomer(request.resource.data) && request.resource.data.balance_cents == 0;
+      allow update: if isValidCreditCustomer(request.resource.data)
+        && (isManagerUser()
+            || (isActiveUser()
+                && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['balance_cents', 'updatedAt', 'last_entry_at'])));
+      allow delete: if false;
+    }
+
+    // Movimientos de fiado: inmutables, siempre firmados por quien los registra.
+    match /credit_entries/{entryId} {
+      allow read: if isActiveUser();
+      allow create: if isActiveUser()
+        && request.resource.data.keys().hasAll(['customer_id', 'type', 'amount_cents', 'description', 'created_by_uid', 'createdAt'])
+        && request.resource.data.keys().hasOnly(['customer_id', 'type', 'amount_cents', 'description', 'sale_id', 'created_by_uid', 'created_by_role', 'createdAt'])
+        && request.resource.data.customer_id is string
+        && exists(/databases/$(database)/documents/credit_customers/$(request.resource.data.customer_id))
+        && request.resource.data.type in ['debt', 'payment']
+        && request.resource.data.amount_cents is int
+        && request.resource.data.amount_cents > 0
+        && request.resource.data.description is string
+        && request.resource.data.description.size() <= 200
+        && request.resource.data.created_by_uid == request.auth.uid;
+      allow update, delete: if false;
+    }
+
     // Roles - solo admins
     match /roles/{roleId} {
       allow read: if isActiveUser();

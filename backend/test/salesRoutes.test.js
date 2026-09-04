@@ -27,7 +27,7 @@ async function requestRoute(router, { body, headers = {} } = {}) {
   return result;
 }
 
-function createSalesDependencies({ role = 'cashier', active = true, products = {} } = {}) {
+function createSalesDependencies({ role = 'cashier', active = true, products = {}, creditCustomers = {} } = {}) {
   const writes = [];
   const users = {
     cashierToken: { uid: 'cashier-1' },
@@ -52,11 +52,19 @@ function createSalesDependencies({ role = 'cashier', active = true, products = {
       }
       if (name === 'products') return { doc: (id) => ({ id }) };
       if (name === 'sales') return { doc: () => ({ id: 'sale-1' }) };
+      if (name === 'credit_customers') return { doc: (id) => ({ id, collection: 'credit_customers' }) };
+      if (name === 'credit_entries') return { doc: () => ({ id: 'entry-1' }) };
       throw new Error(`unexpected collection ${name}`);
     },
     async runTransaction(callback) {
       const transaction = {
         async get(ref) {
+          if (ref.collection === 'credit_customers') {
+            const customer = creditCustomers[ref.id];
+            return customer
+              ? { exists: true, id: ref.id, data: () => customer }
+              : { exists: false, id: ref.id, data: () => undefined };
+          }
           const product = products[ref.id];
           return product
             ? { exists: true, id: ref.id, data: () => product }
@@ -361,4 +369,79 @@ test('sales endpoint rejects totals outside the safe integer range', async () =>
   assert.equal(result.status, 500);
   assert.deepEqual(result.body, { error: 'Error interno del servidor' });
   assert.equal(dependencies.writes.length, 0);
+});
+
+test('credit sales require a customer id and reject it for other payment methods', async () => {
+  const dependencies = createSalesDependencies({ products: { p1: { name: 'Arroz', price_cents: 250, stock: 4 } } });
+  const missing = await requestRoute(routerFor(dependencies), {
+    headers: { Authorization: 'Bearer cashierToken' },
+    body: { items: [{ product_id: 'p1', quantity: 1 }], payment_method: 'credit' },
+  });
+  const unexpected = await requestRoute(routerFor(dependencies), {
+    headers: { Authorization: 'Bearer cashierToken' },
+    body: { items: [{ product_id: 'p1', quantity: 1 }], payment_method: 'cash', credit_customer_id: 'c1' },
+  });
+
+  assert.equal(missing.status, 400);
+  assert.equal(unexpected.status, 400);
+  assert.deepEqual(dependencies.writes, []);
+});
+
+test('credit sales record the debt with the authoritative total in the same transaction', async () => {
+  const dependencies = createSalesDependencies({
+    products: { p1: { name: 'Arroz', price_cents: 250, stock: 4, last_cost_cents: 100 } },
+    creditCustomers: { c1: { name: 'Doña Rosa', active: true, balance_cents: 1000 } },
+  });
+  const result = await requestRoute(routerFor(dependencies), {
+    headers: { Authorization: 'Bearer cashierToken' },
+    body: { items: [{ product_id: 'p1', quantity: 2 }], payment_method: 'credit', credit_customer_id: 'c1' },
+  });
+
+  assert.equal(result.status, 201);
+  assert.deepEqual(result.body, { saleId: 'sale-1' });
+  const sale = dependencies.writes.find((write) => write.id === 'sale-1');
+  assert.equal(sale.data.payment_method, 'credit');
+  assert.equal(sale.data.credit_customer_id, 'c1');
+  assert.equal(sale.data.credit_customer_name, 'Doña Rosa');
+  assert.equal(sale.data.total, 500);
+  assert.deepEqual(dependencies.writes.slice(-2), [
+    {
+      type: 'set',
+      id: 'entry-1',
+      data: {
+        customer_id: 'c1',
+        type: 'debt',
+        amount_cents: 500,
+        description: 'Venta fiada',
+        sale_id: 'sale-1',
+        created_by_uid: 'cashier-1',
+        created_by_role: 'cashier',
+        createdAt: 'server-timestamp',
+      },
+    },
+    {
+      type: 'update',
+      id: 'c1',
+      data: { balance_cents: 1500, updatedAt: 'server-timestamp', last_entry_at: 'server-timestamp' },
+    },
+  ]);
+});
+
+test('credit sales fail closed for unknown or inactive customers without writing', async () => {
+  const dependencies = createSalesDependencies({
+    products: { p1: { name: 'Arroz', price_cents: 250, stock: 4 } },
+    creditCustomers: { inactive: { name: 'Cerrado', active: false, balance_cents: 0 } },
+  });
+  const unknown = await requestRoute(routerFor(dependencies), {
+    headers: { Authorization: 'Bearer cashierToken' },
+    body: { items: [{ product_id: 'p1', quantity: 1 }], payment_method: 'credit', credit_customer_id: 'nope' },
+  });
+  const inactive = await requestRoute(routerFor(dependencies), {
+    headers: { Authorization: 'Bearer cashierToken' },
+    body: { items: [{ product_id: 'p1', quantity: 1 }], payment_method: 'credit', credit_customer_id: 'inactive' },
+  });
+
+  assert.equal(unknown.status, 404);
+  assert.equal(inactive.status, 400);
+  assert.deepEqual(dependencies.writes, []);
 });

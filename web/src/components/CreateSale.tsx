@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react';
-import { Product, SaleItem } from '../firebase/db';
+import { CreditCustomer, PaymentMethod, Product, SaleItem } from '../firebase/db';
 import { createSale } from '../services/saleService';
 import { useProducts } from '../hooks/useProducts';
+import { useCreditCustomers } from '../hooks/useCreditCustomers';
 import { useIsMobile } from '../hooks/useMediaQuery';
 import { useBarcode } from '../hooks/useBarcode';
 import BarcodeScanner from './BarcodeScanner';
@@ -9,12 +10,11 @@ import { Icon } from './ui/Icon';
 import { Modal } from './ui/Modal';
 import { PageHeader } from './ui/PageHeader';
 
-type PaymentMethod = 'cash' | 'card' | 'other';
-
 const PAYMENT_OPTIONS: Array<{ value: PaymentMethod; label: string; emoji: string }> = [
   { value: 'cash', label: 'Efectivo', emoji: '💵' },
   { value: 'card', label: 'Tarjeta', emoji: '💳' },
   { value: 'other', label: 'Otro', emoji: '📱' },
+  { value: 'credit', label: 'Fiado', emoji: '📒' },
 ];
 
 const formatPrice = (cents: number) => `$${(cents / 100).toFixed(2)}`;
@@ -28,11 +28,13 @@ function normalize(value: string): string {
 
 const CreateSale = () => {
   const { products, loading: productsLoading, error: productsError } = useProducts();
+  const { customers: creditCustomers } = useCreditCustomers();
   const isMobile = useIsMobile();
 
   const [cartItems, setCartItems] = useState<SaleItem[]>([]);
   const [search, setSearch] = useState('');
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('cash');
+  const [creditCustomerId, setCreditCustomerId] = useState('');
   const [cartOpen, setCartOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
@@ -145,13 +147,18 @@ const CreateSale = () => {
       setError('El carrito está vacío');
       return;
     }
+    if (paymentMethod === 'credit' && !creditCustomerId) {
+      setError('Selecciona el cliente al que se le fía');
+      return;
+    }
     try {
       setSubmitting(true);
       setError('');
-      await createSale(cartItems, paymentMethod);
+      await createSale(cartItems, paymentMethod, paymentMethod === 'credit' ? creditCustomerId : undefined);
       setSuccess(true);
       setCartItems([]);
       setPaymentMethod('cash');
+      setCreditCustomerId('');
       setCartOpen(false);
       window.setTimeout(() => setSuccess(false), 4000);
     } catch (err: unknown) {
@@ -173,6 +180,9 @@ const CreateSale = () => {
       onPaymentChange={setPaymentMethod}
       onConfirm={handleConfirmSale}
       compact={isMobile}
+      creditCustomers={creditCustomers.filter((customer) => customer.active)}
+      creditCustomerId={creditCustomerId}
+      onCreditCustomerChange={setCreditCustomerId}
     />
   );
 
@@ -310,6 +320,9 @@ const CreateSale = () => {
 };
 
 interface CartPanelProps {
+  creditCustomers: CreditCustomer[];
+  creditCustomerId: string;
+  onCreditCustomerChange: (customerId: string) => void;
   items: SaleItem[];
   total: number;
   unitCount: number;
@@ -323,6 +336,9 @@ interface CartPanelProps {
 }
 
 function CartPanel({
+  creditCustomers,
+  creditCustomerId,
+  onCreditCustomerChange,
   items,
   total,
   unitCount,
@@ -397,7 +413,7 @@ function CartPanel({
 
       <fieldset>
         <legend className="mb-2 text-sm font-medium text-sf-text">Método de pago</legend>
-        <div className="grid grid-cols-3 gap-2" role="radiogroup">
+        <div className="grid grid-cols-4 gap-2" role="radiogroup">
           {PAYMENT_OPTIONS.map((option) => {
             const selected = option.value === paymentMethod;
             return (
@@ -419,10 +435,32 @@ function CartPanel({
         </div>
       </fieldset>
 
+      {paymentMethod === 'credit' && (
+        <div>
+          <label htmlFor="credit-customer" className="mb-1 block text-sm font-medium text-sf-text">Cliente al que se le fía</label>
+          <select
+            id="credit-customer"
+            value={creditCustomerId}
+            onChange={(event) => onCreditCustomerChange(event.target.value)}
+            className="input"
+          >
+            <option value="">-- Selecciona un cliente --</option>
+            {creditCustomers.map((customer) => (
+              <option key={customer.id} value={customer.id}>
+                {customer.name}{customer.balance_cents > 0 ? ` (debe ${formatPrice(customer.balance_cents)})` : ''}
+              </option>
+            ))}
+          </select>
+          {creditCustomers.length === 0 && (
+            <p className="mt-1 text-xs text-gray-500">No hay clientes de fiado activos. Créalos en la sección Fiados.</p>
+          )}
+        </div>
+      )}
+
       <button
         type="button"
         onClick={onConfirm}
-        disabled={submitting || items.length === 0}
+        disabled={submitting || items.length === 0 || (paymentMethod === 'credit' && !creditCustomerId)}
         className="btn-success w-full py-3 text-base"
       >
         {submitting ? 'Procesando...' : `Confirmar venta · ${formatPrice(total)}`}

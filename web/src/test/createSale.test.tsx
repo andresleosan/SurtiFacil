@@ -14,8 +14,13 @@ const saleMock = vi.hoisted(() => ({
   createSale: vi.fn(),
 }));
 
+const creditMock = vi.hoisted(() => ({
+  subscribeToCreditCustomers: vi.fn(),
+}));
+
 vi.mock('../services/productService', () => productMock);
 vi.mock('../services/saleService', () => saleMock);
+vi.mock('../services/creditService', () => creditMock);
 vi.mock('../components/BarcodeScanner', () => ({ default: () => <div>Escáner abierto</div> }));
 
 import CreateSale from '../components/CreateSale';
@@ -45,6 +50,35 @@ describe('CreateSale', () => {
       return vi.fn();
     });
     saleMock.createSale.mockReset().mockResolvedValue('sale-1');
+    creditMock.subscribeToCreditCustomers.mockImplementation((onData: (customers: unknown[]) => void) => {
+      onData([
+        { id: 'cc1', name: 'Doña Rosa', balance_cents: 1550, active: true },
+        { id: 'cc2', name: 'Inactivo', balance_cents: 0, active: false },
+      ]);
+      return vi.fn();
+    });
+  });
+
+  it('sells on credit only after choosing an active customer', async () => {
+    stubViewport(false);
+    const user = userEvent.setup();
+    render(<CreateSale />);
+
+    const list = await screen.findByRole('list', { name: 'Productos disponibles' });
+    await user.click(within(list).getByRole('button', { name: 'Agregar Leche Entera' }));
+    await user.click(screen.getByRole('radio', { name: /Fiado/ }));
+
+    const confirm = screen.getByRole('button', { name: /Confirmar venta/ });
+    expect(confirm).toBeDisabled();
+    const select = screen.getByLabelText('Cliente al que se le fía');
+    expect(within(select).queryByRole('option', { name: /Inactivo/ })).not.toBeInTheDocument();
+    await user.selectOptions(select, 'cc1');
+    expect(confirm).toBeEnabled();
+    await user.click(confirm);
+
+    await waitFor(() => expect(saleMock.createSale).toHaveBeenCalledOnce());
+    expect(saleMock.createSale.mock.calls[0][1]).toBe('credit');
+    expect(saleMock.createSale.mock.calls[0][2]).toBe('cc1');
   });
 
   afterEach(() => {
