@@ -1,4 +1,4 @@
-﻿{
+{
   "indexes": [
     {
       "collectionGroup": "products",
@@ -39,7 +39,7 @@
         { "fieldPath": "supplier_id", "order": "ASCENDING" },
         { "fieldPath": "stock", "order": "ASCENDING" }
       ]
-    }
+    },
     {
       "collectionGroup": "credit_entries",
       "queryScope": "COLLECTION",
