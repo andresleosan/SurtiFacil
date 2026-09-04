@@ -1,6 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useId, useState } from 'react';
 import { PurchaseOrder } from '../firebase/db';
+import { useIsMobile } from '../hooks/useMediaQuery';
 import { receiveOrderItems, ReceiveItem } from '../services/supplierService';
+import { Icon } from './ui/Icon';
+import { Modal } from './ui/Modal';
 
 interface ReceiveOrderProps {
   order: PurchaseOrder;
@@ -8,19 +11,23 @@ interface ReceiveOrderProps {
   onReceived: () => void;
 }
 
+type RowInput = { received: number; final_cost: number };
+
+const formatCents = (cents: number) => `$${(cents / 100).toLocaleString()}`;
+
 const ReceiveOrder = ({ order, onClose, onReceived }: ReceiveOrderProps) => {
-  const [inputs, setInputs] = useState<Record<number, { received: number; final_cost: number }>>(
-    () => {
-      const init: Record<number, { received: number; final_cost: number }> = {};
-      order.items.forEach((item, idx) => {
-        init[idx] = {
-          received: 0,
-          final_cost: item.unit_cost_cents,
-        };
-      });
-      return init;
-    }
-  );
+  const isMobile = useIsMobile();
+  const idPrefix = useId();
+  const [inputs, setInputs] = useState<Record<number, RowInput>>(() => {
+    const init: Record<number, RowInput> = {};
+    order.items.forEach((item, idx) => {
+      init[idx] = {
+        received: 0,
+        final_cost: item.unit_cost_cents,
+      };
+    });
+    return init;
+  });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string>('');
 
@@ -28,9 +35,7 @@ const ReceiveOrder = ({ order, onClose, onReceived }: ReceiveOrderProps) => {
     setError('');
   }, []);
 
-  const formatCents = (cents: number) => `$${(cents / 100).toLocaleString()}`;
-
-  const updateInput = (idx: number, patch: Partial<{ received: number; final_cost: number }>) => {
+  const updateInput = (idx: number, patch: Partial<RowInput>) => {
     setInputs({ ...inputs, [idx]: { ...inputs[idx], ...patch } });
   };
 
@@ -86,19 +91,95 @@ const ReceiveOrder = ({ order, onClose, onReceived }: ReceiveOrderProps) => {
     }
   };
 
-  return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-      <div className="bg-white rounded-xl p-6 w-full max-w-4xl shadow-xl max-h-screen overflow-y-auto">
-        <div className="flex justify-between items-center mb-4">
-          <h3 className="text-lg font-bold text-sf-text flex items-center gap-2">
-            <span>📥</span> Recepción de Orden
-          </h3>
-          <button onClick={onClose} className="text-gray-500 hover:text-gray-700 text-xl">
-            ×
-          </button>
-        </div>
+  const fieldId = (name: string, idx: number) => `${idPrefix}-${name}-${idx}`;
+  const itemLabel = (idx: number) => order.items[idx].name || `Producto ${order.items[idx].product_id}`;
 
-        <div className="mb-4 p-3 bg-sf-light rounded-lg border border-gray-200">
+  const receivedInput = (idx: number, compact: boolean) => {
+    const max = getMaxReceive(idx);
+    const value = inputs[idx]?.received || 0;
+    const setValue = (next: number) => updateInput(idx, { received: Math.max(0, next) });
+    if (compact) {
+      return (
+        <input
+          id={fieldId('received', idx)}
+          type="number"
+          inputMode="numeric"
+          min={0}
+          max={max}
+          value={value}
+          onChange={(e) => updateInput(idx, { received: parseInt(e.target.value) || 0 })}
+          className="input w-24 text-right"
+        />
+      );
+    }
+    return (
+      <div className="flex items-center gap-1">
+        <button
+          type="button"
+          onClick={() => setValue(value - 1)}
+          aria-label={`Disminuir recibida de ${itemLabel(idx)}`}
+          className="icon-btn border border-gray-300 bg-white text-sf-text hover:bg-gray-50"
+        >
+          <Icon name="minus" size={18} />
+        </button>
+        <input
+          id={fieldId('received', idx)}
+          type="number"
+          inputMode="numeric"
+          min={0}
+          max={max}
+          value={value}
+          onChange={(e) => updateInput(idx, { received: parseInt(e.target.value) || 0 })}
+          className="input text-center"
+        />
+        <button
+          type="button"
+          onClick={() => setValue(value + 1)}
+          aria-label={`Aumentar recibida de ${itemLabel(idx)}`}
+          className="icon-btn border border-gray-300 bg-white text-sf-text hover:bg-gray-50"
+        >
+          <Icon name="plus" size={18} />
+        </button>
+      </div>
+    );
+  };
+
+  const costInput = (idx: number, compact: boolean) => (
+    <input
+      id={fieldId('cost', idx)}
+      type="number"
+      inputMode="numeric"
+      min={0}
+      value={inputs[idx]?.final_cost || 0}
+      onChange={(e) => updateInput(idx, { final_cost: parseInt(e.target.value) || 0 })}
+      className={`input ${compact ? 'w-32 text-right' : ''}`}
+    />
+  );
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title="Recepción de Orden"
+      size="xl"
+      footer={
+        <>
+          <button type="button" onClick={onClose} className="btn-secondary">
+            Cancelar
+          </button>
+          <button
+            type="button"
+            onClick={handleConfirm}
+            disabled={loading || !hasAnyReceive || overReceive}
+            className="btn-success"
+          >
+            {loading ? 'Procesando...' : '✅ Confirmar Recepción'}
+          </button>
+        </>
+      }
+    >
+      <div className="space-y-4">
+        <div className="rounded-lg border border-gray-200 bg-sf-light p-3">
           <div className="text-sm text-gray-700">
             <span className="font-medium">Proveedor:</span> {order.supplierName}
           </div>
@@ -108,110 +189,100 @@ const ReceiveOrder = ({ order, onClose, onReceived }: ReceiveOrderProps) => {
         </div>
 
         {error && (
-          <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded mb-4">
+          <div role="alert" className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
             {error}
           </div>
         )}
 
-        <div className="overflow-x-auto">
-          <table className="min-w-full divide-y divide-gray-200">
-            <thead className="bg-gray-50">
-              <tr>
-                <th className="px-3 py-2 text-left text-xs font-semibold text-gray-600 uppercase">
-                  Producto
-                </th>
-                <th className="px-3 py-2 text-right text-xs font-semibold text-gray-600 uppercase">
-                  Pedida
-                </th>
-                <th className="px-3 py-2 text-right text-xs font-semibold text-gray-600 uppercase">
-                  Recibida prev.
-                </th>
-                <th className="px-3 py-2 text-right text-xs font-semibold text-gray-600 uppercase">
-                  Nueva recibida
-                </th>
-                <th className="px-3 py-2 text-right text-xs font-semibold text-gray-600 uppercase">
-                  Costo final (centavos)
-                </th>
-                <th className="px-3 py-2 text-center text-xs font-semibold text-gray-600 uppercase">
-                  Estado
-                </th>
-              </tr>
-            </thead>
-            <tbody className="bg-white divide-y divide-gray-100">
-              {order.items.map((item, idx) => {
-                const status = getRowStatus(idx);
-                const max = getMaxReceive(idx);
-                return (
-                  <tr key={idx}>
-                    <td className="px-3 py-2 text-sm font-medium text-sf-text">
-                      {item.name || `Producto ${item.product_id}`}
-                      {item.isNewProduct && (
-                        <span className="ml-2 bg-blue-100 text-blue-700 px-2 py-0.5 rounded text-xs">
-                          Nuevo
-                        </span>
-                      )}
-                    </td>
-                    <td className="px-3 py-2 text-sm text-right">{item.quantity}</td>
-                    <td className="px-3 py-2 text-sm text-right text-gray-600">
-                      {item.received_quantity}
-                    </td>
-                    <td className="px-3 py-2 text-right">
-                      <input
-                        type="number"
-                        min={0}
-                        max={max}
-                        value={inputs[idx]?.received || 0}
-                        onChange={(e) =>
-                          updateInput(idx, { received: parseInt(e.target.value) || 0 })
-                        }
-                        className="w-20 px-2 py-1 border border-gray-300 rounded text-right text-sm focus:outline-none focus:ring-2 focus:ring-sf-primary"
-                      />
-                      <div className="text-xs text-gray-500 mt-1">máx: {max}</div>
-                    </td>
-                    <td className="px-3 py-2 text-right">
-                      <input
-                        type="number"
-                        min={0}
-                        value={inputs[idx]?.final_cost || 0}
-                        onChange={(e) =>
-                          updateInput(idx, { final_cost: parseInt(e.target.value) || 0 })
-                        }
-                        className="w-24 px-2 py-1 border border-gray-300 rounded text-right text-sm focus:outline-none focus:ring-2 focus:ring-sf-primary"
-                      />
-                    </td>
-                    <td className="px-3 py-2 text-center">
-                      <span
-                        className={`px-2 py-1 rounded text-xs font-medium ${status.className}`}
-                      >
-                        {status.label}
-                      </span>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-
-        <div className="flex gap-3 mt-6">
-          <button
-            type="button"
-            onClick={onClose}
-            className="flex-1 px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition"
-          >
-            Cancelar
-          </button>
-          <button
-            type="button"
-            onClick={handleConfirm}
-            disabled={loading || !hasAnyReceive || overReceive}
-            className="flex-1 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {loading ? 'Procesando...' : '✅ Confirmar Recepción'}
-          </button>
-        </div>
+        {isMobile ? (
+          <ul className="space-y-2" aria-label="Ítems de la orden">
+            {order.items.map((item, idx) => {
+              const status = getRowStatus(idx);
+              const max = getMaxReceive(idx);
+              return (
+                <li key={idx} className="card p-3">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0 flex-1">
+                      <p className="font-medium text-sf-text">
+                        {itemLabel(idx)}
+                        {item.isNewProduct && <span className="chip ml-2 bg-blue-100 text-blue-700">Nuevo</span>}
+                      </p>
+                      <p className="mt-0.5 text-xs text-gray-500">
+                        Pedida: {item.quantity} · Recibida prev.: {item.received_quantity} · máx: {max}
+                      </p>
+                    </div>
+                    <span className={`chip ${status.className}`}>{status.label}</span>
+                  </div>
+                  <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    <div>
+                      <label htmlFor={fieldId('received', idx)} className="mb-1 block text-xs text-gray-600">
+                        Nueva recibida
+                      </label>
+                      {receivedInput(idx, false)}
+                    </div>
+                    <div>
+                      <label htmlFor={fieldId('cost', idx)} className="mb-1 block text-xs text-gray-600">
+                        Costo final (centavos)
+                      </label>
+                      {costInput(idx, false)}
+                    </div>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        ) : (
+          <div className="card overflow-x-auto">
+            <table className="min-w-full divide-y divide-gray-200">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th scope="col" className="px-3 py-2 text-left text-xs font-semibold uppercase text-gray-600">Producto</th>
+                  <th scope="col" className="px-3 py-2 text-right text-xs font-semibold uppercase text-gray-600">Pedida</th>
+                  <th scope="col" className="px-3 py-2 text-right text-xs font-semibold uppercase text-gray-600">Recibida prev.</th>
+                  <th scope="col" className="px-3 py-2 text-right text-xs font-semibold uppercase text-gray-600">Nueva recibida</th>
+                  <th scope="col" className="px-3 py-2 text-right text-xs font-semibold uppercase text-gray-600">Costo final (centavos)</th>
+                  <th scope="col" className="px-3 py-2 text-center text-xs font-semibold uppercase text-gray-600">Estado</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100 bg-white">
+                {order.items.map((item, idx) => {
+                  const status = getRowStatus(idx);
+                  const max = getMaxReceive(idx);
+                  return (
+                    <tr key={idx}>
+                      <td className="px-3 py-2 text-sm font-medium text-sf-text">
+                        {itemLabel(idx)}
+                        {item.isNewProduct && <span className="chip ml-2 bg-blue-100 text-blue-700">Nuevo</span>}
+                      </td>
+                      <td className="px-3 py-2 text-right text-sm">{item.quantity}</td>
+                      <td className="px-3 py-2 text-right text-sm text-gray-600">{item.received_quantity}</td>
+                      <td className="px-3 py-2 text-right">
+                        <label htmlFor={fieldId('received', idx)} className="sr-only">
+                          Nueva recibida de {itemLabel(idx)}
+                        </label>
+                        <div className="flex flex-col items-end">
+                          {receivedInput(idx, true)}
+                          <div className="mt-1 text-xs text-gray-500">máx: {max}</div>
+                        </div>
+                      </td>
+                      <td className="px-3 py-2 text-right">
+                        <label htmlFor={fieldId('cost', idx)} className="sr-only">
+                          Costo final de {itemLabel(idx)}
+                        </label>
+                        <div className="flex justify-end">{costInput(idx, true)}</div>
+                      </td>
+                      <td className="px-3 py-2 text-center">
+                        <span className={`chip ${status.className}`}>{status.label}</span>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
-    </div>
+    </Modal>
   );
 };
 

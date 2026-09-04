@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react';
 import {
-  LineChart,
   Line,
   XAxis,
   YAxis,
@@ -25,16 +24,32 @@ import {
   CategoryMargin,
 } from '../services/marginService';
 import { formatCurrency } from '../services/reportService';
+import { useIsMobile } from '../hooks/useMediaQuery';
+import { PageHeader } from './ui/PageHeader';
 
 const PIE_COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884D8', '#82CA9D', '#FF6B6B', '#4ECDC4'];
 
+/** Etiqueta corta de eje Y (en pesos) para que no choque en pantallas de 360px. */
+const compactCurrency = (cents: number): string => {
+  const pesos = cents / 100;
+  if (Math.abs(pesos) >= 1_000_000) return `$${(pesos / 1_000_000).toFixed(1)}M`;
+  if (Math.abs(pesos) >= 1_000) return `$${Math.round(pesos / 1_000)}k`;
+  return `$${Math.round(pesos)}`;
+};
+
+const EstimatedChip = () => (
+  <span className="chip bg-yellow-200 font-semibold text-yellow-900">estimated</span>
+);
+
 const MarginReports = () => {
+  const isMobile = useIsMobile();
   const [summary, setSummary] = useState<MarginSummary | null>(null);
   const [dailyMargin, setDailyMargin] = useState<MarginDaily[]>([]);
   const [topByAbsolute, setTopByAbsolute] = useState<ProductMargin[]>([]);
   const [topByPercent, setTopByPercent] = useState<ProductMargin[]>([]);
   const [categoryMargin, setCategoryMargin] = useState<CategoryMargin[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [dateRange, setDateRange] = useState<7 | 14 | 30>(7);
 
   useEffect(() => {
@@ -44,6 +59,7 @@ const MarginReports = () => {
   const loadReportData = async () => {
     try {
       setLoading(true);
+      setError(null);
       const [summaryData, dailyData, topAbsData, topPctData, categoryData] = await Promise.all([
         getMarginSummary(),
         getMarginDaily(dateRange),
@@ -56,8 +72,9 @@ const MarginReports = () => {
       setTopByAbsolute(topAbsData);
       setTopByPercent(topPctData);
       setCategoryMargin(categoryData);
-    } catch (error) {
-      console.error('Error loading margin reports:', error);
+    } catch {
+      console.error('Error loading margin reports.');
+      setError('No se pudieron cargar los márgenes.');
     } finally {
       setLoading(false);
     }
@@ -105,144 +122,159 @@ const MarginReports = () => {
     title: string,
     valueKey: 'absolute' | 'percent'
   ) => (
-    <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200">
-      <h3 className="font-semibold mb-4 text-sf-text">{title}</h3>
-      <div className="overflow-x-auto">
-        <table className="min-w-full divide-y divide-gray-200">
-          <thead className="bg-gray-50">
-            <tr>
-              <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">
-                #
-              </th>
-              <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">
-                Producto
-              </th>
-              <th className="px-4 py-3 text-right text-xs font-semibold text-gray-600 uppercase">
-                Unidades
-              </th>
-              <th className="px-4 py-3 text-right text-xs font-semibold text-gray-600 uppercase">
-                Ingresos
-              </th>
-              <th className="px-4 py-3 text-right text-xs font-semibold text-gray-600 uppercase">
-                Costo
-              </th>
-              <th className="px-4 py-3 text-right text-xs font-semibold text-gray-600 uppercase">
-                Margen $
-              </th>
-              <th className="px-4 py-3 text-right text-xs font-semibold text-gray-600 uppercase">
-                Margen %
-              </th>
-              <th className="px-4 py-3 text-center text-xs font-semibold text-gray-600 uppercase">
-                Estimado
-              </th>
-            </tr>
-          </thead>
-          <tbody className="bg-white divide-y divide-gray-100">
-            {rows.length === 0 ? (
+    <div className="card p-4">
+      <h3 className="mb-4 font-semibold text-sf-text">{title}</h3>
+      {rows.length === 0 ? (
+        <div className="py-6 text-center text-sm text-gray-500">Sin datos para este ranking</div>
+      ) : isMobile ? (
+        <ul className="space-y-2" aria-label={title}>
+          {rows.map((p, index) => (
+            <li key={p.product_id} className="rounded-lg border border-gray-100 bg-gray-50 p-3">
+              <div className="flex items-start gap-3">
+                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-sf-primary/10 text-sm font-semibold text-sf-primary">
+                  {index + 1}
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-medium text-gray-900">{p.product_name}</p>
+                  <p className="text-xs text-gray-500">{p.units_sold} unidades</p>
+                </div>
+                <div className="shrink-0 text-right">
+                  <p className="text-sm font-medium text-sf-primary">{formatCurrency(p.margin_cents)}</p>
+                  <p className={`text-xs ${valueKey === 'percent' ? 'font-semibold text-sf-primary' : 'text-gray-700'}`}>
+                    {p.margin_percent.toFixed(1)}%
+                  </p>
+                </div>
+              </div>
+              <dl className="mt-2 grid grid-cols-2 gap-x-3 text-xs text-gray-600">
+                <div className="flex justify-between">
+                  <dt>Ingresos</dt>
+                  <dd className="font-medium text-gray-900">{formatCurrency(p.revenue_cents)}</dd>
+                </div>
+                <div className="flex justify-between">
+                  <dt>Costo</dt>
+                  <dd className="font-medium text-gray-900">{formatCurrency(p.cost_cents)}</dd>
+                </div>
+              </dl>
+              {p.isEstimated && <div className="mt-2"><EstimatedChip /></div>}
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="min-w-full divide-y divide-gray-200">
+            <thead className="bg-gray-50">
               <tr>
-                <td colSpan={8} className="px-4 py-6 text-center text-sm text-gray-500">
-                  Sin datos para este ranking
-                </td>
+                <th scope="col" className="px-4 py-3 text-left text-xs font-semibold uppercase text-gray-600">#</th>
+                <th scope="col" className="px-4 py-3 text-left text-xs font-semibold uppercase text-gray-600">Producto</th>
+                <th scope="col" className="px-4 py-3 text-right text-xs font-semibold uppercase text-gray-600">Unidades</th>
+                <th scope="col" className="px-4 py-3 text-right text-xs font-semibold uppercase text-gray-600">Ingresos</th>
+                <th scope="col" className="px-4 py-3 text-right text-xs font-semibold uppercase text-gray-600">Costo</th>
+                <th scope="col" className="px-4 py-3 text-right text-xs font-semibold uppercase text-gray-600">Margen $</th>
+                <th scope="col" className="px-4 py-3 text-right text-xs font-semibold uppercase text-gray-600">Margen %</th>
+                <th scope="col" className="px-4 py-3 text-center text-xs font-semibold uppercase text-gray-600">Estimado</th>
               </tr>
-            ) : (
-              rows.map((p, index) => (
+            </thead>
+            <tbody className="divide-y divide-gray-100 bg-white">
+              {rows.map((p, index) => (
                 <tr key={p.product_id} className={index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
                   <td className="px-4 py-3 text-sm font-medium text-gray-900">{index + 1}</td>
                   <td className="px-4 py-3 text-sm text-gray-900">{p.product_name}</td>
-                  <td className="px-4 py-3 text-sm text-right">{p.units_sold}</td>
-                  <td className="px-4 py-3 text-sm text-right">{formatCurrency(p.revenue_cents)}</td>
-                  <td className="px-4 py-3 text-sm text-right">{formatCurrency(p.cost_cents)}</td>
-                  <td className="px-4 py-3 text-sm text-right font-medium text-sf-primary">
+                  <td className="px-4 py-3 text-right text-sm">{p.units_sold}</td>
+                  <td className="px-4 py-3 text-right text-sm">{formatCurrency(p.revenue_cents)}</td>
+                  <td className="px-4 py-3 text-right text-sm">{formatCurrency(p.cost_cents)}</td>
+                  <td className="px-4 py-3 text-right text-sm font-medium text-sf-primary">
                     {formatCurrency(p.margin_cents)}
                   </td>
-                  <td className="px-4 py-3 text-sm text-right">
-                    <span
-                      className={
-                        valueKey === 'percent'
-                          ? 'font-semibold text-sf-primary'
-                          : 'text-gray-700'
-                      }
-                    >
+                  <td className="px-4 py-3 text-right text-sm">
+                    <span className={valueKey === 'percent' ? 'font-semibold text-sf-primary' : 'text-gray-700'}>
                       {p.margin_percent.toFixed(1)}%
                     </span>
                   </td>
                   <td className="px-4 py-3 text-center">
-                    {p.isEstimated ? (
-                      <span className="inline-block px-2 py-1 text-xs font-semibold bg-yellow-200 text-yellow-900 rounded">
-                        estimated
-                      </span>
-                    ) : (
-                      <span className="text-gray-400">—</span>
-                    )}
+                    {p.isEstimated ? <EstimatedChip /> : <span className="text-gray-400">—</span>}
                   </td>
                 </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-      </div>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 
   if (loading) {
     return (
       <section className="space-y-4">
-        <h2 className="text-2xl font-bold text-sf-text">📊 Márgenes de Ganancia</h2>
-        <div className="text-center py-8 text-gray-500">Cargando márgenes...</div>
+        <PageHeader title="Márgenes de Ganancia" />
+        <div className="py-8 text-center text-gray-500">Cargando márgenes...</div>
+      </section>
+    );
+  }
+
+  if (error) {
+    return (
+      <section className="space-y-4">
+        <PageHeader title="Márgenes de Ganancia" />
+        <div role="alert" className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-red-700">
+          {error}
+        </div>
       </section>
     );
   }
 
   return (
-    <section className="space-y-6">
-      <div className="flex justify-between items-center">
-        <h2 className="text-2xl font-bold text-sf-text flex items-center gap-2">
-          <span>📊</span> Márgenes de Ganancia
-        </h2>
-        <div className="flex gap-3">
-          <select
-            value={dateRange}
-            onChange={(e) => setDateRange(Number(e.target.value) as 7 | 14 | 30)}
-            className="px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-sf-primary"
-          >
-            <option value={7}>Últimos 7 días</option>
-            <option value={14}>Últimos 14 días</option>
-            <option value={30}>Últimos 30 días</option>
-          </select>
-          <button
-            onClick={exportTopToCSV}
-            disabled={topByAbsolute.length === 0}
-            className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            <span>📥</span> Exportar CSV
-          </button>
-        </div>
-      </div>
+    <section className="space-y-4 md:space-y-6">
+      <PageHeader
+        title="Márgenes de Ganancia"
+        actions={
+          <>
+            <label htmlFor="margin-range" className="sr-only">Rango de fechas</label>
+            <select
+              id="margin-range"
+              value={dateRange}
+              onChange={(e) => setDateRange(Number(e.target.value) as 7 | 14 | 30)}
+              className="input w-auto"
+            >
+              <option value={7}>Últimos 7 días</option>
+              <option value={14}>Últimos 14 días</option>
+              <option value={30}>Últimos 30 días</option>
+            </select>
+            <button
+              type="button"
+              onClick={exportTopToCSV}
+              disabled={topByAbsolute.length === 0}
+              className="btn-success"
+            >
+              Exportar CSV
+            </button>
+          </>
+        }
+      />
 
       {/* Tarjetas de KPIs */}
       {summary && (
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-          <article className="rounded-xl bg-white p-4 shadow-sm border border-gray-200">
+        <div className="grid grid-cols-2 gap-3 md:gap-4 lg:grid-cols-4">
+          <article className="card p-4">
             <h3 className="text-sm text-gray-600">Margen Hoy</h3>
-            <p className="text-xl font-semibold text-sf-primary mt-2">
+            <p className="mt-2 text-lg font-semibold text-sf-primary md:text-xl">
               {formatCurrency(summary.today.margin_cents)}
             </p>
           </article>
-          <article className="rounded-xl bg-white p-4 shadow-sm border border-gray-200">
+          <article className="card p-4">
             <h3 className="text-sm text-gray-600">Margen Semana</h3>
-            <p className="text-xl font-semibold text-sf-primary mt-2">
+            <p className="mt-2 text-lg font-semibold text-sf-primary md:text-xl">
               {formatCurrency(summary.thisWeek.margin_cents)}
             </p>
           </article>
-          <article className="rounded-xl bg-white p-4 shadow-sm border border-gray-200">
+          <article className="card p-4">
             <h3 className="text-sm text-gray-600">Margen Mes</h3>
-            <p className="text-xl font-semibold text-sf-primary mt-2">
+            <p className="mt-2 text-lg font-semibold text-sf-primary md:text-xl">
               {formatCurrency(summary.thisMonth.margin_cents)}
             </p>
           </article>
-          <article className="rounded-xl bg-white p-4 shadow-sm border border-gray-200">
+          <article className="card p-4">
             <h3 className="text-sm text-gray-600">Margen Hoy %</h3>
-            <p className="text-xl font-semibold text-sf-primary mt-2">
+            <p className="mt-2 text-lg font-semibold text-sf-primary md:text-xl">
               {summary.today.margin_percent.toFixed(1)}%
             </p>
           </article>
@@ -250,60 +282,62 @@ const MarginReports = () => {
       )}
 
       {/* Gráfica diaria de ingresos vs costos */}
-      <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200">
-        <h3 className="font-semibold mb-4 text-sf-text">Ingresos vs Costos (diario)</h3>
+      <div className="card p-4">
+        <h3 className="mb-4 font-semibold text-sf-text">Ingresos vs Costos (diario)</h3>
         {dailyMargin.length > 0 ? (
-          <ResponsiveContainer width="100%" height={350}>
-            <ComposedChart data={dailyMargin}>
-              <defs>
-                <linearGradient id="marginFill" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor="#0088FE" stopOpacity={0.3} />
-                  <stop offset="100%" stopColor="#0088FE" stopOpacity={0.05} />
-                </linearGradient>
-              </defs>
-              <CartesianGrid strokeDasharray="3 3" />
-              <XAxis dataKey="date" />
-              <YAxis />
-              <Tooltip
-                formatter={(value: any) => formatCurrency(Number(value))}
-                labelFormatter={(label) => `Fecha: ${label}`}
-              />
-              <Legend />
-              <Area
-                type="monotone"
-                dataKey="revenue_cents"
-                stroke="#0088FE"
-                strokeWidth={2}
-                fill="url(#marginFill)"
-                name="Ingresos"
-              />
-              <Line
-                type="monotone"
-                dataKey="cost_cents"
-                stroke="#94a3b8"
-                strokeWidth={2}
-                dot={false}
-                name="Costos"
-              />
-              <Line
-                type="monotone"
-                dataKey="margin_cents"
-                stroke="#10b981"
-                strokeWidth={2}
-                dot={false}
-                name="Margen"
-              />
-            </ComposedChart>
-          </ResponsiveContainer>
+          <div className="h-64 md:h-80">
+            <ResponsiveContainer width="100%" height="100%">
+              <ComposedChart data={dailyMargin} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+                <defs>
+                  <linearGradient id="marginFill" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="#0088FE" stopOpacity={0.3} />
+                    <stop offset="100%" stopColor="#0088FE" stopOpacity={0.05} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="date" tick={{ fontSize: 11 }} interval="preserveStartEnd" />
+                <YAxis tick={{ fontSize: 11 }} width={isMobile ? 48 : 64} tickFormatter={compactCurrency} />
+                <Tooltip
+                  formatter={(value: any) => formatCurrency(Number(value))}
+                  labelFormatter={(label) => `Fecha: ${label}`}
+                />
+                <Legend wrapperStyle={{ fontSize: 12 }} />
+                <Area
+                  type="monotone"
+                  dataKey="revenue_cents"
+                  stroke="#0088FE"
+                  strokeWidth={2}
+                  fill="url(#marginFill)"
+                  name="Ingresos"
+                />
+                <Line
+                  type="monotone"
+                  dataKey="cost_cents"
+                  stroke="#94a3b8"
+                  strokeWidth={2}
+                  dot={false}
+                  name="Costos"
+                />
+                <Line
+                  type="monotone"
+                  dataKey="margin_cents"
+                  stroke="#10b981"
+                  strokeWidth={2}
+                  dot={false}
+                  name="Margen"
+                />
+              </ComposedChart>
+            </ResponsiveContainer>
+          </div>
         ) : (
-          <div className="text-center py-8 text-gray-500">Sin datos de márgenes</div>
+          <div className="py-8 text-center text-gray-500">Sin datos de márgenes</div>
         )}
       </div>
 
       {/* Aviso de costos estimados */}
       {summary && summary.estimatedCostCount > 0 && (
-        <div className="bg-yellow-50 border border-yellow-300 text-yellow-800 rounded-xl p-4 shadow-sm flex items-start gap-3">
-          <span className="text-xl">⚠️</span>
+        <div className="flex items-start gap-3 rounded-xl border border-yellow-300 bg-yellow-50 p-4 text-yellow-800 shadow-sm">
+          <span className="text-xl" aria-hidden="true">⚠️</span>
           <div>
             <p className="font-semibold">Costos estimados</p>
             <p className="text-sm">
@@ -311,99 +345,104 @@ const MarginReports = () => {
               (precio ÷ 2) porque aún no registran un costo real de compra. Registra
               recepciones de pedidos para obtener márgenes más precisos.
             </p>
-            <span className="inline-block mt-2 px-2 py-1 text-xs font-semibold bg-yellow-200 text-yellow-900 rounded">
-              estimated
-            </span>
+            <div className="mt-2"><EstimatedChip /></div>
           </div>
         </div>
       )}
 
       {/* Margen por categoría: pie chart + tabla */}
-      <div className="grid gap-6 lg:grid-cols-2">
-        <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200">
-          <h3 className="font-semibold mb-4 text-sf-text">Margen por Categoría</h3>
+      <div className="grid gap-4 md:gap-6 lg:grid-cols-2">
+        <div className="card p-4">
+          <h3 className="mb-4 font-semibold text-sf-text">Margen por Categoría</h3>
           {categoryMargin.length > 0 ? (
-            <ResponsiveContainer width="100%" height={300}>
-              <PieChart>
-                <Pie
-                  data={categoryMargin}
-                  cx="50%"
-                  cy="50%"
-                  labelLine={false}
-                  label={({ category, percent }: any) =>
-                    `${category} (${(percent * 100).toFixed(0)}%)`
-                  }
-                  outerRadius={100}
-                  fill="#8884d8"
-                  dataKey="margin_cents"
-                  nameKey="category"
-                >
-                  {categoryMargin.map((_, index) => (
-                    <Cell key={`cat-cell-${index}`} fill={PIE_COLORS[index % PIE_COLORS.length]} />
-                  ))}
-                </Pie>
-                <Tooltip
-                  formatter={(value: any) => formatCurrency(Number(value))}
-                />
-              </PieChart>
-            </ResponsiveContainer>
+            <div className="h-64 md:h-80">
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie
+                    data={categoryMargin}
+                    cx="50%"
+                    cy="50%"
+                    labelLine={false}
+                    label={isMobile ? false : ({ category, percent }: any) =>
+                      `${category} (${(percent * 100).toFixed(0)}%)`
+                    }
+                    outerRadius={isMobile ? 72 : 100}
+                    fill="#8884d8"
+                    dataKey="margin_cents"
+                    nameKey="category"
+                  >
+                    {categoryMargin.map((_, index) => (
+                      <Cell key={`cat-cell-${index}`} fill={PIE_COLORS[index % PIE_COLORS.length]} />
+                    ))}
+                  </Pie>
+                  <Tooltip
+                    formatter={(value: any) => formatCurrency(Number(value))}
+                  />
+                  {isMobile && <Legend wrapperStyle={{ fontSize: 11 }} />}
+                </PieChart>
+              </ResponsiveContainer>
+            </div>
           ) : (
-            <div className="text-center py-8 text-gray-500">Sin datos por categoría</div>
+            <div className="py-8 text-center text-gray-500">Sin datos por categoría</div>
           )}
         </div>
 
-        <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200">
-          <h3 className="font-semibold mb-4 text-sf-text">Detalle por Categoría</h3>
-          <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-gray-200">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">
-                    Categoría
-                  </th>
-                  <th className="px-4 py-3 text-right text-xs font-semibold text-gray-600 uppercase">
-                    Ingresos
-                  </th>
-                  <th className="px-4 py-3 text-right text-xs font-semibold text-gray-600 uppercase">
-                    Costo
-                  </th>
-                  <th className="px-4 py-3 text-right text-xs font-semibold text-gray-600 uppercase">
-                    Margen $
-                  </th>
-                  <th className="px-4 py-3 text-right text-xs font-semibold text-gray-600 uppercase">
-                    Margen %
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="bg-white divide-y divide-gray-100">
-                {categoryMargin.length === 0 ? (
+        <div className="card p-4">
+          <h3 className="mb-4 font-semibold text-sf-text">Detalle por Categoría</h3>
+          {categoryMargin.length === 0 ? (
+            <div className="py-6 text-center text-sm text-gray-500">Sin datos por categoría</div>
+          ) : isMobile ? (
+            <ul className="space-y-2" aria-label="Detalle por categoría">
+              {categoryMargin.map((c) => (
+                <li key={c.category} className="rounded-lg border border-gray-100 bg-gray-50 p-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="truncate text-sm font-medium text-gray-900">{c.category}</p>
+                    <div className="shrink-0 text-right">
+                      <p className="text-sm font-medium text-sf-primary">{formatCurrency(c.margin_cents)}</p>
+                      <p className="text-xs text-gray-700">{c.margin_percent.toFixed(1)}%</p>
+                    </div>
+                  </div>
+                  <dl className="mt-2 grid grid-cols-2 gap-x-3 text-xs text-gray-600">
+                    <div className="flex justify-between">
+                      <dt>Ingresos</dt>
+                      <dd className="font-medium text-gray-900">{formatCurrency(c.revenue_cents)}</dd>
+                    </div>
+                    <div className="flex justify-between">
+                      <dt>Costo</dt>
+                      <dd className="font-medium text-gray-900">{formatCurrency(c.cost_cents)}</dd>
+                    </div>
+                  </dl>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="min-w-full divide-y divide-gray-200">
+                <thead className="bg-gray-50">
                   <tr>
-                    <td colSpan={5} className="px-4 py-6 text-center text-sm text-gray-500">
-                      Sin datos por categoría
-                    </td>
+                    <th scope="col" className="px-4 py-3 text-left text-xs font-semibold uppercase text-gray-600">Categoría</th>
+                    <th scope="col" className="px-4 py-3 text-right text-xs font-semibold uppercase text-gray-600">Ingresos</th>
+                    <th scope="col" className="px-4 py-3 text-right text-xs font-semibold uppercase text-gray-600">Costo</th>
+                    <th scope="col" className="px-4 py-3 text-right text-xs font-semibold uppercase text-gray-600">Margen $</th>
+                    <th scope="col" className="px-4 py-3 text-right text-xs font-semibold uppercase text-gray-600">Margen %</th>
                   </tr>
-                ) : (
-                  categoryMargin.map((c, index) => (
+                </thead>
+                <tbody className="divide-y divide-gray-100 bg-white">
+                  {categoryMargin.map((c, index) => (
                     <tr key={c.category} className={index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
                       <td className="px-4 py-3 text-sm text-gray-900">{c.category}</td>
-                      <td className="px-4 py-3 text-sm text-right">
-                        {formatCurrency(c.revenue_cents)}
-                      </td>
-                      <td className="px-4 py-3 text-sm text-right">
-                        {formatCurrency(c.cost_cents)}
-                      </td>
-                      <td className="px-4 py-3 text-sm text-right font-medium text-sf-primary">
+                      <td className="px-4 py-3 text-right text-sm">{formatCurrency(c.revenue_cents)}</td>
+                      <td className="px-4 py-3 text-right text-sm">{formatCurrency(c.cost_cents)}</td>
+                      <td className="px-4 py-3 text-right text-sm font-medium text-sf-primary">
                         {formatCurrency(c.margin_cents)}
                       </td>
-                      <td className="px-4 py-3 text-sm text-right">
-                        {c.margin_percent.toFixed(1)}%
-                      </td>
+                      <td className="px-4 py-3 text-right text-sm">{c.margin_percent.toFixed(1)}%</td>
                     </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       </div>
 

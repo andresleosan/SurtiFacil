@@ -1,11 +1,22 @@
 import {
   collection,
+  count,
+  getAggregateFromServer,
   getDocs,
+  limit,
+  orderBy,
+  query,
+  startAfter,
+  sum,
+  Timestamp,
+  where,
+  type QueryDocumentSnapshot,
 } from 'firebase/firestore';
 import { getAuth } from 'firebase/auth';
 import { db } from '../firebase/config';
 import { Product, SaleItem, Sale } from '../firebase/db';
 import { mockProducts, addLocalSale, getLocalSales } from './mockData';
+import { refreshProducts } from './productService';
 
 function isMockMode(): boolean {
   return import.meta.env.VITE_USE_MOCK_DATA === 'true';
@@ -163,6 +174,7 @@ function createMockSale(
 
   // Guardar venta en datos mock
   addLocalSale(newSale);
+  refreshProducts();
 
   return saleId;
 }
@@ -204,6 +216,113 @@ export async function getSales(): Promise<Sale[]> {
     return sales;
   } catch {
     console.error('Error getting sales from Firebase');
+    throw new Error('Error al cargar ventas');
+  }
+}
+
+function saleDateMillis(sale: Sale): number {
+  const value = sale.date;
+  if (!value) return 0;
+  if (typeof value.toMillis === 'function') return value.toMillis();
+  const parsed = new Date(value).getTime();
+  return Number.isNaN(parsed) ? 0 : parsed;
+}
+
+function sortSalesDesc(sales: Sale[]): Sale[] {
+  return [...sales].sort((a, b) => saleDateMillis(b) - saleDateMillis(a));
+}
+
+export interface SalesPage {
+  sales: Sale[];
+  /** Cursor opaco para pedir la siguiente página; `null` cuando no hay más. */
+  cursor: unknown | null;
+  hasMore: boolean;
+}
+
+/**
+ * Historial de ventas paginado (más recientes primero). Evita descargar la
+ * colección completa en el dispositivo.
+ */
+export async function getRecentSales(pageSize = 50, cursor: unknown = null): Promise<SalesPage> {
+  if (isMockMode()) {
+    const all = sortSalesDesc(getLocalSales());
+    const offset = typeof cursor === 'number' ? cursor : 0;
+    const sales = all.slice(offset, offset + pageSize);
+    const nextOffset = offset + sales.length;
+    return { sales, cursor: nextOffset < all.length ? nextOffset : null, hasMore: nextOffset < all.length };
+  }
+
+  try {
+    const salesQuery = cursor
+      ? query(collection(db, 'sales'), orderBy('date', 'desc'), startAfter(cursor as QueryDocumentSnapshot), limit(pageSize + 1))
+      : query(collection(db, 'sales'), orderBy('date', 'desc'), limit(pageSize + 1));
+    const snapshot = await getDocs(salesQuery);
+    const documents = snapshot.docs;
+    const hasMore = documents.length > pageSize;
+    const pageDocuments = hasMore ? documents.slice(0, pageSize) : documents;
+    const sales = pageDocuments.map((document) => ({
+      id: document.id,
+      ...(document.data() as Omit<Sale, 'id'>),
+    }));
+    return {
+      sales,
+      cursor: hasMore ? pageDocuments[pageDocuments.length - 1] : null,
+      hasMore,
+    };
+  } catch {
+    console.error('Error getting recent sales from Firebase');
+    throw new Error('Error al cargar ventas');
+  }
+}
+
+/** Ventas desde una fecha (inclusive), más recientes primero. */
+export async function getSalesSince(since: Date): Promise<Sale[]> {
+  if (isMockMode()) {
+    const threshold = since.getTime();
+    return sortSalesDesc(getLocalSales().filter((sale) => saleDateMillis(sale) >= threshold));
+  }
+
+  try {
+    const salesQuery = query(
+      collection(db, 'sales'),
+      where('date', '>=', Timestamp.fromDate(since)),
+      orderBy('date', 'desc'),
+    );
+    const snapshot = await getDocs(salesQuery);
+    return snapshot.docs.map((document) => ({
+      id: document.id,
+      ...(document.data() as Omit<Sale, 'id'>),
+    }));
+  } catch {
+    console.error('Error getting sales since date from Firebase');
+    throw new Error('Error al cargar ventas');
+  }
+}
+
+export interface SalesTotals {
+  count: number;
+  totalCents: number;
+}
+
+/** Totales históricos calculados en el servidor (una sola lectura agregada). */
+export async function getSalesTotals(): Promise<SalesTotals> {
+  if (isMockMode()) {
+    const sales = getLocalSales();
+    return {
+      count: sales.length,
+      totalCents: sales.reduce((total, sale) => total + (sale.total || 0), 0),
+    };
+  }
+
+  try {
+    const aggregate = await getAggregateFromServer(collection(db, 'sales'), {
+      count: count(),
+      totalCents: sum('total'),
+    });
+    const data = aggregate.data();
+    return { count: Number(data.count) || 0, totalCents: Number(data.totalCents) || 0 };
+  } catch {
+    console.error('Error getting sales totals from Firebase');
     throw new Error('Error al cargar ventas');
   }
 }

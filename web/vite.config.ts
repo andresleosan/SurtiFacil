@@ -4,6 +4,13 @@ import react from '@vitejs/plugin-react';
 import { VitePWA } from 'vite-plugin-pwa';
 import { assertProductionBackendUrl } from './src/config/buildEnvironment';
 
+const VENDOR_CHUNKS: Array<{ name: string; test: RegExp }> = [
+  { name: 'react-vendor', test: /[\\/]node_modules[\\/](react|react-dom|scheduler)[\\/]/ },
+  { name: 'firebase-vendor', test: /[\\/]node_modules[\\/](firebase|@firebase)[\\/]/ },
+  { name: 'charts-vendor', test: /[\\/]node_modules[\\/](recharts|d3-[a-z-]+|victory-vector-icon|internmap|delaunator|robust-predicates)[\\/]/ },
+  { name: 'scanner-vendor', test: /[\\/]node_modules[\\/]html5-qrcode[\\/]/ },
+];
+
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), 'VITE_');
   assertProductionBackendUrl(mode, env.VITE_BACKEND_URL);
@@ -50,10 +57,9 @@ export default defineConfig(({ mode }) => {
     build: {
       rollupOptions: {
         output: {
-          manualChunks: {
-            'react-vendor': ['react', 'react-dom'],
-            'firebase-vendor': ['firebase/app', 'firebase/firestore', 'firebase/auth'],
-            'charts-vendor': ['recharts'],
+          manualChunks(id) {
+            const match = VENDOR_CHUNKS.find((chunk) => chunk.test.test(id));
+            return match?.name;
           },
         },
       },

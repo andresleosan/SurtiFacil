@@ -23,7 +23,7 @@ const Login = () => {
 
   return (
     <main className="min-h-screen bg-sf-light text-sf-text font-poppins flex items-center justify-center px-4">
-      <section className="w-full max-w-md rounded-xl bg-white p-8 shadow-lg">
+      <section className="w-full max-w-md rounded-xl bg-white p-6 shadow-lg sm:p-8">
         <h1 className="mb-6 text-2xl font-bold text-sf-primary">Iniciar sesión</h1>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
@@ -36,8 +36,11 @@ const Login = () => {
               value={email}
               onChange={(event) => setEmail(event.target.value)}
               autoComplete="email"
+              inputMode="email"
+              autoCapitalize="none"
+              spellCheck={false}
               required
-              className="w-full rounded border border-gray-300 px-3 py-2"
+              className="input"
             />
           </div>
           <div>
@@ -51,14 +54,14 @@ const Login = () => {
               onChange={(event) => setPassword(event.target.value)}
               autoComplete="current-password"
               required
-              className="w-full rounded border border-gray-300 px-3 py-2"
+              className="input"
             />
           </div>
           {error && <p className="text-sm text-red-600" role="alert">{error}</p>}
           <button
             type="submit"
             disabled={loading}
-            className="w-full rounded bg-sf-primary px-4 py-2 font-semibold text-white disabled:opacity-60"
+            className="btn-primary w-full text-base font-semibold disabled:opacity-60"
           >
             {loading ? 'Iniciando sesión...' : 'Iniciar sesión'}
           </button>

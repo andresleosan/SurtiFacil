@@ -1,394 +1,434 @@
-import { useState, useEffect } from "react";
-import { Product, SaleItem } from "../firebase/db";
-import { createSale, getProducts } from "../services/saleService";
-import BarcodeScanner from "./BarcodeScanner";
-import { useBarcode } from "../hooks/useBarcode";
+import { useMemo, useState } from 'react';
+import { Product, SaleItem } from '../firebase/db';
+import { createSale } from '../services/saleService';
+import { useProducts } from '../hooks/useProducts';
+import { useIsMobile } from '../hooks/useMediaQuery';
+import { useBarcode } from '../hooks/useBarcode';
+import BarcodeScanner from './BarcodeScanner';
+import { Icon } from './ui/Icon';
+import { Modal } from './ui/Modal';
+import { PageHeader } from './ui/PageHeader';
 
-type PaymentMethod = "cash" | "card" | "other";
+type PaymentMethod = 'cash' | 'card' | 'other';
+
+const PAYMENT_OPTIONS: Array<{ value: PaymentMethod; label: string; emoji: string }> = [
+  { value: 'cash', label: 'Efectivo', emoji: '💵' },
+  { value: 'card', label: 'Tarjeta', emoji: '💳' },
+  { value: 'other', label: 'Otro', emoji: '📱' },
+];
+
+const formatPrice = (cents: number) => `$${(cents / 100).toFixed(2)}`;
+
+function normalize(value: string): string {
+  return value
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+}
 
 const CreateSale = () => {
-  // Estado del carrito
-  const [cartItems, setCartItems] = useState<SaleItem[]>([]);
-  const [products, setProducts] = useState<Product[]>([]);
-  const [selectedProductId, setSelectedProductId] = useState<string>("");
-  const [quantity, setQuantity] = useState<string>("");
-  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("cash");
+  const { products, loading: productsLoading, error: productsError } = useProducts();
+  const isMobile = useIsMobile();
 
-  // Estado UI
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string>("");
+  const [cartItems, setCartItems] = useState<SaleItem[]>([]);
+  const [search, setSearch] = useState('');
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('cash');
+  const [cartOpen, setCartOpen] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState('');
   const [success, setSuccess] = useState(false);
 
-  const handleBarcodeScan = (code: string) => {
-    setError("");
-    const found = products.find((p) => p.barcode === code);
-    if (!found) {
-      setError(`Codigo ${code} no registrado. Agrega el producto primero.`);
-      return;
-    }
-    if (found.stock <= 0) {
-      setError(`Sin stock disponible para ${found.name}`);
-      return;
-    }
-
-    const existingItem = cartItems.find((item) => item.product_id === found.id);
-    if (existingItem) {
-      if (existingItem.quantity + 1 > found.stock) {
-        setError(
-          `Stock insuficiente para ${found.name}. Disponible: ${found.stock}`,
-        );
-        return;
-      }
-      setCartItems(
-        cartItems.map((item) =>
-          item.product_id === found.id
-            ? {
-                ...item,
-                quantity: item.quantity + 1,
-                subtotal: (item.quantity + 1) * item.price_cents,
-              }
-            : item,
-        ),
+  const availableProducts = useMemo(() => {
+    const term = normalize(search.trim());
+    return products.filter((product) => {
+      if (product.stock <= 0) return false;
+      if (!term) return true;
+      return (
+        normalize(product.name).includes(term)
+        || normalize(product.category || '').includes(term)
+        || (product.barcode || '').includes(term)
       );
-    } else {
-      setCartItems([
-        ...cartItems,
-        {
-          product_id: found.id,
-          product_name: found.name,
-          quantity: 1,
-          price_cents: found.price_cents,
-          subtotal: found.price_cents,
-        },
-      ]);
-    }
-  };
+    });
+  }, [products, search]);
 
-  const { isOpen: isScannerOpen, open: openScanner, close: closeScanner, handleScan } =
-    useBarcode(handleBarcodeScan);
-
-  // Cargar productos al montar
-  useEffect(() => {
-    const loadProducts = async () => {
-      try {
-        setLoading(true);
-        const data = await getProducts();
-        setProducts(data);
-      } catch (err) {
-        console.error("Error loading products:", err);
-        setError("Error al cargar productos");
-      } finally {
-        setLoading(false);
-      }
-    };
-    loadProducts();
-  }, []);
-
-  // Agregar producto al carrito
-  const handleAddToCart = () => {
-    setError("");
-
-    const qty = parseInt(quantity, 10);
-    if (!selectedProductId) {
-      setError("Selecciona un producto");
-      return;
-    }
-    if (!qty || qty <= 0) {
-      setError("Cantidad debe ser mayor a 0");
-      return;
-    }
-
-    const product = products.find((p) => p.id === selectedProductId);
-    if (!product) {
-      setError("Producto no encontrado");
-      return;
-    }
-
-    if (qty > product.stock) {
-      setError(`Stock insuficiente. Disponible: ${product.stock}`);
-      return;
-    }
-
-    // Verificar si el producto ya está en el carrito
-    const existingItem = cartItems.find(
-      (item) => item.product_id === selectedProductId,
-    );
-    if (existingItem) {
-      const newQty = existingItem.quantity + qty;
-      if (newQty > product.stock) {
-        setError(
-          `Stock insuficiente. Total solicitado: ${newQty}, disponible: ${product.stock}`,
-        );
-        return;
-      }
-      setCartItems(
-        cartItems.map((item) =>
-          item.product_id === selectedProductId
-            ? {
-                ...item,
-                quantity: newQty,
-                subtotal: newQty * item.price_cents,
-              }
-            : item,
-        ),
-      );
-    } else {
-      // Agregar nuevo producto
-      setCartItems([
-        ...cartItems,
-        {
-          product_id: product.id,
-          product_name: product.name,
-          quantity: qty,
-          price_cents: product.price_cents,
-          subtotal: qty * product.price_cents,
-        },
-      ]);
-    }
-
-    setSelectedProductId("");
-    setQuantity("");
-  };
-
-  // Remover producto del carrito
-  const handleRemoveFromCart = (productId: string) => {
-    setCartItems(cartItems.filter((item) => item.product_id !== productId));
-  };
-
-  // Calcular total
   const total = cartItems.reduce((sum, item) => sum + item.subtotal, 0);
+  const unitCount = cartItems.reduce((sum, item) => sum + item.quantity, 0);
 
-  // Confirmar venta
+  const addToCart = (product: Product, quantity = 1): boolean => {
+    setError('');
+    setSuccess(false);
+    if (product.stock <= 0) {
+      setError(`Sin stock disponible para ${product.name}`);
+      return false;
+    }
+    const existing = cartItems.find((item) => item.product_id === product.id);
+    const nextQuantity = (existing?.quantity ?? 0) + quantity;
+    if (nextQuantity > product.stock) {
+      setError(`Stock insuficiente para ${product.name}. Disponible: ${product.stock}`);
+      return false;
+    }
+    setCartItems(
+      existing
+        ? cartItems.map((item) =>
+          item.product_id === product.id
+            ? { ...item, quantity: nextQuantity, subtotal: nextQuantity * item.price_cents }
+            : item,
+        )
+        : [
+          ...cartItems,
+          {
+            product_id: product.id,
+            product_name: product.name,
+            quantity,
+            price_cents: product.price_cents,
+            subtotal: quantity * product.price_cents,
+          },
+        ],
+    );
+    return true;
+  };
+
+  const changeQuantity = (productId: string, delta: number) => {
+    setError('');
+    const existing = cartItems.find((item) => item.product_id === productId);
+    if (!existing) return;
+    const nextQuantity = existing.quantity + delta;
+    if (nextQuantity <= 0) {
+      setCartItems(cartItems.filter((item) => item.product_id !== productId));
+      return;
+    }
+    const product = products.find((candidate) => candidate.id === productId);
+    if (product && nextQuantity > product.stock) {
+      setError(`Stock insuficiente para ${product.name}. Disponible: ${product.stock}`);
+      return;
+    }
+    setCartItems(
+      cartItems.map((item) =>
+        item.product_id === productId
+          ? { ...item, quantity: nextQuantity, subtotal: nextQuantity * item.price_cents }
+          : item,
+      ),
+    );
+  };
+
+  const removeFromCart = (productId: string) => {
+    setCartItems((current) => current.filter((item) => item.product_id !== productId));
+  };
+
+  const handleBarcodeScan = (code: string) => {
+    const found = products.find((product) => product.barcode === code);
+    if (!found) {
+      setError(`Código ${code} no registrado. Agrega el producto primero.`);
+      return;
+    }
+    addToCart(found, 1);
+  };
+
+  const { isOpen: isScannerOpen, open: openScanner, close: closeScanner, handleScan } = useBarcode(handleBarcodeScan);
+
+  const handleSearchSubmit = (event: React.FormEvent) => {
+    event.preventDefault();
+    const term = search.trim();
+    if (!term) return;
+    const byBarcode = products.find((product) => product.barcode === term);
+    if (byBarcode) {
+      if (addToCart(byBarcode, 1)) setSearch('');
+      return;
+    }
+    if (availableProducts.length === 1) {
+      if (addToCart(availableProducts[0], 1)) setSearch('');
+    }
+  };
+
   const handleConfirmSale = async () => {
     if (cartItems.length === 0) {
-      setError("El carrito está vacío");
+      setError('El carrito está vacío');
       return;
     }
-
     try {
-      setLoading(true);
-      setError("");
+      setSubmitting(true);
+      setError('');
       await createSale(cartItems, paymentMethod);
       setSuccess(true);
       setCartItems([]);
-      setPaymentMethod("cash");
-
-      // Recargar productos para actualizar stock
-      const data = await getProducts();
-      setProducts(data);
-
-      // Limpiar mensaje de éxito después de 3 segundos
-      setTimeout(() => setSuccess(false), 3000);
-    } catch (err: any) {
-      setError(err.message || "Error al crear la venta");
+      setPaymentMethod('cash');
+      setCartOpen(false);
+      window.setTimeout(() => setSuccess(false), 4000);
+    } catch (err: unknown) {
+      setError(err instanceof Error && err.message ? err.message : 'Error al crear la venta');
     } finally {
-      setLoading(false);
+      setSubmitting(false);
     }
   };
 
-  // Formatear precio
-  const formatPrice = (cents: number) => {
-    return `$${(cents / 100).toFixed(2)}`;
-  };
+  const cartPanel = (
+    <CartPanel
+      items={cartItems}
+      total={total}
+      unitCount={unitCount}
+      paymentMethod={paymentMethod}
+      submitting={submitting}
+      onChangeQuantity={changeQuantity}
+      onRemove={removeFromCart}
+      onPaymentChange={setPaymentMethod}
+      onConfirm={handleConfirmSale}
+      compact={isMobile}
+    />
+  );
 
   return (
-    <section className="space-y-6">
-      <h2 className="text-2xl font-bold text-sf-text">
-        📝 Registrar Nueva Venta
-      </h2>
+    <section className="space-y-4">
+      <PageHeader
+        title="Nueva venta"
+        description={isMobile ? undefined : 'Toca un producto para agregarlo al carrito.'}
+      />
 
       {error && (
-        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded">
+        <div role="alert" className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
           {error}
         </div>
       )}
-
       {success && (
-        <div className="bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded">
+        <div role="status" className="rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-700">
           ✅ Venta registrada exitosamente
         </div>
       )}
+      {productsError && !error && (
+        <div role="alert" className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          {productsError}
+        </div>
+      )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Panel de selección - izquierda */}
-        <div className="lg:col-span-2 space-y-4">
-          {/* Selector de producto */}
-          <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200">
-            <h3 className="font-semibold mb-3 text-sf-text">
-              Agregar Producto
-            </h3>
-            <div className="space-y-3">
-              <div>
-                <label className="block text-sm font-medium mb-1 text-sf-text">
-                  Producto
-                </label>
-                <div className="flex gap-2">
-                  <select
-                    value={selectedProductId}
-                    onChange={(e) => setSelectedProductId(e.target.value)}
-                    className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-sf-primary text-sf-text"
-                  >
-                    <option value="">-- Selecciona un producto --</option>
-                    {products
-                      .filter((p) => p.stock > 0)
-                      .map((product) => (
-                        <option key={product.id} value={product.id}>
-                          {product.name} ({product.stock} disponibles) -{" "}
-                          {formatPrice(product.price_cents)}
-                        </option>
-                      ))}
-                  </select>
+      <div className="grid gap-4 lg:grid-cols-5">
+        <div className="space-y-3 lg:col-span-3">
+          <form onSubmit={handleSearchSubmit} className="flex gap-2" role="search">
+            <label htmlFor="pos-search" className="sr-only">
+              Buscar producto o código
+            </label>
+            <div className="relative flex-1">
+              <Icon name="search" className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={20} />
+              <input
+                id="pos-search"
+                type="search"
+                inputMode="search"
+                autoComplete="off"
+                enterKeyHint="done"
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                placeholder="Buscar producto o código"
+                className="input pl-10"
+              />
+            </div>
+            <button type="button" onClick={openScanner} className="btn-primary shrink-0" aria-label="Escanear código de barras">
+              <Icon name="scan" />
+              <span className="hidden sm:inline">Escanear</span>
+            </button>
+          </form>
+
+          {productsLoading ? (
+            <p className="py-8 text-center text-gray-500">Cargando productos...</p>
+          ) : availableProducts.length === 0 ? (
+            <p className="card px-4 py-8 text-center text-gray-500">
+              {products.length === 0 ? 'No hay productos con stock disponible' : 'Sin resultados para tu búsqueda'}
+            </p>
+          ) : isMobile ? (
+            <ul className="card divide-y divide-gray-100" aria-label="Productos disponibles">
+              {availableProducts.map((product) => (
+                <li key={product.id} className="flex items-center gap-3 px-3 py-2">
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate font-medium text-sf-text">{product.name}</p>
+                    <p className="text-xs text-gray-500">
+                      {formatPrice(product.price_cents)} · {product.stock} disp.
+                    </p>
+                  </div>
                   <button
                     type="button"
-                    onClick={openScanner}
-                    className="px-3 py-2 bg-sf-primary text-white rounded-lg hover:opacity-90 whitespace-nowrap"
+                    onClick={() => addToCart(product, 1)}
+                    aria-label={`Agregar ${product.name}`}
+                    className="icon-btn bg-sf-primary text-white hover:bg-sf-dark"
                   >
-                    Escanear
+                    <Icon name="plus" />
                   </button>
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium mb-1 text-sf-text">
-                  Cantidad
-                </label>
-                <input
-                  type="number"
-                  min="1"
-                  value={quantity}
-                  onChange={(e) => setQuantity(e.target.value)}
-                  placeholder="Cantidad a vender"
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-sf-primary text-sf-text"
-                />
-              </div>
-
-              <button
-                onClick={handleAddToCart}
-                disabled={loading}
-                className="w-full bg-sf-primary text-white py-2 rounded-lg hover:bg-sf-dark disabled:opacity-50 font-medium transition"
-              >
-                Agregar al Carrito
-              </button>
-            </div>
-          </div>
-
-          {/* Carrito */}
-          <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-            <h3 className="font-semibold p-4 border-b text-sf-text">Carrito</h3>
-            {cartItems.length === 0 ? (
-              <p className="text-gray-500 p-4">El carrito está vacío</p>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full divide-y divide-gray-200">
-                  <thead className="bg-sf-primary text-white">
-                    <tr>
-                      <th className="px-4 py-2 text-left text-xs font-semibold uppercase">
-                        Producto
-                      </th>
-                      <th className="px-4 py-2 text-right text-xs font-semibold uppercase">
-                        Precio Unit.
-                      </th>
-                      <th className="px-4 py-2 text-right text-xs font-semibold uppercase">
-                        Cantidad
-                      </th>
-                      <th className="px-4 py-2 text-right text-xs font-semibold uppercase">
-                        Subtotal
-                      </th>
-                      <th className="px-4 py-2 text-center text-xs font-semibold uppercase">
-                        Acción
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-100">
-                    {cartItems.map((item) => (
-                      <tr
-                        key={item.product_id}
-                        className="hover:bg-sf-light transition"
-                      >
-                        <td className="px-4 py-2 text-sm text-sf-text">
-                          {item.product_name}
-                        </td>
-                        <td className="px-4 py-2 text-sm text-right text-sf-text">
-                          {formatPrice(item.price_cents)}
-                        </td>
-                        <td className="px-4 py-2 text-sm text-right text-sf-text">
-                          {item.quantity}
-                        </td>
-                        <td className="px-4 py-2 text-sm text-right font-medium text-sf-primary">
-                          {formatPrice(item.subtotal)}
-                        </td>
-                        <td className="px-4 py-2 text-center">
-                          <button
-                            onClick={() =>
-                              handleRemoveFromCart(item.product_id)
-                            }
-                            className="text-red-600 hover:text-red-900 text-sm font-medium"
-                          >
-                            ✕
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <ul className="grid grid-cols-2 gap-3 xl:grid-cols-3" aria-label="Productos disponibles">
+              {availableProducts.map((product) => (
+                <li key={product.id}>
+                  <button
+                    type="button"
+                    onClick={() => addToCart(product, 1)}
+                    aria-label={`Agregar ${product.name}`}
+                    className="card flex min-h-[96px] w-full flex-col justify-between p-3 text-left transition hover:border-sf-primary hover:shadow-md active:scale-[0.99]"
+                  >
+                    <span className="line-clamp-2 font-medium text-sf-text">{product.name}</span>
+                    <span className="mt-2 flex items-center justify-between text-sm">
+                      <span className="font-semibold text-sf-primary">{formatPrice(product.price_cents)}</span>
+                      <span className="text-xs text-gray-500">{product.stock} disp.</span>
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
 
-        {/* Panel de resumen - derecha */}
-        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 h-fit">
-          <h3 className="font-semibold mb-4 text-sf-text">Resumen</h3>
-
-          <div className="space-y-4 mb-6">
-            <div className="flex justify-between text-sm text-sf-text">
-              <span>Items:</span>
-              <span className="font-medium">{cartItems.length}</span>
-            </div>
-            <div className="flex justify-between text-sm text-sf-text">
-              <span>Cantidad total:</span>
-              <span className="font-medium">
-                {cartItems.reduce((sum, item) => sum + item.quantity, 0)}
-              </span>
-            </div>
-            <div className="border-t pt-4 flex justify-between text-lg font-bold">
-              <span className="text-sf-text">Total:</span>
-              <span className="text-sf-primary">{formatPrice(total)}</span>
-            </div>
-          </div>
-
-          <div className="space-y-3 mb-6">
-            <label className="block text-sm font-medium text-sf-text">
-              Método de Pago
-            </label>
-            <select
-              value={paymentMethod}
-              onChange={(e) =>
-                setPaymentMethod(e.target.value as PaymentMethod)
-              }
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-sf-primary text-sf-text"
-            >
-              <option value="cash">💵 Efectivo</option>
-              <option value="card">💳 Tarjeta</option>
-              <option value="other">📱 Otro</option>
-            </select>
-          </div>
-
-          <button
-            onClick={handleConfirmSale}
-            disabled={loading || cartItems.length === 0}
-            className="w-full bg-green-600 text-white py-3 rounded-lg hover:bg-green-700 disabled:opacity-50 font-semibold transition"
-          >
-            {loading ? "Procesando..." : "✓ Confirmar Venta"}
-          </button>
-        </div>
+        {!isMobile && (
+          <aside className="lg:col-span-2">
+            <div className="card sticky top-4 p-4">{cartPanel}</div>
+          </aside>
+        )}
       </div>
 
-      {isScannerOpen && (
-        <BarcodeScanner onScan={handleScan} onClose={closeScanner} />
+      {isMobile && (
+        <>
+          <div className="fixed inset-x-0 z-20 border-t border-gray-200 bg-white px-4 py-2 shadow-[0_-4px_12px_rgba(0,0,0,0.06)] bottom-tabbar">
+            <button
+              type="button"
+              onClick={() => setCartOpen(true)}
+              disabled={cartItems.length === 0}
+              className="btn-success w-full justify-between px-4"
+              aria-label={`Ver carrito, ${unitCount} artículos, total ${formatPrice(total)}`}
+            >
+              <span className="flex items-center gap-2">
+                <Icon name="cart" />
+                <span>{unitCount} {unitCount === 1 ? 'artículo' : 'artículos'}</span>
+              </span>
+              <span className="text-base font-bold">{formatPrice(total)}</span>
+            </button>
+          </div>
+          <Modal open={cartOpen} onClose={() => setCartOpen(false)} title={`Carrito (${unitCount})`} size="md">
+            {cartPanel}
+          </Modal>
+        </>
       )}
+
+      {isScannerOpen && <BarcodeScanner onScan={handleScan} onClose={closeScanner} />}
     </section>
   );
 };
+
+interface CartPanelProps {
+  items: SaleItem[];
+  total: number;
+  unitCount: number;
+  paymentMethod: PaymentMethod;
+  submitting: boolean;
+  compact: boolean;
+  onChangeQuantity: (productId: string, delta: number) => void;
+  onRemove: (productId: string) => void;
+  onPaymentChange: (method: PaymentMethod) => void;
+  onConfirm: () => void;
+}
+
+function CartPanel({
+  items,
+  total,
+  unitCount,
+  paymentMethod,
+  submitting,
+  compact,
+  onChangeQuantity,
+  onRemove,
+  onPaymentChange,
+  onConfirm,
+}: CartPanelProps) {
+  return (
+    <div className="space-y-4">
+      {!compact && <h3 className="font-semibold text-sf-text">Carrito</h3>}
+
+      {items.length === 0 ? (
+        <p className="py-6 text-center text-sm text-gray-500">El carrito está vacío</p>
+      ) : (
+        <ul className="divide-y divide-gray-100" aria-label="Artículos en el carrito">
+          {items.map((item) => (
+            <li key={item.product_id} className="flex items-center gap-2 py-2">
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-medium text-sf-text">{item.product_name}</p>
+                <p className="text-xs text-gray-500">
+                  {formatPrice(item.price_cents)} c/u · <span className="font-semibold text-sf-primary">{formatPrice(item.subtotal)}</span>
+                </p>
+              </div>
+              <div className="flex items-center rounded-lg border border-gray-300" role="group" aria-label={`Cantidad de ${item.product_name}`}>
+                <button
+                  type="button"
+                  onClick={() => onChangeQuantity(item.product_id, -1)}
+                  aria-label={`Quitar uno de ${item.product_name}`}
+                  className="icon-btn h-10 w-10 text-sf-text hover:bg-gray-100"
+                >
+                  <Icon name="minus" size={18} />
+                </button>
+                <span className="min-w-[2rem] text-center text-sm font-semibold" aria-live="polite">
+                  {item.quantity}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => onChangeQuantity(item.product_id, 1)}
+                  aria-label={`Agregar uno de ${item.product_name}`}
+                  className="icon-btn h-10 w-10 text-sf-text hover:bg-gray-100"
+                >
+                  <Icon name="plus" size={18} />
+                </button>
+              </div>
+              <button
+                type="button"
+                onClick={() => onRemove(item.product_id)}
+                aria-label={`Eliminar ${item.product_name} del carrito`}
+                className="icon-btn h-10 w-10 text-red-600 hover:bg-red-50"
+              >
+                <Icon name="trash" size={18} />
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      <div className="space-y-1 border-t border-gray-200 pt-3 text-sm text-sf-text">
+        <div className="flex justify-between">
+          <span>Artículos</span>
+          <span className="font-medium">{unitCount}</span>
+        </div>
+        <div className="flex justify-between text-lg font-bold">
+          <span>Total</span>
+          <span className="text-sf-primary">{formatPrice(total)}</span>
+        </div>
+      </div>
+
+      <fieldset>
+        <legend className="mb-2 text-sm font-medium text-sf-text">Método de pago</legend>
+        <div className="grid grid-cols-3 gap-2" role="radiogroup">
+          {PAYMENT_OPTIONS.map((option) => {
+            const selected = option.value === paymentMethod;
+            return (
+              <button
+                key={option.value}
+                type="button"
+                role="radio"
+                aria-checked={selected}
+                onClick={() => onPaymentChange(option.value)}
+                className={`flex min-h-[44px] flex-col items-center justify-center rounded-lg border px-2 text-xs font-medium transition ${
+                  selected ? 'border-sf-primary bg-sf-primary/10 text-sf-primary' : 'border-gray-300 text-gray-700 hover:bg-gray-50'
+                }`}
+              >
+                <span aria-hidden="true">{option.emoji}</span>
+                {option.label}
+              </button>
+            );
+          })}
+        </div>
+      </fieldset>
+
+      <button
+        type="button"
+        onClick={onConfirm}
+        disabled={submitting || items.length === 0}
+        className="btn-success w-full py-3 text-base"
+      >
+        {submitting ? 'Procesando...' : `Confirmar venta · ${formatPrice(total)}`}
+      </button>
+    </div>
+  );
+}
 
 export default CreateSale;

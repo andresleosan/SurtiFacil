@@ -1,12 +1,15 @@
 import { useState } from 'react';
 import { User, UserRole } from '../firebase/db';
 import { registerUser } from '../services/authService';
+import { Modal } from './ui/Modal';
 
 interface CreateUserModalProps {
   isOpen: boolean;
   onClose: () => void;
   onUserCreated: (user: User) => void;
 }
+
+const FORM_ID = 'create-user-form';
 
 const CreateUserModal = ({ isOpen, onClose, onUserCreated }: CreateUserModalProps) => {
   const [formData, setFormData] = useState({
@@ -54,99 +57,96 @@ const CreateUserModal = ({ isOpen, onClose, onUserCreated }: CreateUserModalProp
     onClose();
   };
 
-  if (!isOpen) return null;
-
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-      <div className="bg-white rounded-xl p-6 w-full max-w-md shadow-xl">
-        <h3 className="text-lg font-bold text-sf-text mb-4 flex items-center gap-2">
-          <span>👤</span> Agregar Nuevo Empleado
-        </h3>
+    <Modal
+      open={isOpen}
+      onClose={handleClose}
+      title="Agregar Nuevo Empleado"
+      footer={
+        <>
+          <button type="button" onClick={handleClose} className="btn-secondary">
+            Cancelar
+          </button>
+          <button type="submit" form={FORM_ID} disabled={loading} className="btn-primary">
+            {loading ? 'Creando...' : 'Crear Empleado'}
+          </button>
+        </>
+      }
+    >
+      {error && (
+        <div role="alert" className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          {error}
+        </div>
+      )}
 
-        {error && (
-          <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded mb-4">
-            {error}
-          </div>
-        )}
+      <form id={FORM_ID} onSubmit={handleSubmit} className="space-y-4">
+        <div>
+          <label htmlFor="create-user-name" className="mb-1 block text-sm font-medium text-gray-700">
+            Nombre Completo
+          </label>
+          <input
+            id="create-user-name"
+            type="text"
+            autoComplete="name"
+            value={formData.displayName}
+            onChange={(e) => setFormData({ ...formData, displayName: e.target.value })}
+            className="input"
+            placeholder="Ej: Juan Pérez"
+            required
+          />
+        </div>
 
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Nombre Completo
-            </label>
-            <input
-              type="text"
-              value={formData.displayName}
-              onChange={(e) => setFormData({ ...formData, displayName: e.target.value })}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-sf-primary"
-              placeholder="Ej: Juan Pérez"
-              required
-            />
-          </div>
+        <div>
+          <label htmlFor="create-user-email" className="mb-1 block text-sm font-medium text-gray-700">
+            Email
+          </label>
+          <input
+            id="create-user-email"
+            type="email"
+            inputMode="email"
+            autoComplete="off"
+            value={formData.email}
+            onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+            className="input"
+            placeholder="correo@ejemplo.com"
+            required
+          />
+        </div>
 
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Email
-            </label>
-            <input
-              type="email"
-              value={formData.email}
-              onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-sf-primary"
-              placeholder="correo@ejemplo.com"
-              required
-            />
-          </div>
+        <div>
+          <label htmlFor="create-user-password" className="mb-1 block text-sm font-medium text-gray-700">
+            Contraseña
+          </label>
+          <input
+            id="create-user-password"
+            type="password"
+            autoComplete="new-password"
+            value={formData.password}
+            onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+            className="input"
+            placeholder="Mínimo 6 caracteres"
+            minLength={6}
+            required
+          />
+        </div>
 
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Contraseña
-            </label>
-            <input
-              type="password"
-              value={formData.password}
-              onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-sf-primary"
-              placeholder="Mínimo 6 caracteres"
-              minLength={6}
-              required
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Rol
-            </label>
-            <select
-              value={formData.role}
-              onChange={(e) => setFormData({ ...formData, role: e.target.value as UserRole })}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-sf-primary"
-            >
-              <option value="cashier">Cajero</option>
-              <option value="manager">Gerente</option>
-              <option value="admin">Administrador</option>
-            </select>
-          </div>
-
-          <div className="flex gap-3 mt-6">
-            <button
-              type="button"
-              onClick={handleClose}
-              className="flex-1 px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition"
-            >
-              Cancelar
-            </button>
-            <button
-              type="submit"
-              disabled={loading}
-              className="flex-1 px-4 py-2 bg-sf-primary text-white rounded-lg hover:bg-sf-dark transition disabled:opacity-50"
-            >
-              {loading ? 'Creando...' : 'Crear Empleado'}
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
+        <div>
+          <label htmlFor="create-user-role" className="mb-1 block text-sm font-medium text-gray-700">
+            Rol
+          </label>
+          <select
+            id="create-user-role"
+            value={formData.role}
+            onChange={(e) => setFormData({ ...formData, role: e.target.value as UserRole })}
+            className="input"
+          >
+            <option value="cashier">Cajero</option>
+            <option value="manager">Gerente</option>
+            <option value="admin">Administrador</option>
+          </select>
+        </div>
+      </form>
+    </Modal>
   );
 };
 

@@ -5,14 +5,30 @@ const authMock = vi.hoisted(() => ({ currentUser: null as any }));
 vi.mock('firebase/auth', () => ({ getAuth: () => authMock }));
 vi.mock('firebase/firestore', () => ({
   collection: vi.fn(),
+  count: vi.fn(() => 'count-spec'),
+  getAggregateFromServer: vi.fn(),
   getDocs: vi.fn(),
+  limit: vi.fn((value: number) => ({ limit: value })),
+  orderBy: vi.fn((field: string, direction: string) => ({ orderBy: field, direction })),
+  query: vi.fn((...parts: unknown[]) => ({ parts })),
   serverTimestamp: vi.fn(() => new Date()),
+  startAfter: vi.fn((cursor: unknown) => ({ startAfter: cursor })),
+  sum: vi.fn((field: string) => ({ sum: field })),
+  Timestamp: { fromDate: (date: Date) => ({ toMillis: () => date.getTime() }) },
+  where: vi.fn((field: string, op: string, value: unknown) => ({ where: field, op, value })),
   doc: vi.fn(),
 }));
 
-import { getDocs } from 'firebase/firestore';
+import { getAggregateFromServer, getDocs, limit, query, startAfter, where } from 'firebase/firestore';
 import { mockProducts } from '../services/mockData';
-import { createSale, getProducts, getSales } from '../services/saleService';
+import {
+  createSale,
+  getProducts,
+  getRecentSales,
+  getSales,
+  getSalesSince,
+  getSalesTotals,
+} from '../services/saleService';
 
 describe('saleService', () => {
   beforeEach(() => {
@@ -192,6 +208,82 @@ describe('saleService', () => {
       }], 'cash')).rejects.toThrow('Error al crear la venta');
 
       expect(product.stock).toBe(stockBefore);
+    });
+
+    it('pagina el historial con un cursor y detecta si hay más páginas', async () => {
+      const documents = [3, 2, 1].map((value) => ({
+        id: `sale-${value}`,
+        data: () => ({ date: { toMillis: () => value }, total: value * 100, payment_method: 'cash', items: [] }),
+      }));
+      vi.mocked(getDocs).mockResolvedValueOnce({ docs: documents } as any);
+
+      const firstPage = await getRecentSales(2);
+
+      expect(firstPage.sales.map((sale) => sale.id)).toEqual(['sale-3', 'sale-2']);
+      expect(firstPage.hasMore).toBe(true);
+      expect(firstPage.cursor).toBe(documents[1]);
+      expect(limit).toHaveBeenCalledWith(3);
+
+      vi.mocked(getDocs).mockResolvedValueOnce({ docs: [documents[2]] } as any);
+      const secondPage = await getRecentSales(2, firstPage.cursor);
+
+      expect(startAfter).toHaveBeenCalledWith(documents[1]);
+      expect(secondPage.sales.map((sale) => sale.id)).toEqual(['sale-1']);
+      expect(secondPage.hasMore).toBe(false);
+      expect(secondPage.cursor).toBeNull();
+    });
+
+    it('consulta las ventas desde una fecha con un filtro del servidor', async () => {
+      const since = new Date('2026-09-01T00:00:00');
+      vi.mocked(getDocs).mockResolvedValueOnce({
+        docs: [{ id: 'sale-9', data: () => ({ total: 900, payment_method: 'cash', items: [] }) }],
+      } as any);
+
+      await expect(getSalesSince(since)).resolves.toEqual([
+        expect.objectContaining({ id: 'sale-9', total: 900 }),
+      ]);
+      expect(where).toHaveBeenCalledWith('date', '>=', expect.objectContaining({ toMillis: expect.any(Function) }));
+      expect(query).toHaveBeenCalled();
+    });
+
+    it('obtiene los totales históricos con una agregación del servidor', async () => {
+      vi.mocked(getAggregateFromServer).mockResolvedValueOnce({ data: () => ({ count: 3, totalCents: 900 }) } as any);
+
+      await expect(getSalesTotals()).resolves.toEqual({ count: 3, totalCents: 900 });
+    });
+
+    it('usa mensajes genéricos cuando fallan las consultas acotadas', async () => {
+      const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {});
+      vi.mocked(getDocs).mockRejectedValueOnce(new Error('permission denied token=secret'));
+      vi.mocked(getDocs).mockRejectedValueOnce(new Error('permission denied token=secret'));
+      vi.mocked(getAggregateFromServer).mockRejectedValueOnce(new Error('permission denied token=secret'));
+
+      await expect(getRecentSales(10)).rejects.toThrow('Error al cargar ventas');
+      await expect(getSalesSince(new Date())).rejects.toThrow('Error al cargar ventas');
+      await expect(getSalesTotals()).rejects.toThrow('Error al cargar ventas');
+      expect(errorLog.mock.calls.flat().join(' ')).not.toContain('secret');
+    });
+  });
+
+  describe('consultas acotadas en modo mock', () => {
+    it('pagina, filtra por fecha y totaliza las ventas locales', async () => {
+      const all = await getSales();
+      const firstPage = await getRecentSales(1);
+
+      expect(firstPage.sales).toHaveLength(Math.min(1, all.length));
+      expect(firstPage.hasMore).toBe(all.length > 1);
+      if (firstPage.hasMore) {
+        const secondPage = await getRecentSales(1, firstPage.cursor);
+        expect(secondPage.sales[0]?.id).toBe(all[1].id);
+      }
+
+      await expect(getSalesSince(new Date(0))).resolves.toHaveLength(all.length);
+      await expect(getSalesSince(new Date('2999-01-01'))).resolves.toEqual([]);
+      await expect(getSalesTotals()).resolves.toEqual({
+        count: all.length,
+        totalCents: all.reduce((sum, sale) => sum + sale.total, 0),
+      });
+      expect(getDocs).not.toHaveBeenCalled();
     });
   });
 });

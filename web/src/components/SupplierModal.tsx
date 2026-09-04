@@ -1,5 +1,6 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useId } from 'react';
 import { Supplier } from '../firebase/db';
+import { Modal } from './ui/Modal';
 
 interface SupplierModalProps {
   isOpen: boolean;
@@ -9,6 +10,7 @@ interface SupplierModalProps {
 }
 
 const SupplierModal = ({ isOpen, onClose, onSave, editingSupplier }: SupplierModalProps) => {
+  const formId = useId();
   const [formData, setFormData] = useState({
     name: '',
     contactName: '',
@@ -87,107 +89,130 @@ const SupplierModal = ({ isOpen, onClose, onSave, editingSupplier }: SupplierMod
     onClose();
   };
 
-  if (!isOpen) return null;
+  const field = (name: string) => `${formId}-${name}`;
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-      <div className="bg-white rounded-xl p-6 w-full max-w-md shadow-xl">
-        <h3 className="text-lg font-bold text-sf-text mb-4 flex items-center gap-2">
-          <span>🚚</span> {editingSupplier ? 'Editar Proveedor' : 'Agregar Nuevo Proveedor'}
-        </h3>
+    <Modal
+      open={isOpen}
+      onClose={handleClose}
+      title={editingSupplier ? 'Editar Proveedor' : 'Agregar Nuevo Proveedor'}
+      footer={
+        <>
+          <button type="button" onClick={handleClose} className="btn-secondary">
+            Cancelar
+          </button>
+          <button type="submit" form={formId} disabled={loading} className="btn-primary">
+            {loading ? 'Guardando...' : editingSupplier ? 'Guardar' : 'Crear'}
+          </button>
+        </>
+      }
+    >
+      {error && (
+        <div role="alert" className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          {error}
+        </div>
+      )}
 
-        {error && (
-          <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded mb-4">
-            {error}
-          </div>
-        )}
+      <form id={formId} onSubmit={handleSubmit} className="space-y-4">
+        <div>
+          <label htmlFor={field('name')} className="mb-1 block text-sm font-medium text-gray-700">
+            Nombre *
+          </label>
+          <input
+            id={field('name')}
+            type="text"
+            value={formData.name}
+            onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+            className="input"
+            placeholder="Ej: Distribuidora del Norte"
+            required
+          />
+        </div>
 
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Nombre *
-            </label>
-            <input
-              type="text"
-              value={formData.name}
-              onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-sf-primary"
-              placeholder="Ej: Distribuidora del Norte"
-              required
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
+            <label htmlFor={field('contact')} className="mb-1 block text-sm font-medium text-gray-700">
               Contacto
             </label>
             <input
+              id={field('contact')}
               type="text"
               value={formData.contactName}
               onChange={(e) => setFormData({ ...formData, contactName: e.target.value })}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-sf-primary"
+              className="input"
               placeholder="Ej: Juan Pérez"
             />
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
+            <label htmlFor={field('phone')} className="mb-1 block text-sm font-medium text-gray-700">
               Teléfono
             </label>
             <input
+              id={field('phone')}
               type="tel"
+              inputMode="tel"
               value={formData.phone}
               onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-sf-primary"
+              className="input"
               placeholder="Ej: +503 7777-8888"
             />
           </div>
+        </div>
 
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Email
-            </label>
-            <input
-              type="text"
-              value={formData.email}
-              onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-sf-primary"
-              placeholder="correo@ejemplo.com"
-            />
-          </div>
+        <div>
+          <label htmlFor={field('email')} className="mb-1 block text-sm font-medium text-gray-700">
+            Email
+          </label>
+          <input
+            id={field('email')}
+            type="text"
+            inputMode="email"
+            autoComplete="email"
+            value={formData.email}
+            onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+            className="input"
+            placeholder="correo@ejemplo.com"
+          />
+        </div>
 
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Dirección
-            </label>
-            <input
-              type="text"
-              value={formData.address}
-              onChange={(e) => setFormData({ ...formData, address: e.target.value })}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-sf-primary"
-              placeholder="Ej: Calle Principal #123"
-            />
-          </div>
+        <div>
+          <label htmlFor={field('address')} className="mb-1 block text-sm font-medium text-gray-700">
+            Dirección
+          </label>
+          <input
+            id={field('address')}
+            type="text"
+            value={formData.address}
+            onChange={(e) => setFormData({ ...formData, address: e.target.value })}
+            className="input"
+            placeholder="Ej: Calle Principal #123"
+          />
+        </div>
 
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
+            <label htmlFor={field('category')} className="mb-1 block text-sm font-medium text-gray-700">
               Categoría
             </label>
             <input
+              id={field('category')}
               type="text"
               value={formData.category}
               onChange={(e) => setFormData({ ...formData, category: e.target.value })}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-sf-primary"
+              className="input"
               placeholder="Ej: Lácteos, Bebidas, Abarrotes"
             />
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
+            <label htmlFor={field('lead')} className="mb-1 block text-sm font-medium text-gray-700">
               Lead time (días)
             </label>
             <input
+              id={field('lead')}
               type="number"
+              inputMode="numeric"
               min="0"
               value={formData.lead_time_days}
               onChange={(e) =>
@@ -196,30 +221,13 @@ const SupplierModal = ({ isOpen, onClose, onSave, editingSupplier }: SupplierMod
                   lead_time_days: e.target.value === '' ? '' : Number(e.target.value),
                 })
               }
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-sf-primary"
+              className="input"
               placeholder="Ej: 7"
             />
           </div>
-
-          <div className="flex gap-3 mt-6">
-            <button
-              type="button"
-              onClick={handleClose}
-              className="flex-1 px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition"
-            >
-              Cancelar
-            </button>
-            <button
-              type="submit"
-              disabled={loading}
-              className="flex-1 px-4 py-2 bg-sf-primary text-white rounded-lg hover:bg-sf-dark transition disabled:opacity-50"
-            >
-              {loading ? 'Guardando...' : editingSupplier ? 'Guardar' : 'Crear'}
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
+        </div>
+      </form>
+    </Modal>
   );
 };
 

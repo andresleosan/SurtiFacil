@@ -1,92 +1,113 @@
-import { useEffect, useState } from 'react';
-import { getSales } from '../services/saleService';
-import { getProducts } from '../services/saleService';
-import { Product } from '../firebase/db';
+import { useCallback, useEffect, useState } from 'react';
+import { getSalesSince, getSalesTotals } from '../services/saleService';
 import StockAlerts from './StockAlerts';
+import { Icon } from './ui/Icon';
+import { PageHeader } from './ui/PageHeader';
+
+interface DashboardMetrics {
+  todayCents: number;
+  weekCents: number;
+  totalCents: number;
+  totalCount: number;
+  topProducts: string[];
+}
+
+const EMPTY_METRICS: DashboardMetrics = {
+  todayCents: 0,
+  weekCents: 0,
+  totalCents: 0,
+  totalCount: 0,
+  topProducts: [],
+};
+
+function saleDate(value: any): Date {
+  return value?.toDate ? value.toDate() : new Date(value);
+}
 
 const Dashboard = () => {
-  const [ventasHoy, setVentasHoy] = useState(0);
-  const [ventasSemana, setVentasSemana] = useState(0);
-  const [productosVendidos, setProductosVendidos] = useState(0);
-  const [ingresosTotales, setIngresosTotales] = useState(0);
-  const [topProducts, setTopProducts] = useState<string[]>([]);
+  const [metrics, setMetrics] = useState<DashboardMetrics>(EMPTY_METRICS);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    loadDashboardData();
-    const interval = setInterval(loadDashboardData, 10000);
-    return () => clearInterval(interval);
-  }, []);
-
-  const loadDashboardData = async () => {
+  const loadDashboardData = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
-      const [sales, products] = await Promise.all([getSales(), getProducts()]);
-
       const now = new Date();
       const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-      const startOfWeek = new Date(now);
-      startOfWeek.setDate(now.getDate() - now.getDay());
+      const startOfWeek = new Date(startOfToday);
+      startOfWeek.setDate(startOfToday.getDate() - startOfToday.getDay());
 
-      const salesToday = sales.filter(s => {
-        const saleDate = new Date(s.date);
-        return saleDate >= startOfToday;
-      });
+      // Solo se descargan las ventas de la semana; el histórico llega agregado desde el servidor.
+      const [weekSales, totals] = await Promise.all([getSalesSince(startOfWeek), getSalesTotals()]);
 
-      const salesWeek = sales.filter(s => {
-        const saleDate = new Date(s.date);
-        return saleDate >= startOfWeek;
-      });
+      const todayCents = weekSales
+        .filter((sale) => saleDate(sale.date) >= startOfToday)
+        .reduce((sum, sale) => sum + sale.total, 0);
+      const weekCents = weekSales.reduce((sum, sale) => sum + sale.total, 0);
 
-      const totalToday = salesToday.reduce((sum, s) => sum + s.total, 0);
-      const totalWeek = salesWeek.reduce((sum, s) => sum + s.total, 0);
-      const totalAll = sales.reduce((sum, s) => sum + s.total, 0);
-
-      // Calcular productos más vendidos
       const productCounts = new Map<string, number>();
-      sales.forEach(sale => {
-        sale.items?.forEach(item => {
-          const current = productCounts.get(item.product_name) || 0;
-          productCounts.set(item.product_name, current + item.quantity);
+      weekSales.forEach((sale) => {
+        sale.items?.forEach((item) => {
+          productCounts.set(item.product_name, (productCounts.get(item.product_name) || 0) + item.quantity);
         });
       });
-
-      const sorted = [...productCounts.entries()]
+      const topProducts = [...productCounts.entries()]
         .sort((a, b) => b[1] - a[1])
         .slice(0, 3)
         .map(([name]) => name);
 
-      setVentasHoy(totalToday);
-      setVentasSemana(totalWeek);
-      setIngresosTotales(totalAll);
-      setTopProducts(sorted);
-      setProductosVendidos(sales.length);
+      setMetrics({
+        todayCents,
+        weekCents,
+        totalCents: totals.totalCents,
+        totalCount: totals.count,
+        topProducts,
+      });
     } catch {
       console.error('Error loading dashboard.');
       setError('No se pudieron cargar los datos del panel.');
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
-  const formatCents = (cents: number) => {
-    return `$${(cents / 100).toLocaleString()}`;
-  };
+  useEffect(() => {
+    void loadDashboardData();
+    // Refresca al volver a la pestaña o a la app instalada, sin sondeo continuo.
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') void loadDashboardData();
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => document.removeEventListener('visibilitychange', handleVisibility);
+  }, [loadDashboardData]);
+
+  const formatCents = (cents: number) => `$${(cents / 100).toLocaleString()}`;
 
   const stats = [
-    { title: 'Ventas Hoy', value: formatCents(ventasHoy) },
-    { title: 'Ventas Semana', value: formatCents(ventasSemana) },
-    { title: 'Productos más vendidos', value: topProducts.length > 0 ? topProducts.join(', ') : 'Sin datos' },
-    { title: 'Ingresos Totales', value: formatCents(ingresosTotales) }
+    { title: 'Ventas hoy', value: formatCents(metrics.todayCents) },
+    { title: 'Ventas semana', value: formatCents(metrics.weekCents) },
+    { title: 'Más vendidos (semana)', value: metrics.topProducts.length > 0 ? metrics.topProducts.join(', ') : 'Sin datos' },
+    { title: 'Ingresos totales', value: formatCents(metrics.totalCents) },
   ];
+
+  const header = (
+    <PageHeader
+      title="Panel de Control"
+      actions={
+        <button type="button" onClick={() => void loadDashboardData()} disabled={loading} className="btn-secondary">
+          <Icon name="refresh" size={18} />
+          Actualizar
+        </button>
+      }
+    />
+  );
 
   if (error) {
     return (
       <section className="space-y-4">
-        <h2 className="text-2xl font-bold text-sf-text">Panel de Control</h2>
-        <div role="alert" className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded">
+        {header}
+        <div role="alert" className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-red-700">
           {error}
         </div>
       </section>
@@ -95,31 +116,30 @@ const Dashboard = () => {
 
   return (
     <section className="space-y-4">
-      <h2 className="text-2xl font-bold text-sf-text">Panel de Control</h2>
+      {header}
       {loading && (
-        <p className="text-sm text-gray-500">Cargando datos...</p>
+        <p className="text-sm text-gray-500" role="status">Cargando datos...</p>
       )}
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 md:gap-4 lg:grid-cols-4">
         {stats.map((card) => (
-          <article key={card.title} className="rounded-xl bg-white p-4 shadow-sm border border-gray-200 hover:shadow-md transition">
-            <h3 className="text-sm text-gray-600">{card.title}</h3>
-            <p className="text-xl font-semibold text-sf-primary mt-2">{card.value}</p>
+          <article key={card.title} className="card p-3 transition hover:shadow-md md:p-4">
+            <h3 className="text-xs text-gray-600 md:text-sm">{card.title}</h3>
+            <p className="mt-1 break-words text-lg font-semibold text-sf-primary md:mt-2 md:text-xl">{card.value}</p>
           </article>
         ))}
       </div>
-      <div className="rounded-xl bg-white p-4 shadow-sm border border-gray-200">
-        <h3 className="font-semibold mb-2 text-sf-text">Resumen del Negocio</h3>
-        <p className="text-sm text-gray-600 mb-3">
-          {productosVendidos} ventas registradas en total
+      <div className="card p-4">
+        <h3 className="mb-2 font-semibold text-sf-text">Resumen del negocio</h3>
+        <p className="mb-3 text-sm text-gray-600">
+          {metrics.totalCount} ventas registradas en total
         </p>
         <a
-          href="#"
-          onClick={(e) => {
-            e.preventDefault();
-            const event = new CustomEvent('navigate', { detail: 'reports' });
-            window.dispatchEvent(event);
+          href="#/reports"
+          onClick={(event) => {
+            event.preventDefault();
+            window.dispatchEvent(new CustomEvent('navigate', { detail: 'reports' }));
           }}
-          className="inline-flex items-center gap-2 text-sf-primary hover:text-sf-dark text-sm font-medium"
+          className="inline-flex min-h-[44px] items-center gap-2 text-sm font-medium text-sf-primary hover:text-sf-dark"
         >
           📊 Ver reportes completos →
         </a>

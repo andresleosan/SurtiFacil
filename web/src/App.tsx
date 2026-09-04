@@ -1,20 +1,34 @@
-import { useEffect, useMemo, useState } from 'react';
-import Dashboard from './components/Dashboard';
-import Inventory from './components/Inventory';
-import Sales from './components/Sales';
-import CreateSale from './components/CreateSale';
-import WhatsAppChat from './components/WhatsAppChat';
-import UserManagement from './components/UserManagement';
-import Reports from './components/Reports';
-import Suppliers from './components/Suppliers';
-import PurchaseOrders from './components/PurchaseOrders';
-import MarginReports from './components/MarginReports';
-import Restock from './components/Restock';
+import { lazy, Suspense, useEffect, useMemo, useState, type ComponentType } from 'react';
 import Login from './components/Login';
+import { AppShell } from './components/layout/AppShell';
 import { getSafeAuthErrorMessage, logoutUser, subscribeToAuthState } from './services/authService';
 import { User } from './firebase/db';
 import { canAccessPage, hashForPage, isPage, pageFromHash, Page } from './auth/accessControl';
+import { CurrentUserProvider } from './auth/CurrentUserContext';
 import { clearPrivateRuntimeCaches } from './services/pwaCacheService';
+
+/** Cada página se carga bajo demanda para que el POS no descargue gráficas ni módulos que no usa. */
+const PAGE_COMPONENTS: Record<Page, ComponentType> = {
+  dashboard: lazy(() => import('./components/Dashboard')),
+  inventory: lazy(() => import('./components/Inventory')),
+  sales: lazy(() => import('./components/Sales')),
+  'create-sale': lazy(() => import('./components/CreateSale')),
+  employees: lazy(() => import('./components/UserManagement')),
+  suppliers: lazy(() => import('./components/Suppliers')),
+  orders: lazy(() => import('./components/PurchaseOrders')),
+  reports: lazy(() => import('./components/Reports')),
+  margins: lazy(() => import('./components/MarginReports')),
+  restock: lazy(() => import('./components/Restock')),
+  whatsapp: lazy(() => import('./components/WhatsAppChat')),
+};
+
+function PageFallback() {
+  return (
+    <div className="py-12 text-center text-gray-500" role="status">
+      Cargando...
+    </div>
+  );
+}
 
 function App() {
   const [authLoading, setAuthLoading] = useState(true);
@@ -82,17 +96,12 @@ function App() {
         </section>
       );
     }
-    if (page === 'inventory') return <Inventory />;
-    if (page === 'sales') return <Sales />;
-    if (page === 'create-sale') return <CreateSale />;
-    if (page === 'employees') return <UserManagement />;
-    if (page === 'suppliers') return <Suppliers />;
-    if (page === 'orders') return <PurchaseOrders />;
-    if (page === 'reports') return <Reports />;
-    if (page === 'margins') return <MarginReports />;
-    if (page === 'restock') return <Restock />;
-    if (page === 'whatsapp') return <WhatsAppChat />;
-    return <Dashboard />;
+    const PageComponent = PAGE_COMPONENTS[page];
+    return (
+      <Suspense fallback={<PageFallback />}>
+        <PageComponent />
+      </Suspense>
+    );
   }, [page, currentUser]);
 
   if (authLoading) {
@@ -113,46 +122,14 @@ function App() {
   }
 
   return (
-    <div className="min-h-screen bg-sf-light text-sf-text font-poppins">
-      <header className="bg-sf-primary text-white p-4 shadow-lg">
-        <div className="container mx-auto flex justify-between items-center">
-          <h1 className="text-2xl font-bold">🛒 Surti Fácil</h1>
-          <nav className="space-x-3">
-            <button onClick={() => navigateToPage('dashboard')} className="hover:underline">Dashboard</button>
-            <button onClick={() => navigateToPage('inventory')} className="hover:underline">Inventario</button>
-            <button onClick={() => navigateToPage('sales')} className="hover:underline">Ventas</button>
-            <button onClick={() => navigateToPage('create-sale')} className="hover:underline">Nueva Venta</button>
-            {canAccessPage(currentUser.role, 'employees') && (
-              <button onClick={() => navigateToPage('employees')} className="hover:underline">👥 Empleados</button>
-            )}
-            {canAccessPage(currentUser.role, 'suppliers') && (
-              <button onClick={() => navigateToPage('suppliers')} className="hover:underline">🚚 Proveedores</button>
-            )}
-            {canAccessPage(currentUser.role, 'orders') && (
-              <button onClick={() => navigateToPage('orders')} className="hover:underline">Pedidos</button>
-            )}
-            {canAccessPage(currentUser.role, 'restock') && (
-              <button onClick={() => navigateToPage('restock')} className="hover:underline">Reposición</button>
-            )}
-            <button onClick={() => navigateToPage('reports')} className="hover:underline">Reportes</button>
-            {canAccessPage(currentUser.role, 'margins') && (
-              <button onClick={() => navigateToPage('margins')} className="hover:underline">Márgenes</button>
-            )}
-            {canAccessPage(currentUser.role, 'whatsapp') && (
-              <button onClick={() => navigateToPage('whatsapp')} className="hover:underline">💬 WhatsApp</button>
-            )}
-            <button onClick={handleLogout} className="hover:underline">Cerrar sesión</button>
-          </nav>
-        </div>
-      </header>
-
-      <main className="container mx-auto py-8 px-4">
+    <CurrentUserProvider value={currentUser}>
+      <AppShell user={currentUser} page={page} onNavigate={navigateToPage} onLogout={handleLogout}>
         {authError && (
           <div role="alert" className="mb-4 rounded border border-red-200 bg-red-50 p-4 text-red-700">{authError}</div>
         )}
         {pageComponent}
-      </main>
-    </div>
+      </AppShell>
+    </CurrentUserProvider>
   );
 }
 

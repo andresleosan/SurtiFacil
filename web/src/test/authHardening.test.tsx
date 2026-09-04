@@ -4,6 +4,8 @@ import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 const saleMock = vi.hoisted(() => ({
   getSales: vi.fn(),
   getProducts: vi.fn(),
+  getSalesSince: vi.fn(),
+  getSalesTotals: vi.fn(),
 }));
 
 const reportMock = vi.hoisted(() => ({
@@ -25,6 +27,8 @@ describe('visible data load failures', () => {
   beforeEach(() => {
     saleMock.getSales.mockReset();
     saleMock.getProducts.mockReset();
+    saleMock.getSalesSince.mockReset();
+    saleMock.getSalesTotals.mockReset();
     reportMock.getSalesSummary.mockReset();
     reportMock.getDailySales.mockReset();
     reportMock.getTopProducts.mockReset();
@@ -36,7 +40,8 @@ describe('visible data load failures', () => {
   });
 
   it('shows a Spanish dashboard error instead of zero metrics after a load failure', async () => {
-    saleMock.getSales.mockRejectedValue(new Error('permission-denied'));
+    saleMock.getSalesSince.mockRejectedValue(new Error('permission-denied'));
+    saleMock.getSalesTotals.mockResolvedValue({ count: 0, totalCents: 0 });
     saleMock.getProducts.mockResolvedValue([]);
 
     render(<Dashboard />);

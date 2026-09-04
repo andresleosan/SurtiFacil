@@ -539,6 +539,26 @@ Status: pendiente y bloqueada por checkpoint de infraestructura. Prioridad: P0 o
 
 Status: pendiente. No autorizado para despliegue.
 
+### Task 26: Optimización mobile y tablet (pista paralela a RC0-RC2)
+
+- [x] Diagnosticar el frontend con evidencia (breakpoints, tablas, modales, sondeos, bundle) y revisar patrones en Mobbin.
+- [x] Shell responsivo: barra de pestañas inferior + hoja "Más" en teléfonos; barra lateral colapsable en tablet/escritorio; una sola navegación en el DOM.
+- [x] Componentes compartidos `Modal`, `ConfirmDialog`/`useConfirm`, `PageHeader`, `Icon` y clases táctiles de 44 px; eliminar `confirm()`/`alert()`.
+- [x] POS táctil: búsqueda + escaneo, lista/tarjetas de productos, carrito con steppers y hoja inferior con total fijo en teléfono.
+- [x] Inventario, Ventas, Dashboard, Reportes, Márgenes, Reposición, Pedidos, Proveedores, Empleados y WhatsApp con tarjetas en móvil y tablas desde `md`.
+- [x] Datos: suscripción en tiempo real a productos, historial de ventas paginado, dashboard con consultas por fecha y agregación del servidor; sin `setInterval` en Dashboard/Inventario/Ventas.
+- [x] Bundle: `React.lazy` por página, `manualChunks` por función (chunk `react-vendor` vacío corregido), chunk separado del escáner.
+- [x] PWA: `viewport-fit=cover`, `theme-color` de marca, favicon, `orientation: any`.
+- [x] Pruebas: unitarias nuevas para shell, POS, inventario, ventas, modales y servicios; proyectos Playwright `mobile-chromium` y `tablet-chromium` con `responsive-smoke.spec.ts`.
+- [ ] Acotar `reportService`/`marginService` y medir Lighthouse móvil sobre staging (queda en Task 21/24).
+- [ ] Corrida E2E autenticada en móvil y tablet con cuenta QA (`QA_TEST_EMAIL`/`QA_TEST_PASSWORD`).
+
+Status: implementado en el workspace el 2026-09-04, sin commit ni despliegue. Evidence:
+`docs/mobile-tablet-2026-09-04.md`. Corrida final del 2026-09-04: `tsc` sin errores; frontend 262/262 (30 archivos, antes 216);
+build de producción OK con carga inicial de ~663 KB (index 27 KB + react 144 KB + firebase 493 KB,
+antes ~1.7 MB en un solo paso; Recharts 432 KB y escáner 335 KB se cargan bajo demanda); Playwright
+8 passed / 5 skipped en chromium, mobile-chromium y tablet-chromium (los skipped requieren cuenta QA).
+
 ### Fuera de alcance hasta post-release
 
 - [ ] Multi-tenant/SaaS.

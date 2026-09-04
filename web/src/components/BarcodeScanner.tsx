@@ -1,62 +1,76 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { Html5Qrcode } from 'html5-qrcode';
+import { Modal } from './ui/Modal';
 
 interface BarcodeScannerProps {
   onScan: (code: string) => void;
   onClose: () => void;
 }
 
+/**
+ * Escáner de cámara en un diálogo responsivo. Mantiene el callback más
+ * reciente en un ref para no reiniciar la cámara en cada render del padre.
+ */
 const BarcodeScanner = ({ onScan, onClose }: BarcodeScannerProps) => {
+  const readerId = `barcode-reader-${useId().replace(/[^a-zA-Z0-9]/g, '')}`;
   const scannerRef = useRef<Html5Qrcode | null>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
+  const onScanRef = useRef(onScan);
+  const [cameraError, setCameraError] = useState('');
 
   useEffect(() => {
-    if (!containerRef.current) return;
-
-    const scanner = new Html5Qrcode('barcode-reader');
-    scannerRef.current = scanner;
-
-    scanner.start(
-      { facingMode: 'environment' },
-      {
-        fps: 10,
-        qrbox: { width: 250, height: 150 },
-        aspectRatio: 1.0,
-      },
-      (decodedText) => {
-        onScan(decodedText);
-        scanner.stop().catch(() => {});
-      },
-      () => {}
-    ).catch((err) => {
-      console.error('Camera error:', err);
-    });
-
-    return () => {
-      if (scannerRef.current?.isScanning) {
-        scannerRef.current.stop().catch(() => {});
-      }
-    };
+    onScanRef.current = onScan;
   }, [onScan]);
 
+  useEffect(() => {
+    let cancelled = false;
+    const scanner = new Html5Qrcode(readerId);
+    scannerRef.current = scanner;
+
+    scanner
+      .start(
+        { facingMode: 'environment' },
+        {
+          fps: 10,
+          qrbox: (viewfinderWidth, viewfinderHeight) => {
+            const width = Math.min(viewfinderWidth * 0.85, 320);
+            return { width, height: Math.min(viewfinderHeight * 0.6, width * 0.6) };
+          },
+          aspectRatio: 1.333,
+        },
+        (decodedText) => {
+          if (cancelled) return;
+          cancelled = true;
+          onScanRef.current(decodedText);
+          scanner.stop().catch(() => {});
+        },
+        () => {},
+      )
+      .catch(() => {
+        console.error('Camera error.');
+        setCameraError('No se pudo acceder a la cámara. Revisa los permisos del navegador.');
+      });
+
+    return () => {
+      cancelled = true;
+      if (scanner.isScanning) {
+        scanner.stop().catch(() => {});
+      }
+    };
+  }, [readerId]);
+
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-white rounded-xl p-4 max-w-md w-full mx-4">
-        <div className="flex justify-between items-center mb-4">
-          <h3 className="text-lg font-semibold">Escanear codigo de barras</h3>
-          <button
-            onClick={onClose}
-            className="text-gray-500 hover:text-gray-700"
-          >
-            X
-          </button>
-        </div>
-        <div id="barcode-reader" ref={containerRef} className="rounded-lg overflow-hidden" />
-        <p className="text-sm text-gray-500 mt-2 text-center">
-          Apunta la camara al codigo de barras del producto
-        </p>
+    <Modal open onClose={onClose} title="Escanear código de barras" size="md">
+      <div className="space-y-3">
+        {cameraError ? (
+          <div role="alert" className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+            {cameraError}
+          </div>
+        ) : (
+          <p className="text-sm text-gray-600">Apunta la cámara al código de barras del producto.</p>
+        )}
+        <div id={readerId} className="w-full overflow-hidden rounded-lg bg-black" aria-live="polite" />
       </div>
-    </div>
+    </Modal>
   );
 };
 

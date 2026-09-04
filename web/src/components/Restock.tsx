@@ -2,8 +2,10 @@ import { useEffect, useMemo, useState } from 'react';
 import { getRestockSuggestions, RestockSuggestion, Urgency } from '../services/restockService';
 import { formatCurrency } from '../services/reportService';
 import { Supplier } from '../firebase/db';
+import { useIsMobile } from '../hooks/useMediaQuery';
 import PurchaseOrderModal from './PurchaseOrderModal';
 import { createOrder, getSuppliers } from '../services/supplierService';
+import { PageHeader } from './ui/PageHeader';
 
 const URGENCY_LABELS: Record<Urgency, string> = {
   critical: 'Crítico',
@@ -27,8 +29,10 @@ function formatDays(value: number): string {
 }
 
 const Restock = () => {
+  const isMobile = useIsMobile();
   const [suggestions, setSuggestions] = useState<RestockSuggestion[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
   const [filterCategory, setFilterCategory] = useState('');
   const [filterUrgencies, setFilterUrgencies] = useState<Urgency[]>([...ALL_URGENCIES]);
   const [orderModalOpen, setOrderModalOpen] = useState(false);
@@ -48,8 +52,9 @@ const Restock = () => {
           setSuggestions(data);
           setSuppliers(suppliersData);
         }
-      } catch (error) {
-        console.error('Error loading restock data:', error);
+      } catch {
+        console.error('Error loading restock data');
+        if (!cancelled) setError('Error al cargar sugerencias');
       } finally {
         if (!cancelled) {
           setLoading(false);
@@ -124,50 +129,78 @@ const Restock = () => {
     setOrderModalOpen(true);
   };
 
+  const urgencyChips = (s: RestockSuggestion) => (
+    <div className="flex flex-wrap gap-1">
+      <span className={`chip rounded-full ${URGENCY_BADGE[s.urgency]}`}>{URGENCY_LABELS[s.urgency]}</span>
+      {s.supplier_id === null && (
+        <span className="chip rounded-full bg-gray-100 text-gray-700">Sin proveedor</span>
+      )}
+    </div>
+  );
+
+  const createOrderButton = (s: RestockSuggestion, className = '') => (
+    <button
+      type="button"
+      disabled={s.supplier_id === null}
+      onClick={() => handleCreateOrder(s)}
+      aria-label={`Crear orden para ${s.product_name}`}
+      className={`btn-primary disabled:bg-gray-300 ${className}`}
+    >
+      Crear orden
+    </button>
+  );
+
   if (loading) {
     return (
       <section className="space-y-4">
-        <h2 className="text-2xl font-bold text-sf-text">Reposición Sugerida</h2>
-        <div className="text-center py-8 text-gray-500">Cargando sugerencias...</div>
+        <PageHeader title="Reposición Sugerida" />
+        <div className="py-8 text-center text-gray-500">Cargando sugerencias...</div>
       </section>
     );
   }
 
   return (
-    <section className="space-y-6">
-      <div className="flex justify-between items-center">
-        <h2 className="text-2xl font-bold text-sf-text">Reposición Sugerida</h2>
-      </div>
+    <section className="space-y-4 md:space-y-6">
+      <PageHeader title="Reposición Sugerida" />
 
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        <article className="rounded-xl bg-white p-4 shadow-sm border border-gray-200">
+      {error && (
+        <div role="alert" className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          {error}
+        </div>
+      )}
+
+      <div className="grid grid-cols-2 gap-3 md:gap-4 lg:grid-cols-4">
+        <article className="card p-4">
           <h3 className="text-sm text-gray-600">Críticos</h3>
-          <p className="text-xl font-semibold text-red-600 mt-2">{criticalCount}</p>
+          <p className="mt-2 text-xl font-semibold text-red-600">{criticalCount}</p>
         </article>
-        <article className="rounded-xl bg-white p-4 shadow-sm border border-gray-200">
+        <article className="card p-4">
           <h3 className="text-sm text-gray-600">Altos</h3>
-          <p className="text-xl font-semibold text-orange-600 mt-2">{highCount}</p>
+          <p className="mt-2 text-xl font-semibold text-orange-600">{highCount}</p>
         </article>
-        <article className="rounded-xl bg-white p-4 shadow-sm border border-gray-200">
+        <article className="card p-4">
           <h3 className="text-sm text-gray-600">Sin proveedor</h3>
-          <p className="text-xl font-semibold text-gray-700 mt-2">{noSupplierCount}</p>
+          <p className="mt-2 text-xl font-semibold text-gray-700">{noSupplierCount}</p>
         </article>
-        <article className="rounded-xl bg-white p-4 shadow-sm border border-gray-200">
+        <article className="card p-4">
           <h3 className="text-sm text-gray-600">Total estimado</h3>
-          <p className="text-xl font-semibold text-sf-primary mt-2">
+          <p className="mt-2 truncate text-xl font-semibold text-sf-primary">
             {formatCurrency(totalEstimatedCents)}
           </p>
         </article>
       </div>
 
-      <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200">
-        <div className="flex flex-wrap gap-4 items-end">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Categoría</label>
+      <div className="card p-4">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-end">
+          <div className="sm:w-56">
+            <label htmlFor="restock-filter-category" className="mb-1 block text-sm font-medium text-gray-700">
+              Categoría
+            </label>
             <select
+              id="restock-filter-category"
               value={filterCategory}
               onChange={(e) => setFilterCategory(e.target.value)}
-              className="px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-sf-primary"
+              className="input"
             >
               <option value="">Todas</option>
               {categories.map((c) => (
@@ -177,124 +210,102 @@ const Restock = () => {
               ))}
             </select>
           </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Urgencia</label>
-            <div className="flex gap-3 flex-wrap">
+          <fieldset className="min-w-0">
+            <legend className="mb-1 block text-sm font-medium text-gray-700">Urgencia</legend>
+            <div className="flex flex-wrap gap-x-4 gap-y-1">
               {ALL_URGENCIES.map((u) => (
-                <label key={u} className="inline-flex items-center gap-2 text-sm text-gray-700">
+                <label key={u} className="inline-flex min-h-[44px] items-center gap-2 text-sm text-gray-700">
                   <input
                     type="checkbox"
                     checked={filterUrgencies.includes(u)}
                     onChange={() => toggleUrgency(u)}
-                    className="rounded border-gray-300 text-sf-primary focus:ring-sf-primary"
+                    className="h-5 w-5 rounded border-gray-300 text-sf-primary focus:ring-sf-primary"
                   />
                   {URGENCY_LABELS[u]}
                 </label>
               ))}
             </div>
-          </div>
+          </fieldset>
         </div>
       </div>
 
-      <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200">
-        <h3 className="font-semibold mb-4 text-sf-text">Sugerencias</h3>
-        <div className="overflow-x-auto">
-          <table className="min-w-full divide-y divide-gray-200">
-            <thead className="bg-gray-50">
-              <tr>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">
-                  Producto
-                </th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">
-                  Categoría
-                </th>
-                <th className="px-4 py-3 text-right text-xs font-semibold text-gray-600 uppercase">
-                  Stock
-                </th>
-                <th className="px-4 py-3 text-right text-xs font-semibold text-gray-600 uppercase">
-                  Vel (ud/día)
-                </th>
-                <th className="px-4 py-3 text-right text-xs font-semibold text-gray-600 uppercase">
-                  Días restantes
-                </th>
-                <th className="px-4 py-3 text-right text-xs font-semibold text-gray-600 uppercase">
-                  Sugerido
-                </th>
-                <th className="px-4 py-3 text-right text-xs font-semibold text-gray-600 uppercase">
-                  Costo estimado
-                </th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">
-                  Urgencia
-                </th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">
-                  Acción
-                </th>
-              </tr>
-            </thead>
-            <tbody className="bg-white divide-y divide-gray-100">
-              {filteredSuggestions.length === 0 ? (
+      <div className="space-y-3">
+        <h3 className="font-semibold text-sf-text">Sugerencias</h3>
+        {filteredSuggestions.length === 0 ? (
+          <div className="card py-8 text-center text-sm text-gray-500">No hay sugerencias que mostrar</div>
+        ) : isMobile ? (
+          <ul className="space-y-2" aria-label="Sugerencias de reposición">
+            {filteredSuggestions.map((s) => (
+              <li key={s.product_id} className="card p-3">
+                <div className="flex items-start gap-3">
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate font-medium text-gray-900">{s.product_name}</p>
+                    <p className="mt-0.5 text-xs text-gray-500">{s.category ?? '—'}</p>
+                  </div>
+                  {urgencyChips(s)}
+                </div>
+                <dl className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-sm">
+                  <div className="flex justify-between gap-2">
+                    <dt className="text-gray-500">Stock</dt>
+                    <dd className="font-medium text-gray-700">{s.current_stock}</dd>
+                  </div>
+                  <div className="flex justify-between gap-2">
+                    <dt className="text-gray-500">Vel (ud/día)</dt>
+                    <dd className="font-medium text-gray-700">{s.velocity_per_day.toFixed(2)}</dd>
+                  </div>
+                  <div className="flex justify-between gap-2">
+                    <dt className="text-gray-500">Días restantes</dt>
+                    <dd className="font-medium text-gray-700">{formatDays(s.days_remaining)}</dd>
+                  </div>
+                  <div className="flex justify-between gap-2">
+                    <dt className="text-gray-500">Sugerido</dt>
+                    <dd className="font-medium text-gray-700">{s.suggested_quantity}</dd>
+                  </div>
+                </dl>
+                <div className="mt-3 flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-xs text-gray-500">Costo estimado</p>
+                    <p className="font-semibold text-sf-primary">{formatCurrency(s.estimated_cost_cents)}</p>
+                  </div>
+                  {createOrderButton(s)}
+                </div>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <div className="card overflow-x-auto">
+            <table className="min-w-full divide-y divide-gray-200">
+              <thead className="bg-gray-50">
                 <tr>
-                  <td
-                    colSpan={9}
-                    className="px-4 py-8 text-center text-sm text-gray-500"
-                  >
-                    No hay sugerencias que mostrar
-                  </td>
+                  <th scope="col" className="px-4 py-3 text-left text-xs font-semibold uppercase text-gray-600">Producto</th>
+                  <th scope="col" className="px-4 py-3 text-left text-xs font-semibold uppercase text-gray-600">Categoría</th>
+                  <th scope="col" className="px-4 py-3 text-right text-xs font-semibold uppercase text-gray-600">Stock</th>
+                  <th scope="col" className="px-4 py-3 text-right text-xs font-semibold uppercase text-gray-600">Vel (ud/día)</th>
+                  <th scope="col" className="px-4 py-3 text-right text-xs font-semibold uppercase text-gray-600">Días restantes</th>
+                  <th scope="col" className="px-4 py-3 text-right text-xs font-semibold uppercase text-gray-600">Sugerido</th>
+                  <th scope="col" className="px-4 py-3 text-right text-xs font-semibold uppercase text-gray-600">Costo estimado</th>
+                  <th scope="col" className="px-4 py-3 text-left text-xs font-semibold uppercase text-gray-600">Urgencia</th>
+                  <th scope="col" className="px-4 py-3 text-left text-xs font-semibold uppercase text-gray-600">Acción</th>
                 </tr>
-              ) : (
-                filteredSuggestions.map((s) => (
+              </thead>
+              <tbody className="divide-y divide-gray-100 bg-white">
+                {filteredSuggestions.map((s) => (
                   <tr key={s.product_id} className="bg-white">
-                    <td className="px-4 py-3 text-sm font-medium text-gray-900">
-                      {s.product_name}
-                    </td>
-                    <td className="px-4 py-3 text-sm text-gray-700">
-                      {s.category ?? '—'}
-                    </td>
-                    <td className="px-4 py-3 text-sm text-right text-gray-700">
-                      {s.current_stock}
-                    </td>
-                    <td className="px-4 py-3 text-sm text-right text-gray-700">
-                      {s.velocity_per_day.toFixed(2)}
-                    </td>
-                    <td className="px-4 py-3 text-sm text-right text-gray-700">
-                      {formatDays(s.days_remaining)}
-                    </td>
-                    <td className="px-4 py-3 text-sm text-right text-gray-700">
-                      {s.suggested_quantity}
-                    </td>
-                    <td className="px-4 py-3 text-sm text-right font-medium text-sf-primary">
-                      {formatCurrency(s.estimated_cost_cents)}
-                    </td>
-                    <td className="px-4 py-3 text-sm">
-                      <div className="flex flex-wrap gap-1">
-                        <span
-                          className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${URGENCY_BADGE[s.urgency]}`}
-                        >
-                          {URGENCY_LABELS[s.urgency]}
-                        </span>
-                        {s.supplier_id === null && (
-                          <span className="inline-flex px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-700">
-                            Sin proveedor
-                          </span>
-                        )}
-                      </div>
-                    </td>
-                    <td className="px-4 py-3 text-sm">
-                      <button
-                        type="button"
-                        disabled={s.supplier_id === null}
-                        onClick={() => handleCreateOrder(s)}
-                        className="px-3 py-1.5 rounded-lg text-sm font-medium bg-sf-primary text-white hover:opacity-90 transition disabled:bg-gray-300 disabled:cursor-not-allowed"
-                      >
-                        Crear orden
-                      </button>
-                    </td>
+                    <td className="px-4 py-3 text-sm font-medium text-gray-900">{s.product_name}</td>
+                    <td className="px-4 py-3 text-sm text-gray-700">{s.category ?? '—'}</td>
+                    <td className="px-4 py-3 text-right text-sm text-gray-700">{s.current_stock}</td>
+                    <td className="px-4 py-3 text-right text-sm text-gray-700">{s.velocity_per_day.toFixed(2)}</td>
+                    <td className="px-4 py-3 text-right text-sm text-gray-700">{formatDays(s.days_remaining)}</td>
+                    <td className="px-4 py-3 text-right text-sm text-gray-700">{s.suggested_quantity}</td>
+                    <td className="px-4 py-3 text-right text-sm font-medium text-sf-primary">{formatCurrency(s.estimated_cost_cents)}</td>
+                    <td className="px-4 py-3 text-sm">{urgencyChips(s)}</td>
+                    <td className="px-4 py-2 text-sm">{createOrderButton(s, 'min-h-[40px] px-3')}</td>
                   </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
       <PurchaseOrderModal
@@ -303,9 +314,13 @@ const Restock = () => {
         suppliers={suppliers.filter((s) => s.id === orderSupplierId)}
         initialItems={orderInitial ?? undefined}
         onSave={(data) => {
-          createOrder(data).then(() => {
-            setOrderModalOpen(false);
-          });
+          createOrder(data)
+            .then(() => {
+              setOrderModalOpen(false);
+            })
+            .catch(() => {
+              setError('Error al crear orden');
+            });
         }}
       />
     </section>

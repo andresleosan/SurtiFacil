@@ -1,8 +1,10 @@
-import { useState, useRef } from 'react';
+import { useState } from 'react';
 import ImageUploadAI from './ImageUploadAI';
 import AudioUploadAI from './AudioUploadAI';
 import BarcodeScanner from './BarcodeScanner';
 import { useBarcode } from '../hooks/useBarcode';
+import { Icon } from './ui/Icon';
+import { Modal } from './ui/Modal';
 
 interface AddProductModalProps {
   isOpen: boolean;
@@ -13,122 +15,85 @@ interface AddProductModalProps {
     stock: number;
     category: string;
     barcode?: string;
-  }) => void;
+  }) => void | Promise<void>;
 }
 
 type InputMode = 'manual' | 'image' | 'audio';
 
+const MODES: Array<{ value: InputMode; label: string; emoji: string }> = [
+  { value: 'manual', label: 'Manual', emoji: '✏️' },
+  { value: 'image', label: 'Foto', emoji: '📷' },
+  { value: 'audio', label: 'Voz', emoji: '🎙️' },
+];
+
+const CATEGORIES = ['Abarrotes', 'Bebidas', 'Lácteos', 'Limpieza', 'Otros'];
+
+const EMPTY_FORM = {
+  name: '',
+  price: '',
+  stock: '',
+  category: 'Abarrotes',
+  barcode: '',
+};
+
 const AddProductModal = ({ isOpen, onClose, onAddProduct }: AddProductModalProps) => {
   const [mode, setMode] = useState<InputMode>('manual');
-  const [formData, setFormData] = useState({
-    name: '',
-    price: '',
-    stock: '',
-    category: 'Abarrotes',
-    barcode: '',
-  });
+  const [formData, setFormData] = useState(EMPTY_FORM);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [isDragging, setIsDragging] = useState(false);
-  const [position, setPosition] = useState({ x: 0, y: 0 });
-  const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
-  const modalRef = useRef<HTMLDivElement>(null);
-
-  if (!isOpen) return null;
-
-  const handleMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (modalRef.current) {
-      setIsDragging(true);
-      const rect = modalRef.current.getBoundingClientRect();
-      setDragOffset({
-        x: e.clientX - rect.left,
-        y: e.clientY - rect.top,
-      });
-    }
-  };
-
-  const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (isDragging && modalRef.current) {
-      const newX = e.clientX - dragOffset.x;
-      const newY = e.clientY - dragOffset.y;
-      
-      // Limitar el movimiento dentro de la pantalla
-      const maxX = window.innerWidth - (modalRef.current.offsetWidth || 0);
-      const maxY = window.innerHeight - (modalRef.current.offsetHeight || 0);
-      
-      setPosition({
-        x: Math.max(0, Math.min(newX, maxX)),
-        y: Math.max(0, Math.min(newY, maxY)),
-      });
-    }
-  };
-
-  const handleMouseUp = () => {
-    setIsDragging(false);
-  };
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
-    setFormData((prev) => ({
-      ...prev,
-      [name]: value,
-    }));
+    setFormData((prev) => ({ ...prev, [name]: value }));
   };
 
   const handleBarcodeScan = (code: string) => {
-    setFormData((prev) => ({
-      ...prev,
-      barcode: code,
-    }));
+    setFormData((prev) => ({ ...prev, barcode: code }));
+    setMode('manual');
   };
 
   const { isOpen: isScannerOpen, open: openScanner, close: closeScanner, handleScan } = useBarcode(handleBarcodeScan);
 
-  const handleImageData = (data: {
-    nombre: string;
-    precio_sugerido: number | null;
-    categoria: string;
-  }) => {
+  const handleImageData = (data: { nombre: string; precio_sugerido: number | null; categoria: string }) => {
     setFormData((prev) => ({
       ...prev,
       name: data.nombre,
-      price: data.precio_sugerido ? (data.precio_sugerido * 100).toString() : '',
+      price: data.precio_sugerido ? data.precio_sugerido.toString() : '',
       category: data.categoria,
     }));
     setMode('manual');
   };
 
-  const handleAudioData = (data: {
-    nombre: string;
-    precio: number | null;
-    stock: number | null;
-    categoria: string;
-  }) => {
+  const handleAudioData = (data: { nombre: string; precio: number | null; stock: number | null; categoria: string }) => {
     setFormData((prev) => ({
       ...prev,
       name: data.nombre,
-      price: data.precio ? (data.precio * 100).toString() : '',
+      price: data.precio ? data.precio.toString() : '',
       stock: data.stock ? data.stock.toString() : '',
       category: data.categoria,
     }));
     setMode('manual');
   };
 
+  const resetAndClose = () => {
+    setFormData(EMPTY_FORM);
+    setMode('manual');
+    setError('');
+    onClose();
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
 
-    // Validar campos
     if (!formData.name.trim()) {
       setError('El nombre del producto es requerido');
       return;
     }
-
     if (!formData.price) {
       setError('El precio es requerido');
       return;
     }
-
     if (!formData.stock) {
       setError('El stock es requerido');
       return;
@@ -141,7 +106,6 @@ const AddProductModal = ({ isOpen, onClose, onAddProduct }: AddProductModalProps
       setError('El precio debe ser un número válido');
       return;
     }
-
     if (isNaN(stock) || stock < 0) {
       setError('El stock debe ser un número entero válido');
       return;
@@ -149,25 +113,14 @@ const AddProductModal = ({ isOpen, onClose, onAddProduct }: AddProductModalProps
 
     try {
       setLoading(true);
-      
-      onAddProduct({
+      await onAddProduct({
         name: formData.name.trim(),
         price_cents: Math.round(price * 100),
-        stock: stock,
+        stock,
         category: formData.category,
         barcode: formData.barcode.trim() || undefined,
       });
-
-      // Resetear formulario
-      setFormData({
-        name: '',
-        price: '',
-        stock: '',
-        category: 'Abarrotes',
-        barcode: '',
-      });
-      setMode('manual');
-      onClose();
+      resetAndClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Error al agregar producto');
     } finally {
@@ -176,202 +129,161 @@ const AddProductModal = ({ isOpen, onClose, onAddProduct }: AddProductModalProps
   };
 
   return (
-    <div 
-      className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4"
-      onMouseMove={handleMouseMove}
-      onMouseUp={handleMouseUp}
-      onMouseLeave={handleMouseUp}
-    >
-      <div 
-        ref={modalRef}
-        className="bg-white rounded-xl shadow-lg min-w-[600px] max-w-2xl w-full max-h-[85vh] overflow-y-auto"
-        style={isDragging ? {
-          position: 'fixed',
-          left: `${position.x}px`,
-          top: `${position.y}px`,
-          width: 'auto',
-          margin: 0,
-        } : undefined}
+    <>
+      <Modal
+        open={isOpen}
+        onClose={resetAndClose}
+        title="Agregar producto"
+        size="lg"
+        headerActions={
+          <button type="button" onClick={openScanner} className="btn-secondary min-h-[40px] px-3 text-xs">
+            <Icon name="scan" size={16} />
+            Escanear código
+          </button>
+        }
+        footer={
+          mode === 'manual' ? (
+            <>
+              <button type="button" onClick={resetAndClose} className="btn-secondary">
+                Cancelar
+              </button>
+              <button type="submit" form="add-product-form" disabled={loading} className="btn-primary">
+                {loading ? 'Guardando...' : 'Guardar producto'}
+              </button>
+            </>
+          ) : undefined
+        }
       >
-        {/* Header */}
-        <div 
-          className="sticky top-0 bg-sf-primary text-white p-4 flex justify-between items-center cursor-grab active:cursor-grabbing"
-          onMouseDown={handleMouseDown}
-        >
-          <h2 className="text-xl font-bold">Agregar Producto</h2>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={openScanner}
-              className="px-3 py-1 text-sm bg-white/20 text-white rounded hover:bg-white/30 transition"
-            >
-              Escanear codigo
-            </button>
-            <button
-              onClick={onClose}
-              className="text-xl hover:bg-sf-dark rounded p-1 transition"
-            >
-              ✕
-            </button>
-          </div>
-        </div>
-
-        {/* Contenido */}
-        <div className="p-6 space-y-4">
+        <div className="space-y-4">
           {error && (
-            <div className="bg-red-50 border border-red-200 text-red-700 px-3 py-2 rounded text-sm">
+            <div role="alert" className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
               {error}
             </div>
           )}
 
-          {/* Tabs de modo */}
-          <div className="flex gap-2 border-b">
-            <button
-              onClick={() => {
-                setMode('manual');
-                setError('');
-              }}
-              className={`pb-2 px-3 font-medium text-sm transition ${
-                mode === 'manual'
-                  ? 'text-sf-primary border-b-2 border-sf-primary'
-                  : 'text-gray-500 hover:text-sf-text'
-              }`}
-            >
-              ✏️ Manual
-            </button>
-            <button
-              onClick={() => {
-                setMode('image');
-                setError('');
-              }}
-              className={`pb-2 px-3 font-medium text-sm transition ${
-                mode === 'image'
-                  ? 'text-sf-primary border-b-2 border-sf-primary'
-                  : 'text-gray-500 hover:text-sf-text'
-              }`}
-            >
-              📷 Foto
-            </button>
-            <button
-              onClick={() => {
-                setMode('audio');
-                setError('');
-              }}
-              className={`pb-2 px-3 font-medium text-sm transition ${
-                mode === 'audio'
-                  ? 'text-sf-primary border-b-2 border-sf-primary'
-                  : 'text-gray-500 hover:text-sf-text'
-              }`}
-            >
-              🎙️ Voz
-            </button>
+          <div className="flex gap-1 border-b border-gray-200" role="tablist" aria-label="Modo de captura">
+            {MODES.map((option) => (
+              <button
+                key={option.value}
+                type="button"
+                role="tab"
+                aria-selected={mode === option.value}
+                onClick={() => {
+                  setMode(option.value);
+                  setError('');
+                }}
+                className={`min-h-[44px] flex-1 px-3 text-sm font-medium transition sm:flex-none ${
+                  mode === option.value
+                    ? 'border-b-2 border-sf-primary text-sf-primary'
+                    : 'text-gray-500 hover:text-sf-text'
+                }`}
+              >
+                <span aria-hidden="true">{option.emoji}</span> {option.label}
+              </button>
+            ))}
           </div>
 
-          {/* Modo Manual */}
           {mode === 'manual' && (
-            <form onSubmit={handleSubmit} className="space-y-3">
+            <form id="add-product-form" onSubmit={handleSubmit} className="space-y-3">
               <div>
-                <label className="block text-sm font-medium text-sf-text mb-1">
-                  Nombre del Producto *
+                <label htmlFor="add-name" className="mb-1 block text-sm font-medium text-sf-text">
+                  Nombre del producto *
                 </label>
                 <input
+                  id="add-name"
                   type="text"
                   name="name"
                   value={formData.name}
                   onChange={handleInputChange}
                   placeholder="Ej: Arroz Diana"
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-sf-primary text-sf-text"
+                  autoComplete="off"
+                  className="input"
                 />
               </div>
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-sm font-medium text-sf-text mb-1">
+                  <label htmlFor="add-price" className="mb-1 block text-sm font-medium text-sf-text">
                     Precio ($) *
                   </label>
                   <input
+                    id="add-price"
                     type="number"
+                    inputMode="decimal"
                     step="0.01"
+                    min="0"
                     name="price"
                     value={formData.price}
                     onChange={handleInputChange}
                     placeholder="4200"
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-sf-primary text-sf-text"
+                    className="input"
                   />
                 </div>
-
                 <div>
-                  <label className="block text-sm font-medium text-sf-text mb-1">
+                  <label htmlFor="add-stock" className="mb-1 block text-sm font-medium text-sf-text">
                     Stock *
                   </label>
                   <input
+                    id="add-stock"
                     type="number"
+                    inputMode="numeric"
+                    min="0"
                     name="stock"
                     value={formData.stock}
                     onChange={handleInputChange}
                     placeholder="50"
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-sf-primary text-sf-text"
+                    className="input"
                   />
                 </div>
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-sf-text mb-1">
+                <label htmlFor="add-category" className="mb-1 block text-sm font-medium text-sf-text">
                   Categoría
                 </label>
                 <select
+                  id="add-category"
                   name="category"
                   value={formData.category}
                   onChange={handleInputChange}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-sf-primary text-sf-text"
+                  className="input"
                 >
-                  <option>Abarrotes</option>
-                  <option>Bebidas</option>
-                  <option>Lácteos</option>
-                  <option>Limpieza</option>
-                  <option>Otros</option>
+                  {CATEGORIES.map((category) => (
+                    <option key={category}>{category}</option>
+                  ))}
                 </select>
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-sf-text mb-1">
-                  Codigo de barras (opcional)
+                <label htmlFor="add-barcode" className="mb-1 block text-sm font-medium text-sf-text">
+                  Código de barras (opcional)
                 </label>
-                <input
-                  type="text"
-                  name="barcode"
-                  value={formData.barcode}
-                  onChange={handleInputChange}
-                  placeholder="Escanear o escribir codigo"
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-sf-primary text-sf-text"
-                />
+                <div className="flex gap-2">
+                  <input
+                    id="add-barcode"
+                    type="text"
+                    inputMode="numeric"
+                    name="barcode"
+                    value={formData.barcode}
+                    onChange={handleInputChange}
+                    placeholder="Escanear o escribir código"
+                    className="input"
+                  />
+                  <button type="button" onClick={openScanner} aria-label="Escanear código de barras" className="icon-btn border border-gray-300 text-sf-primary hover:bg-sf-light">
+                    <Icon name="scan" />
+                  </button>
+                </div>
               </div>
-
-              <button
-                type="submit"
-                disabled={loading}
-                className="w-full bg-sf-primary text-white py-2 rounded-lg hover:bg-sf-dark disabled:opacity-50 font-medium transition"
-              >
-                {loading ? 'Guardando...' : 'Guardar Producto'}
-              </button>
             </form>
           )}
 
-          {/* Modo Imagen */}
-          {mode === 'image' && (
-            <ImageUploadAI onProductData={handleImageData} onError={setError} />
-          )}
-
-          {/* Modo Audio */}
-          {mode === 'audio' && (
-            <AudioUploadAI onProductData={handleAudioData} onError={setError} />
-          )}
+          {mode === 'image' && <ImageUploadAI onProductData={handleImageData} onError={setError} />}
+          {mode === 'audio' && <AudioUploadAI onProductData={handleAudioData} onError={setError} />}
         </div>
-      </div>
+      </Modal>
 
-      {isScannerOpen && (
-        <BarcodeScanner onScan={handleScan} onClose={closeScanner} />
-      )}
-    </div>
+      {isScannerOpen && <BarcodeScanner onScan={handleScan} onClose={closeScanner} />}
+    </>
   );
 };
 
