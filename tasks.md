@@ -412,6 +412,22 @@ Status: revisión. Report: `docs/final-review-2026-08-04.md`
 
 ---
 
+## Punto de partida para la siguiente sesion (2026-09-05)
+
+Estado al cierre del 2026-09-04: frontend y backend publicados en https://surtifacil.vercel.app
+(ADR-0003), inicio con Google activo, cuenta admin `andres.san1404@gmail.com`, pista mobile/tablet
+(Task 26) y Fiados (Task 27) desplegados. Grafo de graphify actualizado.
+
+Siguiente sesion, en orden sugerido:
+
+- [ ] Comprobacion del operador en la app desplegada: login con Google, una venta normal y una fiada, anotar y abonar un fiado desde el telefono.
+- [ ] Task 27: escenarios de emulador para las reglas de `credit_customers`/`credit_entries` en `qa/tests/firestore-rules.cjs` (requiere Java 21).
+- [ ] Task 21: acotar `reportService`/`marginService` (siguen leyendo toda la coleccion `sales`) y medir Lighthouse movil sobre la URL publicada.
+- [ ] Task 20: idempotencia del webhook de WhatsApp y cuerpo crudo para HMAC en Vercel antes de habilitar WhatsApp real.
+- [ ] Task 23: README y docs sin lenguaje de scaffold; documentar `npm run provision:admin`.
+- [ ] Decidir facturacion GCP para Cloud Run (ADR-0002) o mantener Vercel Functions; rotar la llave de la cuenta de servicio al migrar.
+- [ ] Limpiar `ANTHROPIC_API_KEY` de Vercel si no se aprueba presupuesto de IA.
+
 ## Plan de estabilizacion y release - 2026-08-28
 
 Este plan conserva el historial anterior y reemplaza sus conteos de auditoria como baseline vigente.
