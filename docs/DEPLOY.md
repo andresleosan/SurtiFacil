@@ -212,3 +212,29 @@ de iteración de listas; los carritos mayores se rechazan.
 ---
 
 *Última actualización: 2026-07-31*
+
+
+---
+
+## Despliegue alternativo del frontend en Vercel
+
+El repositorio es un monorepo: la SPA vive en `web/`. Sin configuración, Vercel construye la raíz,
+no encuentra salida y responde `404: NOT_FOUND`. El archivo `vercel.json` de la raíz corrige eso
+(instala y construye dentro de `web/`, sirve `web/dist` y reescribe rutas a `index.html`).
+
+Pasos en el dashboard de Vercel (Settings del proyecto):
+
+1. **General → Root Directory**: dejar vacío (raíz del repo) para que aplique `vercel.json`.
+2. **Environment Variables** (Production y Preview):
+   - `VITE_FIREBASE_API_KEY`, `VITE_FIREBASE_AUTH_DOMAIN`, `VITE_FIREBASE_PROJECT_ID`,
+     `VITE_FIREBASE_STORAGE_BUCKET`, `VITE_FIREBASE_MESSAGING_SENDER_ID`, `VITE_FIREBASE_APP_ID`
+   - `VITE_BACKEND_URL` con la URL HTTPS pública del backend Express. El build de producción falla
+     a propósito si falta o apunta a `localhost` (`web/src/config/buildEnvironment.ts`).
+   - `VITE_USE_MOCK_DATA=false`
+3. **Firebase Authentication → Settings → Authorized domains**: agregar `surtifacil.vercel.app`
+   (y el dominio de previews si se usan), o el login fallará con un error genérico.
+4. Backend: incluir `https://surtifacil.vercel.app` en `FRONTEND_ORIGINS`.
+5. Redeploy. Verificar `/`, `/manifest.json` y un deep link como `/#/inventory`.
+
+Firebase Hosting sigue siendo el destino documentado para producción; Vercel es válido como
+staging del frontend mientras el backend público no exista.
