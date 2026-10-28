@@ -25,10 +25,13 @@
     "docs": "echo 'See docs/run_instructions.md'"
   },
   "engines": {
-    "node": "22.x"
+    "node": ">=22.23.4 <23"
   },
   "devDependencies": {
     "@playwright/test": "1.55.1",
     "concurrently": "^8.2.2"
+  },
+  "overrides": {
+    "shell-quote@>=1 <2": "1.11.0"
   }
 }

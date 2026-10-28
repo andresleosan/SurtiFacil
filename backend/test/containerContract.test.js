@@ -8,7 +8,7 @@ const dockerfile = fs.readFileSync(path.join(root, 'Dockerfile'), 'utf8');
 const dockerignore = fs.readFileSync(path.join(root, '.dockerignore'), 'utf8');
 
 test('backend container pins Node, installs production dependencies, and runs unprivileged', () => {
-  assert.match(dockerfile, /^FROM node:22\.23\.2-bookworm-slim@sha256:[a-f0-9]{64}$/m);
+  assert.match(dockerfile, /^FROM node:22\.23\.4-bookworm-slim@sha256:[a-f0-9]{64}$/m);
   assert.match(dockerfile, /npm ci --omit=dev --ignore-scripts/);
   assert.match(dockerfile, /^ENV NODE_ENV=production \\/m);
   assert.match(dockerfile, /^\s+PORT=8080$/m);
