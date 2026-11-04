@@ -114,4 +114,23 @@ Este documento define las reglas visuales, ergonómicas, de accesibilidad, voz (
   - Buscador predictivo en tiempo real compatible con pistola de código de barras EAN-13.
   - Chips de filtro rápido: *Todos*, *En Oferta*, *Más Vendidos*, *Por Agotarse*.
 
+### 6.3 Explorador Visual de Pasillos y Departamentos de Abastos ([Patrón Rappi Aisles en Mobbin](https://mobbin.com/screens/41848e74-4e6c-4dec-9da4-cdf042973fa5))
+- **Cuadrícula Táctil de Pasillos (Aisles Grid):**
+  - Matriz de 2 columnas con tarjetas horizontales amplias y redondeadas (`rounded-2xl border border-slate-200/80 bg-white p-3 hover:border-sf-primary hover:shadow-sm transition-all`).
+  - Distribución interna: nombre del pasillo y contador de productos a la izquierda (`font-semibold text-slate-800 text-sm md:text-base`), e imagen ilustrada/3D de alta calidad a la derecha.
+  - Pasillos oficiales del abasto paisa:
+    * 🥑 *Frutas y Verduras* (Fruver)
+    * 🥖 *Panadería y Arepas*
+    * 🥚 *Lácteos y Huevos*
+    * 🍚 *Granos y Despensa*
+    * 🥩 *Carnes y Salsamentaria*
+    * 🍟 *Snacks y Confitería*
+    * 🥤 *Bebidas y Licores*
+    * 🧼 *Aseo y Hogar*
+    * 🧻 *Cuidado Personal*
+- **Sinergia Rappi + Blinkit (De Pasillo a Mostrador):**
+  - **Vista General / Kiosco:** El usuario o cliente explora los departamentos con la cuadrícula de pasillos ilustrados de **Rappi**.
+  - **Al Seleccionar un Pasillo:** Entra a la cuadrícula de productos con el riel vertical izquierdo de **Blinkit**, permitiendo al cajero o cliente alternar rápidamente entre pasillos sin devolverse de pantalla.
+
+
 
