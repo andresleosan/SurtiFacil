@@ -1,4 +1,4 @@
-# Base de 1 Titán — Cronos la completa con lo específico del stack elegido (STACK.md).
+# SurtiFácil SaaS — Archivos ignorados por Git
 
 # Secretos y credenciales — nunca deben llegar al repo
 .env

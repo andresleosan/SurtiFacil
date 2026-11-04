@@ -1,53 +1,101 @@
-<!-- Esta es la plantilla que scripts/nuevo-proyecto.sh y scripts/adoptar-proyecto.sh copian a la
-     raíz de cada proyecto generado. Las rutas de abajo (.cronos/...) son relativas a la raíz DEL
-     PROYECTO, no a la raíz de este kit fuente (acá, en el kit fuente, AGENCY.md/MASTER_PROMPT.md
-     viven directo en la raíz, sin .cronos/ — ver README.md, "Estructura de este kit"). Ver
-     adr/ADR-011-multiplataforma-opencode-codex-vscode.md para el porqué de este archivo. -->
+# SurtiFácil SaaS — Instrucciones para Agentes de Desarrollo
 
-# Cronos
+Guía de arquitectura, estándares de desarrollo y comandos operativos para el proyecto **SurtiFácil SaaS** (Plataforma Multi-Tenant para Tiendas de Barrio, Locales de Abastos y Minimercados en Medellín y Colombia).
 
-Eres **Cronos**, agente primario de desarrollo full-stack (arquitectura, backend, frontend, datos,
-integraciones, seguridad, QA, rendimiento, despliegue), con delegación controlada y un ciclo de
-autocrítica obligatorio antes de dar cualquier tarea por terminada. Conservas la autoridad final.
+---
 
-## Lee esto primero
+## 1. Visión General del Proyecto
 
-Antes de cualquier otra cosa, en esta misma carpeta:
-1. `.cronos/AGENCY.md` — principios, arquitectura, reglas de oro completas, ciclo de autocrítica.
-2. `.cronos/MASTER_PROMPT.md` — el flujo completo, empezando por el Paso 0.
+**SurtiFácil SaaS** es una plataforma integral de Punto de Venta (POS), Kiosco Táctil de Autoatención para iPad/Tablet (`#/kiosco/:slug`), Catálogo Público Vecinal (`#/tienda/:slug`), Gestión de Domicilios, Control de Inventario con Escáner de Códigos de Barras, Libro Digital de Fiados, Órdenes a Proveedores, Cierres de Caja con Arqueo COP y Asistente Inteligente **Sarin** (Voz en POS + Pedidos y Gestión con **DeepSeek API** por WhatsApp), diseñada con arquitectura **multi-tenant** sobre **Cloudflare Pages + Cloudflare D1 + Firebase Authentication**.
 
-Si `.cronos/` no existe en este proyecto, dilo explícitamente antes de seguir — puede ser un
-proyecto todavía sin adoptar al core (ver Flujo B de `MASTER_PROMPT.md`, `scripts/adoptar-proyecto.sh`)
-o una instalación incompleta.
+---
 
-## Reglas de oro (resumen — ante cualquier diferencia, manda `.cronos/AGENCY.md`, no este resumen)
+## 2. Stack Tecnológico
 
-Esta sección es defensa en profundidad, mismo criterio que ya documentó `adr/ADR-003`: si por lo
-que sea no llegas a leer `.cronos/AGENCY.md` en esta sesión, estas reglas te siguen aplicando
-igual, porque son parte de este mismo archivo que tu plataforma carga sí o sí.
+- **Frontend (`web/`):**
+  - React 18 (`react`, `react-dom`)
+  - Vite 6
+  - TypeScript (modo estricto)
+  - Tailwind CSS + Autoprefixer + PostCSS
+  - Recharts (gráficos y métricas de ventas y márgenes)
+  - `html5-qrcode` (escáner de códigos de barras EAN-13 / UPC / QR)
+  - `vite-plugin-pwa` + Workbox (PWA instalable y soporte offline)
+- **Backend & Base de Datos Serverless (Cloudflare):**
+  - **Cloudflare Pages:** Hosting global en `https://surtifacil.pages.dev`
+  - **Cloudflare Pages Functions (`web/functions/api/`):** API REST serverless en el mismo origen
+  - **Cloudflare D1 (`surtifacil-db`):** Base de datos SQLite relacional en el Edge (`env.DB`)
+- **Autenticación:**
+  - **Firebase Authentication (`surtifacilapp`):** Inicio de sesión con Correo/Contraseña y Google, emitiendo ID Tokens (JWT RS256) verificados por el backend en Cloudflare
+- **Inteligencia Artificial (Bot Sarin):**
+  - **DeepSeek API (`deepseek-chat`):** Orquestación de pedidos por WhatsApp/Web y Copiloto Gerencial del tendero
+  - **Web Speech API (`es-CO`):** Reconocimiento y síntesis de voz manos libres en el POS
+- **Testing & QA:**
+  - Vitest + Testing Library (`npm test`)
+  - Playwright E2E (`npm run test:e2e`)
 
-- Un hallazgo crítico de seguridad detectado por ti mismo bloquea el avance, sin excepciones.
-- Ninguna tarea pasa a "aprobada" sin evidencia real y verificable de que las pruebas corrieron y
-  pasaron — nunca la suposición de que "probablemente ya funciona".
-- No hay despliegue a producción, migración destructiva, ni gasto nuevo en APIs de pago sin
-  confirmación explícita del operador.
-- Toda migración lleva plan de reversión documentado antes de aplicarse; las destructivas además
-  exigen backup verificado y confirmación explícita.
-- Puedes delegar tareas acotadas a un máximo de 3 subagentes sin delegación anidada. No leen
-  secretos, no modifican Git, no despliegan, no migran, no generan gasto ni aprueban tareas;
-  revisas sus archivos y repites las pruebas antes de aceptar resultados.
-- Si detectas una tensión real entre dos decisiones válidas (ej. seguridad vs. velocidad), se la
-  escalas al operador — no inventas tú un criterio de desempate.
-- DDD siempre: `BRIEF.md` → `STACK.md` → `tasks.md` → código, con checkpoints de confirmación
-  humana antes de construir (el detalle completo vive en `.cronos/MASTER_PROMPT.md`).
-- Hablas siempre en español, salvo nombres de archivos/variables de código.
+---
 
-## Plataforma
+## 3. Comandos Principales
 
-Este proyecto puede usarse desde OpenCode, Codex CLI o VS Code (GitHub Copilot). Detecta cuál te
-está ejecutando ahora mismo (`.cronos/MASTER_PROMPT.md`, Paso 0): la mecánica de permisos/sandbox y
-MCP ya está resuelta en el archivo de configuración que tu plataforma lee sola — `opencode.json`,
-`.codex/config.toml`, o `.github/copilot-instructions.md` + `.vscode/mcp.json`, según cuál exista
-en este proyecto. Para el modelo de IA, el criterio completo vive en `.cronos/MODELOS.md` — ninguna
-de las tres plataformas restringe qué proveedor o modelo puedes usar, cada una tiene su propio
-mecanismo de descubrimiento en vivo.
+```powershell
+# Desarrollo local frontend
+npm run start:web
+
+# Compilación de producción (tsc && vite build)
+npm run build:web
+
+# Pruebas unitarias (Vitest)
+npm test
+
+# Pruebas End-to-End (Playwright)
+npm run test:e2e
+```
+
+---
+
+## 4. Estructura del Repositorio
+
+```text
+├── web/
+│   ├── functions/          # Cloudflare Pages Functions (API Serverless /api/* conectada a env.DB)
+│   ├── public/             # Assets públicos, iconos PWA, manifest.json y _redirects
+│   └── src/
+│       ├── auth/           # Contexto de usuario autenticado y control de acceso por rol
+│       ├── components/     # Vistas y modales (POS, Inventario, Fiados, Kiosco, Tienda, Sarin, etc.)
+│       ├── config/         # Validaciones de entorno y configuración de compilación
+│       ├── firebase/       # Inicialización de Firebase Auth y contratos de tipos
+│       ├── hooks/          # Custom hooks reactivos
+│       ├── services/       # Clientes de API hacia Cloudflare D1 y servicios de dominio
+│       └── test/           # Suites de pruebas unitarias en Vitest
+├── docs/
+│   ├── HOJA_DE_RUTA_PRODUCCION.md # Fuente de verdad secuencial para el comando /avanzar
+│   └── schema-d1.sql              # Esquema relacional multi-tenant de Cloudflare D1
+├── qa/                     # Configuración y suites E2E de Playwright
+├── DESIGN.md               # Sistema de diseño, ergonomía táctil, voz Sarin y reglas UI/UX
+└── AGENTS.md               # Este archivo de instrucciones del proyecto
+```
+
+---
+
+## 5. Reglas Críticas de Arquitectura y Negocio
+
+### 5.1 Aislamiento Multi-Tenant (`negocio_id`)
+- Toda tabla operativa en Cloudflare D1 (`products`, `sales`, `sale_items`, `credit_customers`, `credit_entries`, `suppliers`, `purchase_orders`, `customer_orders`, `users`) está estrictamente aislada por `negocio_id`.
+- Ninguna consulta o escritura en `web/functions/api/` puede ejecutarse sin filtrar por el `negocio_id` validado del usuario autenticado o del `slug` público del local.
+
+### 5.2 Autoridad Financiera en Servidor y Moneda Colombiana (`formatCOP`)
+- Todos los valores monetarios se muestran en Pesos Colombianos (`formatCOP`, ej. `$ 12.500`) y se almacenan como enteros inmutables.
+- El cálculo de totales de venta, descuentos de stock, márgenes y saldos en el libro de fiados es responsabilidad exclusiva del servidor en transacciones atómicas de Cloudflare D1.
+- El sistema opera con medios de pago controlados por el tendero (**Efectivo**, **Transferencia Nequi/Bancolombia** y **Fiado**); no inyectar pasarelas de cobro externas no autorizadas.
+
+### 5.3 Control de Roles y Staff por Tienda
+- Roles operativos por negocio: `admin` (dueño/administrador del local, gestiona catálogo completo, precios, empleados y configuración), `manager` (inventario, compras y reportes) y `cashier` (POS, recepción de pedidos de Kiosco/WhatsApp y abonos de fiados).
+- SuperAdmin de la plataforma SaaS (`andres.san1404@gmail.com`): acceso exclusivo al Centro de Control Multi-Tenant (`#/super-admin`) para activar locales, gestionar planes y auditar cuotas de IA de DeepSeek.
+
+---
+
+## 6. Flujo de Trabajo con `/avanzar`
+
+1. La fuente de verdad del progreso entre sesiones es [`docs/HOJA_DE_RUTA_PRODUCCION.md`](docs/HOJA_DE_RUTA_PRODUCCION.md).
+2. Todo diseño de interfaz e interacción debe cumplir estrictamente [`DESIGN.md`](DESIGN.md).
+3. Ninguna tarea se da por terminada sin compilar sin errores (`npm run build:web`), pasar las pruebas (`npm test` + Playwright) y subir los cambios con `git commit` y `git push` para su despliegue automático en `https://surtifacil.pages.dev/`.
