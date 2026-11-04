@@ -51,3 +51,4 @@ export type PagesFunction<
   Params extends string = any,
   Data extends Record<string, unknown> = Record<string, unknown>
 > = (context: EventContext<TEnv, Params, Data>) => Response | Promise<Response>;
+

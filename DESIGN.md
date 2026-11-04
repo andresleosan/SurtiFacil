@@ -78,3 +78,40 @@ Este documento define las reglas visuales, ergonómicas, de accesibilidad, voz (
   - Carga diferida (`React.lazy` + `Suspense`) por ruta/módulo para mantener el bundle inicial ligero en celulares de gama media/baja y tablets de mostrador.
   - Consultas paginadas e indexadas en Cloudflare D1 sin descargas masivas innecesarias.
 
+---
+
+## 6. Referencias Oficiales de Interfaz y Navegación (Mobbin UI Patterns)
+
+### 6.1 Navegación Administrativa General ([Patrón HoneyBook en Mobbin](https://mobbin.com/screens/bcce288e-c338-41f8-a1d1-fb6b6d6dc709))
+- **Barra Lateral (`Sidebar` en `AppShell.tsx`):**
+  - Fondo oscuro de alto contraste (`bg-sf-dark` `#0D1B2A`).
+  - Cabecera con logo de SurtiFácil, nombre del local de abastos y badge de estado de tienda (*"Abierto"* / selector de local).
+  - Indicador de estado del plan / días restantes en la parte superior.
+  - **Jerarquía Agrupada con Chevrons Desplegables:**
+    - ⚡ **Mostrador y Ventas:** *Dashboard*, *Nueva Venta (POS)*, *Historial de Ventas*.
+    - 📒 **Cartera y Créditos:** *Libro de Fiados* (con badge de deuda acumulada).
+    - 📦 **Catálogo y Bodega:** *Inventario y Menú*, *Reposición de Stock*, *Márgenes y Costos*.
+    - 🚚 **Proveedores y Compras:** *Proveedores*, *Órdenes de Compra*.
+    - 💬 **Canales y Vecinos:** *Bandeja WhatsApp*, *Modo Kiosco iPad*, *Tienda Vecinal*.
+    - ⚙️ **Configuración y Equipo:** *Empleados del Local*, *Ajustes de Tienda*.
+  - **Pie del Menú:** Perfil del cajero/administrador con menú emergente para cerrar sesión y cambiar de turno.
+- **Barra Superior (`TopBar`):**
+  - Buscador rápido global, botón de acción rápida destacado `+ Nueva Venta` (`bg-emerald-600` hover `bg-emerald-700`) y botón de micrófono Sarin.
+
+### 6.2 Menú Táctil de Productos y POS ([Patrón Blinkit en Mobbin](https://mobbin.com/screens/39e1dc5f-a55e-4bb1-b93f-1b60ea4d7375))
+- **Riel Vertical Izquierdo de Categorías (Vertical Category Rail):**
+  - Riel vertical fijo con ancho táctil (`w-20` a `w-24`) con iconos ilustrativos y etiquetas claras para cada categoría de abastos: *Granos y Despensa*, *Lácteos y Huevos*, *Fruver*, *Carnes y Salsamentaria*, *Aseo y Hogar*, *Bebidas y Licores*, *Snacks y Panadería*.
+  - Indicador de categoría activa con borde azul (`#1565C0`) y fondo contrastado.
+- **Cuadrícula de Productos de Alta Ergonomía:**
+  - Columnas fluidas (2 columnas en móvil/tablet vertical, 3-4 columnas en iPad horizontal y mostrador).
+  - Tarjetas de producto limpias con:
+    - Fotografía o icono representativo del producto.
+    - Nombre del producto legible a 1 metro de distancia.
+    - Badge de presentación y unidad de medida (*"1 Libra"*, *"1 Kg"*, *"Bolsa 1L"*, *"Cubeta x30"*).
+    - Precio oficial en `formatCOP` (`text-lg font-bold tabular-nums`).
+    - Botón táctil verde esmeralda `+ AGREGAR` (`min-h-[44px]` en POS, `min-h-[56px]` en Kiosco) que responde al instante con micro-animación.
+- **Barra de Subfiltros y Búsqueda Superior:**
+  - Buscador predictivo en tiempo real compatible con pistola de código de barras EAN-13.
+  - Chips de filtro rápido: *Todos*, *En Oferta*, *Más Vendidos*, *Por Agotarse*.
+
+

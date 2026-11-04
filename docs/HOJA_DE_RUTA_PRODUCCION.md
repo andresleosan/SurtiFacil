@@ -54,16 +54,17 @@ Este archivo es la **fuente de verdad persistente entre sesiones** para el coman
     3. Limpiar imports de `firebase/firestore` del bundle de producción para reducir drásticamente el peso de `firebase-vendor` (~300 KB menos de JS descargado).
     4. Actualizar y pasar el 100 % de las pruebas unitarias en Vitest y verificar el flujo en vivo con Playwright.
 
-- [ ] **Tarea 3 — Panel Administrativo de Catálogo, Menú de Abastos y Configuración del Local para el Staff (`/inventario` y `/configuracion`):**
-  - **Objetivo:** Permitir que el administrador y el staff de cada tienda de abastos gestionen de punta a punta su menú/catálogo de productos, combos vecinales, precios, unidades de medida y configuración comercial del local.
+- [ ] **Tarea 3 — Rediseño de Navegación Administrativa (Patrón HoneyBook), Catálogo Táctil de Abastos (Patrón Blinkit) y Configuración del Local (`/inventario` y `/configuracion`):**
+  - **Objetivo:** Renovar la experiencia visual y operativa del staff implementando la navegación jerárquica inspirada en HoneyBook en el AppShell y el catálogo de abastos con riel vertical de categorías táctil inspirado en Blinkit, permitiendo administrar productos, unidades de medida, combos y configuración comercial.
   - **Alcance Técnico:**
-    1. Ampliar el modelo y formulario de productos ([`AddProductModal.tsx`](../web/src/components/AddProductModal.tsx), [`Inventory.tsx`](../web/src/components/Inventory.tsx)) con:
-       - Unidad de venta (`unidad`, `libra`, `kilo`, `litro`, `paquete`, `cubeta`, `atado`).
-       - Imagen/URL o selector de ícono ilustrativo por categoría de abastos (`Granos y Despensa`, `Lácteos y Huevos`, `Fruver`, `Carnes y Salsamentaria`, `Aseo y Hogar`, `Bebidas y Licores`, `Snacks y Panadería`).
-       - Switches táctiles de visibilidad: **Mostrar en Kiosco iPad (`visible_kiosco`)**, **Mostrar en Tienda Web/WhatsApp (`visible_tienda`)** y **Producto Destacado / En Oferta (`en_oferta`, `precio_oferta_cents`)**.
-       - Edición rápida en línea de precio de venta y stock desde la tabla/tarjeta de inventario para cuando llega mercancía nueva al mostrador.
-    2. Crear pestaña/gestor de **Combos y Kits de Mercado** (ej. *"Combo Desayuno Paisa"*, *"Kit Aseo Mes"*) donde el staff agrupa productos existentes con un precio especial.
-    3. Crear la vista **Configuración del Negocio** (`web/src/components/StoreSettings.tsx`) accesible desde el menú lateral para editar: nombre comercial, barrio en Medellín, dirección, teléfono WhatsApp de pedidos, horario de atención, valor del domicilio, datos informativos de pago (Nequi / Bancolombia Ahorro a la Mano) y mensaje de bienvenida.
+    1. **Navegación Administrativa ([Patrón HoneyBook en Mobbin](https://mobbin.com/screens/bcce288e-c338-41f8-a1d1-fb6b6d6dc709)):**
+       - Refactorizar [`AppShell.tsx`](../web/src/components/layout/AppShell.tsx) y [`navItems.ts`](../web/src/components/layout/navItems.ts) con barra lateral oscura (`bg-sf-dark`), cabecera con estado de tienda y suscripción, subgrupos desplegables con chevrons (*Mostrador y Ventas*, *Cartera y Fiados*, *Catálogo y Bodega*, *Proveedores*, *Canales Vecinales*, *Configuración*), barra superior con botón hero `+ Nueva Venta` y menú emergente de perfil de cajero.
+    2. **Catálogo Táctil de Abastos ([Patrón Blinkit en Mobbin](https://mobbin.com/screens/39e1dc5f-a55e-4bb1-b93f-1b60ea4d7375)):**
+       - Implementar riel vertical izquierdo de categorías con iconos ilustrados (*Granos*, *Lácteos*, *Fruver*, *Carnes*, *Aseo*, *Bebidas*, *Snacks*).
+       - Cuadrícula de tarjetas de producto de 2-3 columnas con fotografía, nombre, badge de peso/unidad (`libra`, `kilo`, `litro`, `cubeta`, `paquete`), precio `formatCOP`, botón verde táctil `+ AGREGAR` y switches de visibilidad (*Kiosco iPad*, *Tienda Web* y *En Oferta*).
+       - Edición rápida en línea de precio y stock para cuando llega mercancía nueva al mostrador.
+    3. Crear gestor de **Combos y Kits de Mercado** (ej. *"Combo Desayuno Paisa"*, *"Kit Aseo Mes"*) donde el staff agrupa productos existentes con precio especial.
+    4. Crear la vista **Configuración del Negocio** (`web/src/components/StoreSettings.tsx`) para editar: nombre comercial, barrio en Medellín, dirección, teléfono WhatsApp de pedidos, horario de atención, valor del domicilio, datos informativos de pago (Nequi / Bancolombia) y mensaje de bienvenida.
 
 - [ ] **Tarea 4 — Plataforma SaaS Multi-Tenant para Abastos en Medellín: Planes, Registro de Locales (`/registro-negocio`), Selector de Tienda y Panel SuperAdmin (`/super-admin`):**
   - **Objetivo:** Convertir SurtiFácil en un SaaS comercializable para cientos de tiendas de barrio en Medellín, con control centralizado de suscripciones y cuotas de IA por tienda.

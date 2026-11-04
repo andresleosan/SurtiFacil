@@ -126,3 +126,4 @@ export async function authenticateRequest(
     token: decoded,
   };
 }
+

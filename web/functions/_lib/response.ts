@@ -41,3 +41,4 @@ export function handleOptions(): Response {
     headers: corsHeaders,
   });
 }
+
