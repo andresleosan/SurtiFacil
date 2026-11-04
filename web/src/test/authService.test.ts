@@ -180,9 +180,10 @@ describe('authService', () => {
         'cashier'
       );
 
-       expect(fetch).toHaveBeenCalledWith(
-         'http://localhost:3000/api/auth/provision-user',
-         expect.objectContaining({
+      const expectedBackendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3000';
+      expect(fetch).toHaveBeenCalledWith(
+        `${expectedBackendUrl}/api/auth/provision-user`,
+        expect.objectContaining({
            method: 'POST',
            headers: expect.objectContaining({ Authorization: 'Bearer token' }),
          }),
@@ -393,8 +394,9 @@ describe('authService', () => {
       expect(signOut).not.toHaveBeenCalled();
       expect(warn).toHaveBeenCalledWith('No se pudieron sincronizar custom claims.');
       warn.mockRestore();
+      const expectedBackendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3000';
       expect(fetchMock).toHaveBeenCalledWith(
-        'http://localhost:3000/api/auth/sync-claims',
+        `${expectedBackendUrl}/api/auth/sync-claims`,
         expect.objectContaining({
           headers: {
             Authorization: 'Bearer token',

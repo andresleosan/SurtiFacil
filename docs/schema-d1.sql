@@ -224,3 +224,39 @@ CREATE TABLE IF NOT EXISTS customer_orders (
 
 CREATE INDEX IF NOT EXISTS idx_customer_orders_negocio ON customer_orders(negocio_id, status);
 CREATE INDEX IF NOT EXISTS idx_customer_orders_token ON customer_orders(tracking_token);
+
+-- ==============================================================================
+-- 11. Semillas Iniciales (Negocio Insignia y SuperAdmin de la Plataforma)
+-- ==============================================================================
+INSERT OR IGNORE INTO negocios (
+  id, slug, nombre, barrio, ciudad, telefono_whatsapp, direccion, horario, estado, plan_id, cuota_ia_total, cuota_ia_usada, costo_domicilio_cents, datos_pago_offline, config_json
+) VALUES (
+  'surtifacil',
+  'surtifacil',
+  'SurtiFácil Abastos Central - Medellín',
+  'La Candelaria / Centro',
+  'Medellín',
+  '+573001234567',
+  'Calle 50 # 50-20, Centro, Medellín',
+  'Lunes a Domingo 7:00 AM - 9:00 PM',
+  'activo',
+  'enterprise',
+  999999,
+  0,
+  350000, -- $ 3.500 COP
+  'Nequi / Bancolombia: 300 123 4567',
+  '{"slogan":"El motor digital del tendero paisa","allow_kiosk":true,"allow_whatsapp":true}'
+);
+
+INSERT OR IGNORE INTO users (
+  id, negocio_id, email, display_name, role, is_super_admin, active
+) VALUES (
+  'admin-andres-san1404',
+  'surtifacil',
+  'andres.san1404@gmail.com',
+  'Andrés Sánchez (SuperAdmin)',
+  'admin',
+  1,
+  1
+);
+

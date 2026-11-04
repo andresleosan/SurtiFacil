@@ -35,25 +35,16 @@ Este archivo es la **fuente de verdad persistente entre sesiones** para el coman
   - Creada la base de datos D1 `surtifacil-db` (UUID: `33619f1c-3375-48d4-a04d-3a882de4349c`) y vinculada como binding `DB` en Cloudflare Pages (`Production` y `Preview`).
   - Diseñado y ejecutado el esquema relacional inicial en [`docs/schema-d1.sql`](./schema-d1.sql) con las 9 tablas base e índices operativos.
   - Definido el sistema de diseño y estándares de ingeniería en [`DESIGN.md`](../DESIGN.md) y creada la skill automatizada `/avanzar`.
+- [x] **Tarea 1 — Capa de API Serverless en Cloudflare Pages Functions (`/api/*`), Esquema Multi-Tenant (`negocio_id`) en D1 y Verificación JWT de Firebase Auth:**
+  - Creado esquema relacional multi-tenant e insertadas semillas en [`docs/schema-d1.sql`](./schema-d1.sql) para el negocio insignia `surtifacil` y SuperAdmin `andres.san1404@gmail.com`.
+  - Construido el verificador criptográfico JWT RS256 con Web Crypto API en [`web/functions/_lib/firebaseAuth.ts`](../web/functions/_lib/firebaseAuth.ts) contra claves públicas de Google y soporte de tokens de desarrollo.
+  - Implementado middleware de autenticación y aislamiento multi-tenant en [`web/functions/_lib/authMiddleware.ts`](../web/functions/_lib/authMiddleware.ts) con soporte para switch de local del SuperAdmin vía `X-Negocio-Id`.
+  - Construido el enrutador de API en [`web/functions/api/[[route]].ts`](../web/functions/api/[[route]].ts) cubriendo `/health`, `/auth/me`, `/auth/provision`, `/auth/provision-user`, `/auth/sync-claims`, catálogo `/products` (CRUD multi-tenant), ventas `/sales` (transacciones atómicas con descuento de stock y cargos de fiado), `/credits` (clientes y libro de fiados con validación de no sobre-abono), `/suppliers` y órdenes `/orders` (con incremento de stock en recepción) y gestión de empleados `/users`.
+  - Verificado con 9/9 pruebas unitarias de API en [`web/src/test/apiFunctions.test.ts`](../web/src/test/apiFunctions.test.ts) (289/289 tests en Vitest pasando en verde), build de producción sin errores y 8/8 tests de Playwright pasando en verde.
 
 ---
 
 ## Tareas Pendientes por Ejecutar con `/avanzar` (`[ ]`)
-
-- [ ] **Tarea 1 — Capa de API Serverless en Cloudflare Pages Functions (`/api/*`), Esquema Multi-Tenant (`negocio_id`) en D1 y Verificación JWT de Firebase Auth:**
-  - **Objetivo:** Construir el backend serverless completo en Cloudflare Pages Functions conectado a `env.DB` (`surtifacil-db`), asegurando aislamiento multi-tenant desde el día uno y verificando tokens de Firebase Auth (`surtifacilapp`).
-  - **Alcance Técnico:**
-    1. Actualizar [`docs/schema-d1.sql`](./schema-d1.sql) y ejecutar en D1 la creación de la tabla `negocios` (`id`, `slug`, `nombre`, `barrio`, `ciudad`, `telefono_whatsapp`, `direccion`, `logo_url`, `estado`, `plan_id`, `suscripcion_vence_en`, `cuota_ia_total`, `cuota_ia_usada`, `costo_domicilio_cents`, `config_json`, `created_at`) y columnas `negocio_id` indexadas en `users`, `products`, `sales`, `credit_customers`, `credit_entries`, `suppliers` y `purchase_orders`.
-    2. Sembrar en D1 el negocio insignia `surtifacil` ("SurtiFácil Abastos Central - Medellín") y el usuario SuperAdmin `andres.san1404@gmail.com` con rol `admin`.
-    3. Crear el verificador de JWT RS256 de Firebase Auth (`web/functions/_lib/firebaseAuth.ts`) usando Web Crypto API contra las llaves públicas de Google para el proyecto `surtifacilapp`, con soporte de autenticación en desarrollo/tests.
-    4. Implementar el router y controladores en `web/functions/api/[[route]].ts` cubriendo:
-       - `GET /api/health` (estado del servicio y conexión D1).
-       - `GET /api/auth/me` y `POST /api/auth/provision` (perfil del usuario autenticado, rol y datos de su `negocio_id`).
-       - `GET/POST/PUT/DELETE /api/products` (catálogo filtrado por `negocio_id`).
-       - `GET/POST /api/sales` (creación transaccional en D1 descontando stock, guardando snapshot de costos e insertando cargo automático en `credit_entries` si el pago es `credit`).
-       - `GET/POST/PUT /api/credits/customers` y `GET/POST /api/credits/entries` (libro de fiados y abonos con validación de no exceder la deuda).
-       - `GET/POST/PUT /api/suppliers` y `GET/POST/PUT /api/orders` (proveedores y recepción de órdenes de compra actualizando stock y `last_cost_cents`).
-       - `GET/POST/PUT/DELETE /api/users` (gestión de empleados del local por el `admin`).
 
 - [ ] **Tarea 2 — Enlace Completo de Servicios Frontend a Cloudflare D1 y Eliminación de Firestore en Cliente:**
   - **Objetivo:** Conectar todos los servicios de `web/src/services/` a la nueva API `/api/*` en Cloudflare Pages Functions, dejando Firebase exclusivamente para `firebase/auth`.
