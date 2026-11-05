@@ -1,5 +1,3 @@
-import { collection, getDocs, query, where, orderBy, Timestamp } from 'firebase/firestore';
-import { db } from '../firebase/config';
 import { Sale } from '../firebase/db';
 import { getSales } from './saleService';
 
@@ -45,21 +43,21 @@ export async function getSalesSummary(): Promise<SalesSummary> {
 
   const salesToday = sales
     .filter(s => {
-      const saleDate = s.date?.toDate?.() || new Date(s.date);
+      const saleDate = s.date?.toDate?.() || (s.date ? new Date(s.date) : new Date(0));
       return saleDate >= startOfToday;
     })
     .reduce((sum, s) => sum + s.total, 0);
 
   const salesWeek = sales
     .filter(s => {
-      const saleDate = s.date?.toDate?.() || new Date(s.date);
+      const saleDate = s.date?.toDate?.() || (s.date ? new Date(s.date) : new Date(0));
       return saleDate >= startOfWeek;
     })
     .reduce((sum, s) => sum + s.total, 0);
 
   const salesMonth = sales
     .filter(s => {
-      const saleDate = s.date?.toDate?.() || new Date(s.date);
+      const saleDate = s.date?.toDate?.() || (s.date ? new Date(s.date) : new Date(0));
       return saleDate >= startOfMonth;
     })
     .reduce((sum, s) => sum + s.total, 0);
@@ -94,7 +92,7 @@ export async function getDailySales(days: number = 7): Promise<DailySales[]> {
     nextDate.setDate(date.getDate() + 1);
 
     const daySales = sales.filter(s => {
-      const saleDate = s.date?.toDate?.() || new Date(s.date);
+      const saleDate = s.date?.toDate?.() || (s.date ? new Date(s.date) : new Date(0));
       return saleDate >= date && saleDate < nextDate;
     });
 
@@ -125,7 +123,7 @@ export async function getWeeklySales(weeks: number = 4): Promise<DailySales[]> {
     endOfWeek.setDate(startOfWeek.getDate() + 7);
 
     const weekSales = sales.filter(s => {
-      const saleDate = s.date?.toDate?.() || new Date(s.date);
+      const saleDate = s.date?.toDate?.() || (s.date ? new Date(s.date) : new Date(0));
       return saleDate >= startOfWeek && saleDate < endOfWeek;
     });
 

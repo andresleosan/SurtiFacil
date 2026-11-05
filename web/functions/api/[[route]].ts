@@ -289,16 +289,47 @@ export const onRequest: PagesFunction<Env> = async (context) => {
     }
 
     // 5. Ventas y Cobro en Mostrador (/sales)
-    if (path === '/sales') {
+    if (path === '/sales' || path === '/sales/create') {
       const auth = await authenticateRequest(request, env);
 
       // GET /api/sales
       if (method === 'GET') {
-        const limit = Math.min(parseInt(url.searchParams.get('limit') || '50', 10), 100);
-        const sales = await env.DB.prepare(
-          'SELECT * FROM sales WHERE negocio_id = ? ORDER BY created_at DESC LIMIT ?'
-        )
-          .bind(auth.negocioId, limit)
+        // Soporte para totales agregados calculados en D1
+        if (url.searchParams.get('totals') === 'true') {
+          const row = await env.DB.prepare(
+            'SELECT COUNT(*) as count, COALESCE(SUM(total_cents), 0) as totalCents FROM sales WHERE negocio_id = ?'
+          )
+            .bind(auth.negocioId)
+            .first<{ count: number; totalCents: number }>();
+
+          return jsonResponse({
+            count: row?.count || 0,
+            totalCents: row?.totalCents || 0,
+          });
+        }
+
+        const since = url.searchParams.get('since');
+        const cursor = url.searchParams.get('cursor');
+        const limitParam = Math.min(parseInt(url.searchParams.get('limit') || '50', 10), 100);
+
+        let query = 'SELECT * FROM sales WHERE negocio_id = ?';
+        const params: unknown[] = [auth.negocioId];
+
+        if (since) {
+          query += ' AND created_at >= ?';
+          params.push(since);
+        }
+
+        if (cursor) {
+          query += ' AND id < ?';
+          params.push(cursor);
+        }
+
+        query += ' ORDER BY created_at DESC, id DESC LIMIT ?';
+        params.push(limitParam);
+
+        const sales = await env.DB.prepare(query)
+          .bind(...params)
           .all();
 
         // Cargar ítems asociados para cada venta
@@ -470,6 +501,7 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         return jsonResponse(
           {
             id: saleId,
+            saleId,
             negocio_id: auth.negocioId,
             total_cents: computedTotalCents,
             total_cost_cents: computedTotalCostCents,
@@ -551,6 +583,7 @@ export const onRequest: PagesFunction<Env> = async (context) => {
 
       if (method === 'GET') {
         const customerId = url.searchParams.get('customer_id');
+        const limitParam = Math.min(parseInt(url.searchParams.get('limit') || '50', 10), 100);
         let query = 'SELECT * FROM credit_entries WHERE negocio_id = ?';
         const params: unknown[] = [auth.negocioId];
 
@@ -558,7 +591,8 @@ export const onRequest: PagesFunction<Env> = async (context) => {
           query += ' AND customer_id = ?';
           params.push(customerId);
         }
-        query += ' ORDER BY created_at DESC';
+        query += ' ORDER BY created_at DESC LIMIT ?';
+        params.push(limitParam);
 
         const res = await env.DB.prepare(query).bind(...params).all();
         return jsonResponse(res.results || []);
@@ -583,7 +617,7 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         // Validación: un abono no puede ser mayor al saldo actual
         if (body.type === 'payment' && body.amount_cents > customer.balance_cents) {
           return errorResponse(
-            `El abono ($${body.amount_cents / 100}) no puede superar la deuda actual ($${customer.balance_cents / 100}).`,
+            'El abono no puede superar la deuda actual',
             400
           );
         }
@@ -699,6 +733,24 @@ export const onRequest: PagesFunction<Env> = async (context) => {
 
         return jsonResponse(updated);
       }
+
+      if (method === 'DELETE' && supplierId) {
+        const orderCount = await env.DB.prepare(
+          'SELECT COUNT(*) as count FROM purchase_orders WHERE supplier_id = ? AND negocio_id = ?'
+        )
+          .bind(supplierId, auth.negocioId)
+          .first<{ count: number }>();
+
+        if (orderCount && orderCount.count > 0) {
+          return errorResponse('No se puede eliminar: tiene órdenes asociadas', 400);
+        }
+
+        await env.DB.prepare('DELETE FROM suppliers WHERE id = ? AND negocio_id = ?')
+          .bind(supplierId, auth.negocioId)
+          .run();
+
+        return jsonResponse({ success: true, id: supplierId });
+      }
     }
 
     // 8. Órdenes de Compra a Proveedores (/orders)
@@ -780,17 +832,111 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       }
 
       if (method === 'PUT' && orderId) {
-        const body = (await request.json()) as { status?: string; received_total_cents?: number };
+        const body = (await request.json()) as {
+          status?: string;
+          received_total_cents?: number;
+          receives?: Array<{ index: number; received_quantity: number; final_cost_cents: number }>;
+        };
         const order = await env.DB.prepare('SELECT * FROM purchase_orders WHERE id = ? AND negocio_id = ?')
           .bind(orderId, auth.negocioId)
-          .first<{ id: string; status: string; total_cents: number }>();
+          .first<{ id: string; status: string; total_cents: number; supplier_id: string }>();
 
         if (!order) {
           return errorResponse('Orden de compra no encontrada.', 404);
         }
 
+        // Cancelación de orden
+        if (body.status === 'cancelled') {
+          const itemsResult = await env.DB.prepare('SELECT received_quantity FROM purchase_order_items WHERE order_id = ?')
+            .bind(orderId)
+            .all<{ received_quantity: number }>();
+          const hasReception = (itemsResult.results || []).some((i) => i.received_quantity > 0);
+          if (hasReception) {
+            return errorResponse('No se puede cancelar: ya se recibió stock', 400);
+          }
+          await env.DB.prepare("UPDATE purchase_orders SET status = 'cancelled' WHERE id = ? AND negocio_id = ?")
+            .bind(orderId, auth.negocioId)
+            .run();
+          return jsonResponse({ success: true, order_id: orderId, status: 'cancelled' });
+        }
+
+        // Recepción granular de ítems
+        if (body.receives && Array.isArray(body.receives)) {
+          const existingItemsRes = await env.DB.prepare('SELECT * FROM purchase_order_items WHERE order_id = ?')
+            .bind(orderId)
+            .all<any>();
+          const existingItems = existingItemsRes.results || [];
+          const batch: any[] = [];
+          let currentReceivedTotal = 0;
+          let allReceived = true;
+          let someReceived = false;
+
+          for (let idx = 0; idx < existingItems.length; idx++) {
+            const it = existingItems[idx];
+            const r = body.receives.find((x) => x.index === idx);
+            const newReceivedQty = (it.received_quantity || 0) + (r ? r.received_quantity : 0);
+            const finalCost = r ? r.final_cost_cents : (it.final_cost_cents || it.unit_cost_cents);
+
+            if (newReceivedQty > it.quantity) {
+              return errorResponse(
+                `No se puede recibir más de lo pedido en "${it.name}". Pedido: ${it.quantity}, ya recibido: ${it.received_quantity}, intento: ${r?.received_quantity}`,
+                400
+              );
+            }
+
+            if (newReceivedQty < it.quantity) {
+              allReceived = false;
+            }
+            if (newReceivedQty > 0) {
+              someReceived = true;
+            }
+
+            currentReceivedTotal += newReceivedQty * finalCost;
+
+            if (r && r.received_quantity > 0) {
+              batch.push(
+                env.DB.prepare(
+                  'UPDATE purchase_order_items SET received_quantity = ?, final_cost_cents = ? WHERE id = ?'
+                ).bind(newReceivedQty, finalCost, it.id)
+              );
+
+              if (it.product_id) {
+                batch.push(
+                  env.DB.prepare(
+                    `UPDATE products SET
+                      stock = stock + ?,
+                      last_cost_cents = ?,
+                      last_cost_source = 'purchase',
+                      last_cost_updated_at = datetime('now'),
+                      updated_at = datetime('now')
+                    WHERE id = ? AND negocio_id = ?`
+                  ).bind(r.received_quantity, finalCost, it.product_id, auth.negocioId)
+                );
+              }
+            }
+          }
+
+          const nextStatus = allReceived ? 'received' : someReceived ? 'partial' : order.status;
+          batch.push(
+            env.DB.prepare(
+              "UPDATE purchase_orders SET status = ?, received_total_cents = ?, received_date = IIF(? = 'received', datetime('now'), received_date) WHERE id = ? AND negocio_id = ?"
+            ).bind(nextStatus, currentReceivedTotal, nextStatus, orderId, auth.negocioId)
+          );
+
+          if (allReceived) {
+            batch.push(
+              env.DB.prepare(
+                'UPDATE suppliers SET total_orders = total_orders + 1, total_spent_cents = total_spent_cents + ? WHERE id = ? AND negocio_id = ?'
+              ).bind(currentReceivedTotal, order.supplier_id, auth.negocioId)
+            );
+          }
+
+          await env.DB.batch(batch);
+          return jsonResponse({ success: true, order_id: orderId, status: nextStatus });
+        }
+
+        // Transición de estado directa
         const batch: any[] = [];
-        // Si el estado cambia a 'received', actualizar stock y last_cost_cents de los productos
         if (body.status === 'received' && order.status !== 'received') {
           const items = await env.DB.prepare('SELECT * FROM purchase_order_items WHERE order_id = ?')
             .bind(orderId)

@@ -14,7 +14,7 @@ vi.mock('firebase/firestore', () => ({
   serverTimestamp: vi.fn(() => new Date()),
 }));
 
-import { addDoc, getDoc, getDocs, runTransaction, updateDoc } from 'firebase/firestore';
+import { apiClient } from '../services/apiClient';
 import { OrderItem, OrderStatus } from '../firebase/db';
 import { resetLocalSales } from '../services/mockData';
 import {
@@ -321,29 +321,23 @@ describe('supplierService - Firebase configurado', () => {
     vi.unstubAllEnvs();
   });
 
-  it('mantiene el resultado de una lectura exitosa de proveedores en Firestore', async () => {
-    vi.mocked(getDocs).mockResolvedValueOnce({
-      forEach: (callback: (document: { id: string; data: () => object }) => void) => {
-        callback({
-          id: 'supplier-1',
-          data: () => ({ name: 'Proveedor Firebase', active: true, totalOrders: 2, totalSpentCents: 3000 }),
-        });
-      },
-    } as any);
+  it('mantiene el resultado de una lectura exitosa de proveedores en D1', async () => {
+    vi.spyOn(apiClient, 'get').mockResolvedValueOnce([
+      { id: 'supplier-1', name: 'Proveedor Firebase', active: 1, total_orders: 2, total_spent_cents: 3000 },
+    ]);
 
     await expect(getSuppliers()).resolves.toEqual([
-      {
+      expect.objectContaining({
         id: 'supplier-1',
         name: 'Proveedor Firebase',
         active: true,
         totalOrders: 2,
         totalSpentCents: 3000,
-      },
+      }),
     ]);
   });
 
-  it('mantiene los datos y el ID de un proveedor creado exitosamente en Firestore', async () => {
-    vi.mocked(addDoc).mockResolvedValueOnce({ id: 'supplier-2' } as any);
+  it('mantiene los datos y el ID de un proveedor creado exitosamente en D1', async () => {
     const data = {
       name: 'Proveedor Nuevo',
       contactName: 'Contacto',
@@ -352,6 +346,12 @@ describe('supplierService - Firebase configurado', () => {
       category: 'Test',
       active: true,
     };
+    vi.spyOn(apiClient, 'post').mockResolvedValueOnce({
+      id: 'supplier-2',
+      ...data,
+      total_orders: 0,
+      total_spent_cents: 0,
+    });
 
     await expect(addSupplier(data)).resolves.toEqual({
       id: 'supplier-2',
@@ -361,57 +361,46 @@ describe('supplierService - Firebase configurado', () => {
     });
   });
 
-  it('mantiene el resultado de una lectura exitosa de órdenes en Firestore', async () => {
+  it('mantiene el resultado de una lectura exitosa de órdenes en D1', async () => {
     const order = {
       id: 'order-1',
-      supplierId: 'supplier-1',
-      supplierName: 'Proveedor Firebase',
+      supplier_id: 'supplier-1',
+      supplier_name: 'Proveedor Firebase',
       status: 'draft' as const,
       items: [],
       total_cents: 1000,
       received_total_cents: 0,
-      date: new Date('2026-08-04T00:00:00.000Z'),
+      created_at: new Date('2026-08-04T00:00:00.000Z'),
     };
-    vi.mocked(getDocs).mockResolvedValueOnce({
-      forEach: (callback: (document: { id: string; data: () => object }) => void) => {
-        callback({
-          id: order.id,
-          data: () => ({
-            supplierId: order.supplierId,
-            supplierName: order.supplierName,
-            status: order.status,
-            items: order.items,
-            total_cents: order.total_cents,
-            received_total_cents: order.received_total_cents,
-            date: order.date,
-          }),
-        });
-      },
-    } as any);
+    vi.spyOn(apiClient, 'get').mockResolvedValueOnce([order]);
 
-    await expect(getOrders()).resolves.toEqual([order]);
+    await expect(getOrders()).resolves.toEqual([
+      expect.objectContaining({
+        id: 'order-1',
+        supplierId: 'supplier-1',
+        supplierName: 'Proveedor Firebase',
+        status: 'draft',
+        total_cents: 1000,
+      }),
+    ]);
   });
 
-  it('mantiene la actualización exitosa del estado de una orden en Firestore', async () => {
-    vi.mocked(getDocs).mockResolvedValueOnce({
-      forEach: (callback: (document: { id: string; data: () => object }) => void) => {
-        callback({ id: 'order-1', data: () => ({ status: 'draft' }) });
-      },
-    } as any);
-    vi.mocked(updateDoc).mockResolvedValueOnce(undefined);
+  it('mantiene la actualización exitosa del estado de una orden en D1', async () => {
+    vi.spyOn(apiClient, 'get').mockResolvedValueOnce([{ id: 'order-1', status: 'draft' }]);
+    const putSpy = vi.spyOn(apiClient, 'put').mockResolvedValueOnce({ success: true });
 
     await expect(updateOrderStatus('order-1', 'ordered')).resolves.toBeUndefined();
-    expect(updateDoc).toHaveBeenCalled();
+    expect(putSpy).toHaveBeenCalled();
   });
 
   it('rechaza la lectura de proveedores en vez de devolver una lista vacía', async () => {
-    vi.mocked(getDocs).mockRejectedValueOnce(new Error('permission denied'));
+    vi.spyOn(apiClient, 'get').mockRejectedValueOnce(new Error('permission denied'));
 
     await expect(getSuppliers()).rejects.toThrow('Error al cargar proveedores');
   });
 
   it('rechaza la creación de proveedores sin exponer el error de Firebase', async () => {
-    vi.mocked(addDoc).mockRejectedValueOnce(new Error('token=secret-token'));
+    vi.spyOn(apiClient, 'post').mockRejectedValueOnce(new Error('token=secret-token'));
 
     await expect(
       addSupplier({
@@ -426,7 +415,7 @@ describe('supplierService - Firebase configurado', () => {
   });
 
   it('rechaza la actualización de proveedores sin exponer el error de Firebase', async () => {
-    vi.mocked(updateDoc).mockRejectedValueOnce(new Error('apiKey=secret-key'));
+    vi.spyOn(apiClient, 'put').mockRejectedValueOnce(new Error('apiKey=secret-key'));
 
     await expect(updateSupplier('sup-1', { name: 'Actualizado' })).rejects.toThrow(
       'Error al actualizar proveedor'
@@ -434,25 +423,25 @@ describe('supplierService - Firebase configurado', () => {
   });
 
   it('rechaza la eliminación de proveedores si falla la lectura en Firebase', async () => {
-    vi.mocked(getDocs).mockRejectedValueOnce(new Error('permission denied'));
+    vi.spyOn(apiClient, 'delete').mockRejectedValueOnce(new Error('permission denied'));
 
     await expect(deleteSupplier('sup-1')).rejects.toThrow('Error al eliminar proveedor');
   });
 
   it('sanitiza una eliminación de proveedor que rechaza con un valor no Error', async () => {
-    vi.mocked(getDocs).mockRejectedValueOnce(null);
+    vi.spyOn(apiClient, 'delete').mockRejectedValueOnce(null);
 
     await expect(deleteSupplier('sup-1')).rejects.toThrow('Error al eliminar proveedor');
   });
 
   it('rechaza la lectura de órdenes en vez de devolver una lista vacía', async () => {
-    vi.mocked(getDocs).mockRejectedValueOnce(new Error('permission denied'));
+    vi.spyOn(apiClient, 'get').mockRejectedValueOnce(new Error('permission denied'));
 
     await expect(getOrders()).rejects.toThrow('Error al cargar órdenes de compra');
   });
 
   it('rechaza la creación de órdenes sin exponer el error de Firebase', async () => {
-    vi.mocked(addDoc).mockRejectedValueOnce(new Error('password=secret-password'));
+    vi.spyOn(apiClient, 'post').mockRejectedValueOnce(new Error('password=secret-password'));
 
     await expect(
       createOrder({
@@ -464,7 +453,7 @@ describe('supplierService - Firebase configurado', () => {
   });
 
   it('rechaza la actualización de estado si falla Firebase', async () => {
-    vi.mocked(getDocs).mockRejectedValueOnce(new Error('permission denied'));
+    vi.spyOn(apiClient, 'get').mockRejectedValueOnce(new Error('permission denied'));
 
     await expect(updateOrderStatus('order-1', 'ordered')).rejects.toThrow(
       'Error al actualizar estado de orden'
@@ -472,9 +461,7 @@ describe('supplierService - Firebase configurado', () => {
   });
 
   it('preserva el error de orden inexistente en modo Firebase', async () => {
-    vi.mocked(getDocs).mockResolvedValueOnce({
-      forEach: () => undefined,
-    } as any);
+    vi.spyOn(apiClient, 'get').mockResolvedValueOnce([]);
 
     await expect(updateOrderStatus('missing-order', 'ordered')).rejects.toThrow(
       'Orden no encontrada'
@@ -482,11 +469,7 @@ describe('supplierService - Firebase configurado', () => {
   });
 
   it('preserva el error de transición inválida en modo Firebase', async () => {
-    vi.mocked(getDocs).mockResolvedValueOnce({
-      forEach: (callback: (document: { id: string; data: () => object }) => void) => {
-        callback({ id: 'order-1', data: () => ({ status: 'received' }) });
-      },
-    } as any);
+    vi.spyOn(apiClient, 'get').mockResolvedValueOnce([{ id: 'order-1', status: 'received' }]);
 
     await expect(updateOrderStatus('order-1', 'draft')).rejects.toThrow(
       'Transición de estado no permitida: received → draft'
@@ -494,7 +477,7 @@ describe('supplierService - Firebase configurado', () => {
   });
 
   it('sanitiza una actualización de estado que rechaza con un valor no Error', async () => {
-    vi.mocked(getDocs).mockRejectedValueOnce(null);
+    vi.spyOn(apiClient, 'get').mockRejectedValueOnce(null);
 
     await expect(updateOrderStatus('order-1', 'ordered')).rejects.toThrow(
       'Error al actualizar estado de orden'
@@ -502,7 +485,8 @@ describe('supplierService - Firebase configurado', () => {
   });
 
   it('rechaza la recepción si falla la transacción de Firebase', async () => {
-    vi.mocked(runTransaction).mockRejectedValueOnce(new Error('token=secret-token'));
+    vi.spyOn(apiClient, 'get').mockResolvedValueOnce([{ id: 'order-1', items: [{ quantity: 1, received_quantity: 0 }] }]);
+    vi.spyOn(apiClient, 'put').mockRejectedValueOnce(new Error('token=secret-token'));
 
     await expect(
       receiveOrderItems('order-1', [{ index: 0, received_quantity: 1, final_cost_cents: 100 }])
@@ -510,7 +494,8 @@ describe('supplierService - Firebase configurado', () => {
   });
 
   it('sanitiza una recepción que rechaza con un valor no Error', async () => {
-    vi.mocked(runTransaction).mockRejectedValueOnce(null);
+    vi.spyOn(apiClient, 'get').mockResolvedValueOnce([{ id: 'order-1', items: [{ quantity: 1, received_quantity: 0 }] }]);
+    vi.spyOn(apiClient, 'put').mockRejectedValueOnce(null);
 
     await expect(
       receiveOrderItems('order-1', [{ index: 0, received_quantity: 1, final_cost_cents: 100 }])
@@ -518,13 +503,15 @@ describe('supplierService - Firebase configurado', () => {
   });
 
   it('rechaza la cancelación si falla Firebase', async () => {
-    vi.mocked(getDoc).mockRejectedValueOnce(new Error('permission denied'));
+    vi.spyOn(apiClient, 'get').mockResolvedValueOnce([{ id: 'order-1', items: [{ quantity: 1, received_quantity: 0 }] }]);
+    vi.spyOn(apiClient, 'put').mockRejectedValueOnce(new Error('permission denied'));
 
     await expect(cancelOrder('order-1')).rejects.toThrow('Error al cancelar orden');
   });
 
   it('sanitiza una cancelación que rechaza con un valor no Error', async () => {
-    vi.mocked(getDoc).mockRejectedValueOnce(null);
+    vi.spyOn(apiClient, 'get').mockResolvedValueOnce([{ id: 'order-1', items: [{ quantity: 1, received_quantity: 0 }] }]);
+    vi.spyOn(apiClient, 'put').mockRejectedValueOnce(null);
 
     await expect(cancelOrder('order-1')).rejects.toThrow('Error al cancelar orden');
   });

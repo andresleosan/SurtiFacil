@@ -1,32 +1,62 @@
-import {
-  collection,
-  count,
-  getAggregateFromServer,
-  getDocs,
-  limit,
-  orderBy,
-  query,
-  startAfter,
-  sum,
-  Timestamp,
-  where,
-  type QueryDocumentSnapshot,
-} from 'firebase/firestore';
 import { getAuth } from 'firebase/auth';
-import { db } from '../firebase/config';
 import { PaymentMethod, Product, SaleItem, Sale } from '../firebase/db';
 import { mockProducts, addLocalSale, getLocalSales, mockCreditCustomers, addLocalCreditEntry } from './mockData';
 import { refreshProducts } from './productService';
+import { apiClient, emitDataChange } from './apiClient';
 
 function isMockMode(): boolean {
   return import.meta.env.VITE_USE_MOCK_DATA === 'true';
 }
 
-const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3000';
-const auth = getAuth();
+function mapProduct(row: any): Product {
+  return {
+    id: row.id,
+    name: row.name,
+    price_cents: row.price_cents,
+    stock: row.stock ?? 0,
+    category: row.category || undefined,
+    barcode: row.barcode || undefined,
+    supplier_id: row.supplier_id || undefined,
+    createdAt: row.created_at || row.createdAt,
+    last_cost_cents: row.last_cost_cents ?? undefined,
+    last_cost_source: row.last_cost_source || undefined,
+    last_cost_updated_at: row.last_cost_updated_at || undefined,
+  };
+}
+
+function mapSale(row: any): Sale {
+  const createdDate = row.created_at ? new Date(row.created_at) : new Date();
+  return {
+    id: row.id,
+    date: {
+      toMillis: () => createdDate.getTime(),
+      toDate: () => createdDate,
+      toISOString: () => createdDate.toISOString(),
+    },
+    total: row.total_cents ?? row.total,
+    total_cost_cents: row.total_cost_cents ?? 0,
+    payment_method: row.payment_method,
+    credit_customer_id: row.credit_customer_id || undefined,
+    credit_customer_name: row.credit_customer_name || undefined,
+    schema_version: row.schema_version ?? 2,
+    created_by_uid: row.created_by_uid || undefined,
+    created_by_role: row.created_by_role || undefined,
+    createdAt: createdDate,
+    items: (row.items || []).map((it: any) => ({
+      product_id: it.product_id,
+      product_name: it.product_name,
+      quantity: it.quantity,
+      price_cents: it.price_cents,
+      subtotal: it.subtotal_cents ?? it.subtotal ?? (it.price_cents * it.quantity),
+      unit_cost_cents: it.unit_cost_cents ?? undefined,
+      cost_subtotal_cents: it.cost_subtotal_cents ?? undefined,
+      category: it.category || undefined,
+    })),
+  };
+}
 
 /**
- * Obtiene la lista de productos desde Firestore
+ * Obtiene la lista de productos desde Cloudflare D1
  * Solo usa datos mock cuando el modo está habilitado explícitamente.
  */
 export async function getProducts(): Promise<Product[]> {
@@ -36,18 +66,8 @@ export async function getProducts(): Promise<Product[]> {
   }
 
   try {
-    const productsRef = collection(db, 'products');
-    const snapshot = await getDocs(productsRef);
-    const products: Product[] = [];
-
-    snapshot.forEach((doc) => {
-      products.push({
-        id: doc.id,
-        ...(doc.data() as Omit<Product, 'id'>),
-      });
-    });
-
-    return products;
+    const list = await apiClient.get<any[]>('/products');
+    return (list || []).map(mapProduct);
   } catch {
     console.error('Error getting products from Firebase');
     throw new Error('Error al cargar productos');
@@ -74,31 +94,38 @@ export async function createSale(
     return createMockSale(cartItems, paymentMethod, creditCustomerId);
   }
 
-  const user = auth.currentUser;
-  if (!user) throw new Error('Debes iniciar sesión para crear la venta');
+  let user = null;
+  try {
+    const auth = getAuth();
+    user = auth.currentUser;
+  } catch {
+    // Si auth no está disponible
+  }
+
+  if (!user) {
+    throw new Error('Debes iniciar sesión para crear la venta');
+  }
 
   try {
-    const idToken = await user.getIdToken();
-    const response = await fetch(`${BACKEND_URL}/api/sales/create`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${idToken}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        items: cartItems.map(({ product_id, quantity }) => ({ product_id, quantity })),
-        payment_method: paymentMethod,
-        ...(paymentMethod === 'credit' ? { credit_customer_id: creditCustomerId } : {}),
-      }),
-    });
-    const result = await response.json().catch(() => ({}));
-    if (!response.ok) {
-      throw new Error(typeof result.error === 'string' ? result.error : 'Error al crear la venta');
-    }
-    if (typeof result.saleId !== 'string' || result.saleId.length === 0) {
+    const payload = {
+      items: cartItems.map(({ product_id, quantity }) => ({ product_id, quantity })),
+      payment_method: paymentMethod,
+      ...(paymentMethod === 'credit' ? { credit_customer_id: creditCustomerId } : {}),
+    };
+
+    const result = await apiClient.post<{ id?: string; saleId?: string }>('/sales', payload);
+    const saleId = result?.saleId || result?.id;
+    if (!saleId || typeof saleId !== 'string') {
       throw new Error('Error al crear la venta');
     }
-    return result.saleId;
+
+    emitDataChange('sales');
+    emitDataChange('products');
+    if (paymentMethod === 'credit') {
+      emitDataChange('credits');
+    }
+
+    return saleId;
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : '';
     const safeMessages = new Set([
@@ -128,6 +155,7 @@ function createMockSale(
   if (paymentMethod === 'credit' && !creditCustomer) {
     throw new Error('Cliente de fiado no encontrado');
   }
+
   // Validar stock disponible
   for (const item of cartItems) {
     const product = mockProducts.find((p) => p.id === item.product_id);
@@ -209,40 +237,23 @@ function createMockSale(
 }
 
 /**
- * Obtiene el historial de ventas desde Firestore (o datos mock en modo explícito)
+ * Obtiene el historial de ventas desde Cloudflare D1 (o datos mock en modo explícito)
  */
 export async function getSales(): Promise<Sale[]> {
   if (isMockMode()) {
     console.log('ℹ️ Usando historial de ventas mock (Firebase no configurado)');
     const sales = getLocalSales();
-    // Ordenar por fecha descendente
     return sales.sort((a, b) => {
-      const timeA = new Date(a.date).getTime();
-      const timeB = new Date(b.date).getTime();
+      const timeA = saleDateMillis(a);
+      const timeB = saleDateMillis(b);
       return timeB - timeA;
     });
   }
 
   try {
-    const salesRef = collection(db, 'sales');
-    const snapshot = await getDocs(salesRef);
-    const sales: Sale[] = [];
-
-    snapshot.forEach((doc) => {
-      sales.push({
-        id: doc.id,
-        ...(doc.data() as Omit<Sale, 'id'>),
-      });
-    });
-
-    // Ordenar por fecha descendente (más recientes primero)
-    sales.sort((a, b) => {
-      const timeA = a.date?.toMillis?.() || 0;
-      const timeB = b.date?.toMillis?.() || 0;
-      return timeB - timeA;
-    });
-
-    return sales;
+    const list = await apiClient.get<any[]>('/sales');
+    const sales = (list || []).map(mapSale);
+    return sortSalesDesc(sales);
   } catch {
     console.error('Error getting sales from Firebase');
     throw new Error('Error al cargar ventas');
@@ -250,9 +261,10 @@ export async function getSales(): Promise<Sale[]> {
 }
 
 function saleDateMillis(sale: Sale): number {
-  const value = sale.date;
+  const value = sale.date || sale.createdAt;
   if (!value) return 0;
   if (typeof value.toMillis === 'function') return value.toMillis();
+  if (value instanceof Date) return value.getTime();
   const parsed = new Date(value).getTime();
   return Number.isNaN(parsed) ? 0 : parsed;
 }
@@ -263,14 +275,12 @@ function sortSalesDesc(sales: Sale[]): Sale[] {
 
 export interface SalesPage {
   sales: Sale[];
-  /** Cursor opaco para pedir la siguiente página; `null` cuando no hay más. */
   cursor: unknown | null;
   hasMore: boolean;
 }
 
 /**
- * Historial de ventas paginado (más recientes primero). Evita descargar la
- * colección completa en el dispositivo.
+ * Historial de ventas paginado (más recientes primero).
  */
 export async function getRecentSales(pageSize = 50, cursor: unknown = null): Promise<SalesPage> {
   if (isMockMode()) {
@@ -282,20 +292,16 @@ export async function getRecentSales(pageSize = 50, cursor: unknown = null): Pro
   }
 
   try {
-    const salesQuery = cursor
-      ? query(collection(db, 'sales'), orderBy('date', 'desc'), startAfter(cursor as QueryDocumentSnapshot), limit(pageSize + 1))
-      : query(collection(db, 'sales'), orderBy('date', 'desc'), limit(pageSize + 1));
-    const snapshot = await getDocs(salesQuery);
-    const documents = snapshot.docs;
-    const hasMore = documents.length > pageSize;
-    const pageDocuments = hasMore ? documents.slice(0, pageSize) : documents;
-    const sales = pageDocuments.map((document) => ({
-      id: document.id,
-      ...(document.data() as Omit<Sale, 'id'>),
-    }));
+    const cursorParam = typeof cursor === 'string' ? `&cursor=${encodeURIComponent(cursor)}` : '';
+    const list = await apiClient.get<any[]>(`/sales?limit=${pageSize + 1}${cursorParam}`);
+    const mapped = (list || []).map(mapSale);
+    const hasMore = mapped.length > pageSize;
+    const sales = hasMore ? mapped.slice(0, pageSize) : mapped;
+    const nextCursor = hasMore && sales.length > 0 ? sales[sales.length - 1].id : null;
+
     return {
       sales,
-      cursor: hasMore ? pageDocuments[pageDocuments.length - 1] : null,
+      cursor: nextCursor,
       hasMore,
     };
   } catch {
@@ -312,16 +318,9 @@ export async function getSalesSince(since: Date): Promise<Sale[]> {
   }
 
   try {
-    const salesQuery = query(
-      collection(db, 'sales'),
-      where('date', '>=', Timestamp.fromDate(since)),
-      orderBy('date', 'desc'),
-    );
-    const snapshot = await getDocs(salesQuery);
-    return snapshot.docs.map((document) => ({
-      id: document.id,
-      ...(document.data() as Omit<Sale, 'id'>),
-    }));
+    const list = await apiClient.get<any[]>(`/sales?since=${encodeURIComponent(since.toISOString())}`);
+    const sales = (list || []).map(mapSale);
+    return sortSalesDesc(sales);
   } catch {
     console.error('Error getting sales since date from Firebase');
     throw new Error('Error al cargar ventas');
@@ -344,12 +343,8 @@ export async function getSalesTotals(): Promise<SalesTotals> {
   }
 
   try {
-    const aggregate = await getAggregateFromServer(collection(db, 'sales'), {
-      count: count(),
-      totalCents: sum('total'),
-    });
-    const data = aggregate.data();
-    return { count: Number(data.count) || 0, totalCents: Number(data.totalCents) || 0 };
+    const data = await apiClient.get<SalesTotals>('/sales?totals=true');
+    return { count: Number(data?.count) || 0, totalCents: Number(data?.totalCents) || 0 };
   } catch {
     console.error('Error getting sales totals from Firebase');
     throw new Error('Error al cargar ventas');

@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { apiClient, ApiError } from '../services/apiClient';
 
 const authMock = vi.hoisted(() => {
   const firebaseUser = {
@@ -6,23 +7,15 @@ const authMock = vi.hoisted(() => {
     email: 'admin@example.com',
     displayName: 'Administrador',
     getIdTokenResult: vi.fn(),
-    getIdToken: vi.fn(),
+    getIdToken: vi.fn(async () => 'token'),
   };
 
   return {
     firebaseUser,
-    firebaseAuth: { currentUser: firebaseUser },
+    firebaseAuth: { currentUser: firebaseUser as any },
     authStateListener: null as ((user: typeof firebaseUser | null) => void) | null,
-    userDocumentListener: null as ((snapshot: any) => void) | null,
-    userDocumentErrorListener: null as ((error: unknown) => void) | null,
-    userSnapshot: null as any,
-    onSnapshot: vi.fn(),
     signInWithEmailAndPassword: vi.fn(),
     signOut: vi.fn(),
-    unsubscribeUserDocument: vi.fn(),
-    getDoc: vi.fn(),
-    doc: vi.fn(),
-    updateDoc: vi.fn(),
   };
 });
 
@@ -34,27 +27,13 @@ vi.mock('firebase/auth', () => ({
   getAuth: vi.fn(() => authMock.firebaseAuth),
   onIdTokenChanged: vi.fn((_auth, listener) => {
     authMock.authStateListener = listener;
-    listener(authMock.firebaseUser);
+    listener(authMock.firebaseAuth.currentUser);
     return vi.fn();
   }),
   createUserWithEmailAndPassword: vi.fn(),
   signInWithEmailAndPassword: authMock.signInWithEmailAndPassword,
   signOut: authMock.signOut,
   updateProfile: vi.fn(),
-}));
-
-vi.mock('firebase/firestore', () => ({
-  collection: vi.fn(),
-  getDoc: authMock.getDoc,
-  setDoc: vi.fn(),
-  addDoc: vi.fn(),
-  updateDoc: authMock.updateDoc,
-  onSnapshot: authMock.onSnapshot,
-  deleteDoc: vi.fn(),
-  doc: authMock.doc,
-  query: vi.fn(),
-  where: vi.fn(),
-  serverTimestamp: vi.fn(() => new Date()),
 }));
 
 import { deleteUser, hasRole, isAdmin, loginUser, logoutUser, subscribeToAuthState } from '../services/authService';
@@ -70,26 +49,8 @@ describe('configured auth subscription', () => {
     vi.stubEnv('VITE_FIREBASE_APP_ID', 'app-id');
     authMock.authStateListener = null;
     authMock.firebaseAuth.currentUser = authMock.firebaseUser;
-    authMock.userDocumentListener = null;
-    authMock.userDocumentErrorListener = null;
-    authMock.userSnapshot = {
-      exists: () => true,
-      data: () => ({ email: 'admin@example.com', displayName: 'Administrador', role: 'cashier', active: true }),
-    };
     authMock.signInWithEmailAndPassword.mockReset();
     authMock.signOut.mockReset();
-    authMock.unsubscribeUserDocument.mockReset();
-    authMock.onSnapshot.mockReset().mockImplementation((_ref: unknown, listener: (snapshot: any) => void, errorListener: (error: unknown) => void) => {
-      authMock.userDocumentListener = listener;
-      authMock.userDocumentErrorListener = errorListener;
-      listener(authMock.userSnapshot);
-      return authMock.unsubscribeUserDocument;
-    });
-    authMock.getDoc.mockReset();
-    authMock.doc.mockReset().mockReturnValue({ path: 'users/admin-1' });
-    authMock.updateDoc.mockReset();
-    authMock.firebaseUser.getIdTokenResult.mockReset();
-    authMock.firebaseUser.getIdTokenResult.mockResolvedValue({ claims: { admin: true } });
     authMock.firebaseUser.getIdToken.mockReset();
     authMock.firebaseUser.getIdToken.mockResolvedValue('token');
   });
@@ -97,9 +58,13 @@ describe('configured auth subscription', () => {
   afterEach(() => {
     vi.unstubAllEnvs();
     vi.unstubAllGlobals();
+    vi.restoreAllMocks();
   });
 
-  it('emits the authenticated user role from the current Firestore user document', async () => {
+  it('emits the authenticated user role from the current user document', async () => {
+    vi.spyOn(apiClient, 'get').mockResolvedValue({
+      user: { id: 'admin-1', email: 'admin@example.com', displayName: 'Administrador', role: 'cashier', active: true },
+    });
     const listener = vi.fn();
 
     subscribeToAuthState(listener);
@@ -113,26 +78,20 @@ describe('configured auth subscription', () => {
   });
 
   it('ignores a stale user document resolution after logout', async () => {
-    authMock.onSnapshot.mockImplementationOnce((_ref: unknown, listener: (snapshot: any) => void) => {
-      authMock.userDocumentListener = listener;
-      return authMock.unsubscribeUserDocument;
+    vi.spyOn(apiClient, 'get').mockResolvedValue({
+      user: { id: 'admin-1', email: 'admin@example.com', displayName: 'Administrador', role: 'cashier', active: true },
     });
     const listener = vi.fn();
 
     subscribeToAuthState(listener);
     authMock.authStateListener?.(null);
-    authMock.userDocumentListener?.({
-      exists: () => true,
-      data: () => ({ email: 'admin@example.com', displayName: 'Administrador', role: 'admin', active: true }),
-    });
 
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(listener).toHaveBeenCalledTimes(1);
+    await new Promise((resolve) => setTimeout(resolve, 10));
     expect(listener).toHaveBeenLastCalledWith(null);
   });
 
   it('emits a null session when the authenticated UID has no user document', async () => {
-    authMock.userSnapshot = { exists: () => false };
+    vi.spyOn(apiClient, 'get').mockResolvedValue({ user: null });
     const listener = vi.fn();
 
     subscribeToAuthState(listener);
@@ -142,10 +101,9 @@ describe('configured auth subscription', () => {
   });
 
   it('emits a null session when the authenticated UID document is inactive', async () => {
-    authMock.userSnapshot = {
-      exists: () => true,
-      data: () => ({ email: 'admin@example.com', displayName: 'Administrador', role: 'cashier', active: false }),
-    };
+    vi.spyOn(apiClient, 'get').mockResolvedValue({
+      user: { id: 'admin-1', email: 'admin@example.com', displayName: 'Administrador', role: 'cashier', active: false },
+    });
     const listener = vi.fn();
 
     subscribeToAuthState(listener);
@@ -158,14 +116,10 @@ describe('configured auth subscription', () => {
     authMock.signOut.mockImplementation(async () => {
       authMock.firebaseAuth.currentUser = null as any;
     });
+    vi.spyOn(apiClient, 'get').mockRejectedValue(new Error('Network error provider=secret'));
     const listener = vi.fn();
-    authMock.onSnapshot.mockImplementationOnce((_ref: unknown, _listener: (snapshot: any) => void, errorListener: (error: unknown) => void) => {
-      authMock.userDocumentErrorListener = errorListener;
-      return authMock.unsubscribeUserDocument;
-    });
 
     subscribeToAuthState(listener);
-    authMock.userDocumentErrorListener?.(new Error('permission-denied provider=secret'));
 
     await vi.waitFor(() => expect(listener).toHaveBeenLastCalledWith(
       null,
@@ -174,18 +128,14 @@ describe('configured auth subscription', () => {
   });
 
   it('preserves the infrastructure error when a null auth event follows the snapshot error', async () => {
-    const listener = vi.fn();
-    authMock.onSnapshot.mockImplementationOnce((_ref: unknown, _listener: (snapshot: any) => void, errorListener: (error: unknown) => void) => {
-      authMock.userDocumentErrorListener = errorListener;
-      return authMock.unsubscribeUserDocument;
-    });
+    vi.spyOn(apiClient, 'get').mockRejectedValue(new Error('D1 unavailable provider=secret'));
     authMock.signOut.mockImplementation(async () => {
       authMock.firebaseAuth.currentUser = null as any;
       setTimeout(() => authMock.authStateListener?.(null), 0);
     });
+    const listener = vi.fn();
 
     subscribeToAuthState(listener);
-    authMock.userDocumentErrorListener?.(new Error('Firestore unavailable provider=secret'));
 
     await vi.waitFor(() => expect(listener).toHaveBeenLastCalledWith(
       null,
@@ -198,60 +148,9 @@ describe('configured auth subscription', () => {
     );
   });
 
-  it('refreshes the ID token before resolving claims after sync', async () => {
+  it('returns an explicit infrastructure auth error when D1 cannot be read', async () => {
     authMock.signInWithEmailAndPassword.mockResolvedValue({ user: authMock.firebaseUser });
-    authMock.getDoc.mockResolvedValue({
-      exists: () => true,
-      data: () => ({ email: 'admin@example.com', displayName: 'Administrador', role: 'cashier', active: true }),
-    });
-    authMock.updateDoc.mockResolvedValue(undefined);
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true }));
-
-    const user = await loginUser('admin@example.com', 'password');
-
-    expect(authMock.firebaseUser.getIdToken).toHaveBeenCalledWith(true);
-    expect(user.role).toBe('cashier');
-  });
-
-    it('completes login on a non-OK claims sync without exposing response details', async () => {
-    authMock.signInWithEmailAndPassword.mockResolvedValue({ user: authMock.firebaseUser });
-    authMock.getDoc.mockResolvedValue({
-      exists: () => true,
-      data: () => ({ email: 'admin@example.com', displayName: 'Administrador', role: 'cashier', active: true }),
-    });
-    authMock.updateDoc.mockResolvedValue(undefined);
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 500 }));
-    const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
-
-    // ADR-0001: los claims son cache derivada; el documento activo sigue siendo la autoridad.
-    await expect(loginUser('admin@example.com', 'password')).resolves.toMatchObject({ role: 'cashier', active: true });
-
-    expect(warning).toHaveBeenCalledWith('No se pudieron sincronizar custom claims.');
-    expect(warning.mock.calls.flat().join(' ')).not.toContain('500');
-    expect(authMock.firebaseUser.getIdToken).not.toHaveBeenCalledWith(true);
-    expect(authMock.signOut).not.toHaveBeenCalled();
-    });
-
-  it('completes login when claims sync is unavailable and keeps the session', async () => {
-    authMock.signInWithEmailAndPassword.mockResolvedValue({ user: authMock.firebaseUser });
-    authMock.getDoc.mockResolvedValue({
-      exists: () => true,
-      data: () => ({ email: 'admin@example.com', displayName: 'Administrador', role: 'cashier', active: true }),
-    });
-    authMock.updateDoc.mockResolvedValue(undefined);
-    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('network token=secret')));
-    const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
-
-    await expect(loginUser('admin@example.com', 'password')).resolves.toMatchObject({ role: 'cashier', active: true });
-
-    expect(warning).toHaveBeenCalledWith('No se pudieron sincronizar custom claims.');
-    expect(warning.mock.calls.flat().join(' ')).not.toContain('secret');
-    expect(authMock.signOut).not.toHaveBeenCalled();
-  });
-
-  it('returns an explicit infrastructure auth error when Firestore cannot be read', async () => {
-    authMock.signInWithEmailAndPassword.mockResolvedValue({ user: authMock.firebaseUser });
-    authMock.getDoc.mockRejectedValue(new Error('permission-denied provider=secret'));
+    vi.spyOn(apiClient, 'get').mockRejectedValue(new Error('permission-denied provider=secret'));
 
     await expect(loginUser('admin@example.com', 'password')).rejects.toMatchObject({
       code: 'infrastructure',
@@ -261,7 +160,7 @@ describe('configured auth subscription', () => {
 
   it('marks missing or inactive user documents as unauthenticated', async () => {
     authMock.signInWithEmailAndPassword.mockResolvedValue({ user: authMock.firebaseUser });
-    authMock.getDoc.mockResolvedValue({ exists: () => false });
+    vi.spyOn(apiClient, 'get').mockRejectedValue(new ApiError('No registrado', 404));
 
     await expect(loginUser('admin@example.com', 'password')).rejects.toMatchObject({
       code: 'unauthenticated',
@@ -278,18 +177,11 @@ describe('configured auth subscription', () => {
   });
 
   it('deactivates a user through the authenticated backend instead of deleting Firestore directly', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
-    vi.stubGlobal('fetch', fetchMock);
+    const deleteSpy = vi.spyOn(apiClient, 'delete').mockResolvedValue(undefined as any);
 
     await deleteUser('target-user');
 
-    expect(fetchMock).toHaveBeenCalledWith(
-      expect.stringContaining('/api/auth/users/target-user'),
-      expect.objectContaining({
-        method: 'DELETE',
-        headers: { Authorization: 'Bearer token' },
-      }),
-    );
+    expect(deleteSpy).toHaveBeenCalledWith('/users/target-user');
   });
 
   it('does not sign out a newer Firebase session when an older login flow fails', async () => {
@@ -297,36 +189,31 @@ describe('configured auth subscription', () => {
       uid: 'older-user',
       email: 'older@example.com',
       displayName: 'Older',
-      getIdTokenResult: vi.fn().mockResolvedValue({ claims: {} }),
       getIdToken: vi.fn().mockResolvedValue('older-token'),
     };
     const newerUser = {
       uid: 'newer-user',
       email: 'newer@example.com',
       displayName: 'Newer',
-      getIdTokenResult: vi.fn().mockResolvedValue({ claims: {} }),
       getIdToken: vi.fn().mockResolvedValue('newer-token'),
     };
     authMock.signInWithEmailAndPassword.mockImplementationOnce(async () => {
       authMock.firebaseAuth.currentUser = olderUser;
       return { user: olderUser };
     });
-    authMock.getDoc.mockResolvedValue({
-      exists: () => true,
-      data: () => ({ email: 'older@example.com', displayName: 'Older', role: 'cashier', active: true }),
-    });
-    let rejectUpdate: ((error: Error) => void) | undefined;
-    authMock.updateDoc.mockImplementationOnce(
-      () => new Promise((_resolve, reject) => { rejectUpdate = reject; }),
+
+    let rejectGet: ((error: Error) => void) | undefined;
+    vi.spyOn(apiClient, 'get').mockImplementationOnce(
+      () => new Promise((_resolve, reject) => { rejectGet = reject; }),
     );
 
     const loginPromise = loginUser('older@example.com', 'password');
     const loginRejection = expect(loginPromise).rejects.toThrow(
       'No se pudo verificar la sesión. Inténtalo de nuevo.',
     );
-    await vi.waitFor(() => expect(authMock.updateDoc).toHaveBeenCalled());
+    await vi.waitFor(() => expect(apiClient.get).toHaveBeenCalled());
     authMock.firebaseAuth.currentUser = newerUser;
-    rejectUpdate?.(new Error('permission-denied token=secret'));
+    rejectGet?.(new Error('permission-denied token=secret'));
 
     await loginRejection;
     expect(authMock.signOut).not.toHaveBeenCalled();
@@ -337,17 +224,15 @@ describe('configured auth subscription', () => {
       uid: 'older-success-user',
       email: 'older-success@example.com',
       displayName: 'Older Success',
-      getIdTokenResult: vi.fn(),
       getIdToken: vi.fn().mockResolvedValue('older-success-token'),
     };
     const newerUser = {
       uid: 'newer-success-user',
       email: 'newer-success@example.com',
       displayName: 'Newer Success',
-      getIdTokenResult: vi.fn(),
       getIdToken: vi.fn().mockResolvedValue('newer-success-token'),
     };
-    let resolveOlderDoc: ((snapshot: any) => void) | undefined;
+    let resolveOlderDoc: ((res: any) => void) | undefined;
     authMock.signInWithEmailAndPassword
       .mockImplementationOnce(async () => {
         authMock.firebaseAuth.currentUser = olderUser;
@@ -357,18 +242,12 @@ describe('configured auth subscription', () => {
         authMock.firebaseAuth.currentUser = newerUser;
         return { user: newerUser };
       });
-    authMock.doc.mockImplementation((_db: unknown, _collection: string, uid: string) => ({ path: `users/${uid}` }));
-    authMock.getDoc.mockImplementation((ref: { path: string }) => {
-      if (ref.path.endsWith('older-success-user')) {
-        return new Promise((resolve) => { resolveOlderDoc = resolve; });
-      }
-      return Promise.resolve({
-        exists: () => true,
-        data: () => ({ email: 'newer-success@example.com', displayName: 'Newer Success', role: 'manager', active: true }),
+
+    vi.spyOn(apiClient, 'get')
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveOlderDoc = resolve; }))
+      .mockResolvedValueOnce({
+        user: { id: 'newer-success-user', email: 'newer-success@example.com', displayName: 'Newer Success', role: 'manager', active: true },
       });
-    });
-    authMock.updateDoc.mockResolvedValue(undefined);
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true }));
 
     const olderLogin = loginUser('older-success@example.com', 'password');
     await vi.waitFor(() => expect(authMock.signInWithEmailAndPassword).toHaveBeenCalledTimes(1));
@@ -376,8 +255,7 @@ describe('configured auth subscription', () => {
     await expect(newerLogin).resolves.toMatchObject({ id: 'newer-success-user', role: 'manager' });
 
     resolveOlderDoc?.({
-      exists: () => true,
-      data: () => ({ email: 'older-success@example.com', displayName: 'Older Success', role: 'cashier', active: true }),
+      user: { id: 'older-success-user', email: 'older-success@example.com', displayName: 'Older Success', role: 'cashier', active: true },
     });
 
     await expect(olderLogin).rejects.toThrow('No se pudo completar el inicio de sesión.');
@@ -385,6 +263,9 @@ describe('configured auth subscription', () => {
   });
 
   it('does not grant configured-mode access from the synchronous cache', async () => {
+    vi.spyOn(apiClient, 'get').mockResolvedValue({
+      user: { id: 'admin-1', email: 'admin@example.com', displayName: 'Administrador', role: 'cashier', active: true },
+    });
     const listener = vi.fn();
 
     subscribeToAuthState(listener);
@@ -392,59 +273,5 @@ describe('configured auth subscription', () => {
     await vi.waitFor(() => expect(listener).toHaveBeenLastCalledWith(expect.objectContaining({ role: 'cashier' })));
     expect(hasRole('admin')).toBe(false);
     expect(isAdmin()).toBe(false);
-  });
-
-  it('updates the authenticated role when the user document changes', async () => {
-    const listener = vi.fn();
-
-    subscribeToAuthState(listener);
-    await vi.waitFor(() => expect(listener).toHaveBeenLastCalledWith(expect.objectContaining({ role: 'cashier' })));
-
-    await authMock.userDocumentListener?.({
-      exists: () => true,
-      data: () => ({ email: 'admin@example.com', displayName: 'Administrador', role: 'manager', active: true }),
-    });
-
-    await vi.waitFor(() => expect(listener).toHaveBeenLastCalledWith(expect.objectContaining({ role: 'manager' })));
-  });
-
-  it('clears the session when the live user document becomes inactive', async () => {
-    const listener = vi.fn();
-
-    subscribeToAuthState(listener);
-    await vi.waitFor(() => expect(listener).toHaveBeenLastCalledWith(expect.objectContaining({ active: true })));
-    await authMock.userDocumentListener?.({
-      exists: () => true,
-      data: () => ({ email: 'admin@example.com', displayName: 'Administrador', role: 'admin', active: false }),
-    });
-
-    await vi.waitFor(() => expect(listener).toHaveBeenLastCalledWith(null));
-    expect(authMock.signOut).toHaveBeenCalled();
-  });
-
-  it('clears the session when the live user document disappears', async () => {
-    const listener = vi.fn();
-
-    subscribeToAuthState(listener);
-    await vi.waitFor(() => expect(listener).toHaveBeenLastCalledWith(expect.objectContaining({ active: true })));
-    await authMock.userDocumentListener?.({ exists: () => false });
-
-    await vi.waitFor(() => expect(listener).toHaveBeenLastCalledWith(null));
-    expect(authMock.signOut).toHaveBeenCalled();
-  });
-
-  it('does not emit live user changes after unsubscribe', async () => {
-    const listener = vi.fn();
-
-    const unsubscribe = subscribeToAuthState(listener);
-    await vi.waitFor(() => expect(listener).toHaveBeenLastCalledWith(expect.objectContaining({ role: 'cashier' })));
-    unsubscribe();
-    await authMock.userDocumentListener?.({
-      exists: () => true,
-      data: () => ({ email: 'admin@example.com', displayName: 'Administrador', role: 'manager', active: true }),
-    });
-
-    expect(authMock.unsubscribeUserDocument).toHaveBeenCalled();
-    expect(listener).not.toHaveBeenLastCalledWith(expect.objectContaining({ role: 'manager' }));
   });
 });

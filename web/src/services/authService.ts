@@ -6,19 +6,10 @@ import {
   signInWithRedirect,
   signOut,
   onIdTokenChanged,
-  User as FirebaseUser
+  User as FirebaseUser,
 } from 'firebase/auth';
-import {
-  collection,
-  getDocs,
-  getDoc,
-  onSnapshot,
-  updateDoc,
-  doc,
-  serverTimestamp
-} from 'firebase/firestore';
-import { db } from '../firebase/config';
 import { User, UserRole } from '../firebase/db';
+import { apiClient, emitDataChange } from './apiClient';
 
 const auth = getAuth();
 const CLAIMS_SYNC_ERROR = 'No se pudieron sincronizar custom claims.';
@@ -73,38 +64,6 @@ export function getSafeAuthErrorMessage(
   return safeFallback;
 }
 
-/**
- * Sincroniza claims derivados para backend optimizado. El documento activo
- * del usuario sigue siendo la fuente de verdad para reglas y UI.
- */
-async function syncCustomClaims(uid: string, expectedUser: FirebaseUser): Promise<void> {
-  const backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3000';
-  try {
-    if (auth.currentUser !== expectedUser) throw new Error(CLAIMS_SYNC_ERROR);
-    const idToken = await expectedUser.getIdToken();
-    if (!idToken) throw new Error(CLAIMS_SYNC_ERROR);
-
-    const response = await fetch(`${backendUrl}/api/auth/sync-claims`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${idToken}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ uid }),
-    });
-
-    if (!response.ok) throw new Error(CLAIMS_SYNC_ERROR);
-    if (auth.currentUser !== expectedUser) throw new Error(CLAIMS_SYNC_ERROR);
-
-    await expectedUser.getIdToken(true);
-  } catch {
-    if (auth.currentUser !== expectedUser) throw new Error(AUTH_LOGIN_STALE_ERROR);
-    // Los claims son cache derivada (ADR-0001): reglas y backend leen /users/{uid}.
-    // Sin backend disponible el login sigue siendo valido; solo se pierde la optimizacion.
-    console.warn(CLAIMS_SYNC_ERROR);
-  }
-}
-
 // Mock data for development without Firebase
 let mockUsers: User[] = [
   {
@@ -130,10 +89,10 @@ let mockAuthListeners: Array<(user: User | null) => void> = [];
 let authTransitionSequence = 0;
 
 /**
- * Verifica si Firebase está configurado
+ * Verifica si Firebase está configurado (variables requeridas presentes)
  */
 function isFirebaseConfigured(): boolean {
-  return !!(db && typeof db === 'object' && REQUIRED_FIREBASE_ENV.every((key) => Boolean(import.meta.env[key])));
+  return REQUIRED_FIREBASE_ENV.every((key) => Boolean(import.meta.env[key]));
 }
 
 function isMockMode(): boolean {
@@ -166,46 +125,18 @@ function notifyMockAuthState(): void {
   mockAuthListeners.forEach((listener) => listener(currentUser));
 }
 
-async function getFirebaseUserData(uid: string): Promise<Omit<User, 'id'> | null> {
-  try {
-    const snapshot = await getDoc(doc(db, 'users', uid));
-    if (!snapshot.exists()) return null;
-
-    const userData = snapshot.data() as Omit<User, 'id'>;
-    return userData.active === true && isValidUserRole(userData.role) ? userData : null;
-  } catch {
-    throw createAuthStateError('infrastructure');
-  }
-}
-
-async function mapFirebaseUser(
-  firebaseUser: FirebaseUser,
-  userData?: Omit<User, 'id'> | null,
-): Promise<User | null> {
-  const firestoreUser = userData === undefined
-    ? await getFirebaseUserData(firebaseUser.uid)
-    : userData;
-  if (!firestoreUser || firestoreUser.active !== true || !isValidUserRole(firestoreUser.role)) return null;
-
-  return {
-    id: firebaseUser.uid,
-    ...firestoreUser,
-    role: firestoreUser.role,
-  };
-}
-
 async function clearFirebaseSession(expectedUser: FirebaseUser): Promise<void> {
   if (auth.currentUser !== expectedUser) return;
   currentUser = null;
   try {
     await signOut(auth);
   } catch {
-    // Keep the local session cleared if Firebase sign-out fails.
+    // Mantener la sesión local limpia si falla Firebase sign-out
   }
 }
 
 /**
- * Suscribe la aplicación al estado de sesión de Firebase o del modo mock explícito.
+ * Suscribe la aplicación al estado de sesión de Firebase Auth y D1 o del modo mock.
  */
 export function subscribeToAuthState(
   listener: (user: User | null, error?: AuthStateError) => void,
@@ -227,37 +158,9 @@ export function subscribeToAuthState(
   let authStateSequence = 0;
   let disposed = false;
   let pendingInfrastructureError: AuthStateError | null = null;
-  let unsubscribeUserDocument: (() => void) | null = null;
-
-  const stopUserDocumentSubscription = () => {
-    unsubscribeUserDocument?.();
-    unsubscribeUserDocument = null;
-  };
-
-  const emitUserDocumentState = async (
-    firebaseUser: FirebaseUser,
-    userData: Omit<User, 'id'> | null,
-    sequence: number,
-  ) => {
-    if (disposed || sequence !== authStateSequence || auth.currentUser !== firebaseUser) return;
-
-    const mappedUser = await mapFirebaseUser(firebaseUser, userData);
-    if (disposed || sequence !== authStateSequence || auth.currentUser !== firebaseUser) return;
-
-    if (!mappedUser) {
-      pendingInfrastructureError = null;
-      await clearFirebaseSession(firebaseUser);
-      if (disposed || sequence !== authStateSequence) return;
-    }
-
-    pendingInfrastructureError = null;
-    currentUser = mappedUser;
-    listener(mappedUser);
-  };
 
   const unsubscribeAuth = onIdTokenChanged(auth, async (firebaseUser) => {
     const sequence = ++authStateSequence;
-    stopUserDocumentSubscription();
 
     if (!firebaseUser) {
       currentUser = null;
@@ -266,37 +169,62 @@ export function subscribeToAuthState(
       return;
     }
 
-    unsubscribeUserDocument = onSnapshot(
-      doc(db, 'users', firebaseUser.uid),
-      (snapshot) => {
-        const userData = snapshot.exists()
-          ? snapshot.data() as Omit<User, 'id'>
-          : null;
-        void emitUserDocumentState(firebaseUser, userData, sequence);
-      },
-      () => {
-        if (disposed || sequence !== authStateSequence || auth.currentUser !== firebaseUser) return;
-        console.error('Error observing user session.');
-        pendingInfrastructureError = createAuthStateError('infrastructure');
-        void clearFirebaseSession(firebaseUser).then(() => {
-          if (disposed || sequence !== authStateSequence) return;
-          currentUser = null;
-          listener(null, pendingInfrastructureError ?? undefined);
-        });
-      },
-    );
+    try {
+      const res = await apiClient.get<{ user: any; negocio?: any }>('/auth/me');
+      if (disposed || sequence !== authStateSequence || auth.currentUser !== firebaseUser) return;
+
+      if (!res || !res.user) {
+        pendingInfrastructureError = null;
+        await clearFirebaseSession(firebaseUser);
+        if (disposed || sequence !== authStateSequence) return;
+        currentUser = null;
+        listener(null);
+        return;
+      }
+
+      const u = res.user;
+      if ((u.active !== true && u.active !== 1) || !isValidUserRole(u.role)) {
+        pendingInfrastructureError = null;
+        await clearFirebaseSession(firebaseUser);
+        if (disposed || sequence !== authStateSequence) return;
+        currentUser = null;
+        listener(null);
+        return;
+      }
+
+      const mappedUser: User = {
+        id: u.id || firebaseUser.uid,
+        email: u.email || firebaseUser.email || '',
+        displayName: u.displayName || u.display_name || firebaseUser.displayName || 'Usuario',
+        role: u.role,
+        active: true,
+        createdAt: u.created_at || new Date(),
+      };
+
+      pendingInfrastructureError = null;
+      currentUser = mappedUser;
+      listener(mappedUser);
+    } catch {
+      if (disposed || sequence !== authStateSequence || auth.currentUser !== firebaseUser) return;
+      console.error('Error observing user session.');
+      pendingInfrastructureError = createAuthStateError('infrastructure');
+      void clearFirebaseSession(firebaseUser).then(() => {
+        if (disposed || sequence !== authStateSequence) return;
+        currentUser = null;
+        listener(null, pendingInfrastructureError ?? undefined);
+      });
+    }
   });
 
   return () => {
     disposed = true;
     authStateSequence += 1;
-    stopUserDocumentSubscription();
     unsubscribeAuth();
   };
 }
 
 /**
- * Registra un nuevo usuario en Firebase Auth y Firestore
+ * Registra un nuevo usuario mediante /api/auth/provision-user
  */
 export async function registerUser(
   email: string,
@@ -305,7 +233,6 @@ export async function registerUser(
   role: UserRole
 ): Promise<User> {
   if (isMockMode()) {
-    // Modo mock
     const newUser: User = {
       id: `user-${Date.now()}`,
       email,
@@ -323,26 +250,21 @@ export async function registerUser(
   try {
     const firebaseUser = auth.currentUser;
     if (!firebaseUser) throw new Error('No hay una sesion administrativa activa.');
-    const idToken = await firebaseUser.getIdToken();
-    const backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3000';
-    const response = await fetch(`${backendUrl}/api/auth/provision-user`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${idToken}`,
-      },
-      body: JSON.stringify({ email, password, displayName, role }),
+
+    const userData = await apiClient.post<any>('/auth/provision-user', {
+      email,
+      password,
+      displayName,
+      role,
     });
 
-    if (!response.ok) throw new Error('No se pudo crear el usuario');
-    const userData = await response.json() as User;
     return {
       id: userData.id,
       email: userData.email,
-      displayName: userData.displayName,
+      displayName: userData.displayName || userData.display_name || displayName,
       role: userData.role,
-      active: userData.active,
-      createdAt: userData.createdAt,
+      active: userData.active === 1 || userData.active === true,
+      createdAt: userData.createdAt || userData.created_at,
     };
   } catch (error: any) {
     console.error('Error registering user.');
@@ -355,7 +277,6 @@ export async function registerUser(
  */
 export async function loginUser(email: string, password: string): Promise<User> {
   if (isMockMode()) {
-    // Modo mock
     const user = mockUsers.find(u => u.email === email);
     if (!user) {
       throw new Error('Usuario no encontrado');
@@ -397,10 +318,7 @@ function getFirebaseErrorCode(error: unknown): string {
 }
 
 /**
- * Inicia sesión con Google. Devuelve `null` si la persona cerró la ventana sin
- * completar el flujo. Cuando el navegador bloquea ventanas emergentes (PWA
- * instalada, WebViews) cae al flujo de redirección y la sesión se resuelve al
- * volver mediante `subscribeToAuthState`.
+ * Inicia sesión con Google
  */
 export async function loginWithGoogle(): Promise<User | null> {
   if (isMockMode()) {
@@ -440,29 +358,31 @@ export async function loginWithGoogle(): Promise<User | null> {
 }
 
 /**
- * Valida el documento autoritativo del usuario recién autenticado, registra el
- * último acceso y sincroniza los claims derivados. Común a todos los proveedores.
+ * Valida el usuario recién autenticado contra Cloudflare D1 (/api/auth/me)
  */
 async function completeFirebaseLogin(firebaseUser: FirebaseUser, sequence: number): Promise<User> {
   if (auth.currentUser !== firebaseUser || sequence !== authTransitionSequence) {
     throw new Error(AUTH_LOGIN_STALE_ERROR);
   }
 
-  const userRef = doc(db, 'users', firebaseUser.uid);
-  let snapshot;
+  let res: any;
   try {
-    snapshot = await getDoc(userRef);
-  } catch {
+    res = await apiClient.get<{ user: any }>('/auth/me');
+  } catch (err: any) {
+    const status = err?.status;
+    if (status === 401 || status === 403 || status === 404) {
+      throw createAuthStateError('unauthenticated');
+    }
     throw createAuthStateError('infrastructure');
   }
 
-  if (!snapshot.exists()) {
+  if (!res || !res.user) {
     throw createAuthStateError('unauthenticated');
   }
 
-  const userData = snapshot.data() as Omit<User, 'id'>;
+  const userData = res.user;
 
-  if (userData.active !== true) {
+  if (userData.active !== true && userData.active !== 1) {
     throw createAuthStateError('unauthenticated');
   }
 
@@ -474,31 +394,16 @@ async function completeFirebaseLogin(firebaseUser: FirebaseUser, sequence: numbe
     throw new Error(AUTH_LOGIN_STALE_ERROR);
   }
 
-  try {
-    await updateDoc(userRef, {
-      lastLogin: serverTimestamp(),
-    });
-  } catch {
-    throw createAuthStateError('infrastructure');
-  }
+  const claimUser: User = {
+    id: userData.id || firebaseUser.uid,
+    email: userData.email || firebaseUser.email || '',
+    displayName: userData.displayName || userData.display_name || firebaseUser.displayName || 'Usuario',
+    role: userData.role,
+    active: true,
+    createdAt: userData.created_at || new Date(),
+  };
 
-  if (auth.currentUser !== firebaseUser || sequence !== authTransitionSequence) {
-    throw new Error(AUTH_LOGIN_STALE_ERROR);
-  }
-
-  // Claims are derived for backend optimization; Firestore rules use the user document role.
-  await syncCustomClaims(firebaseUser.uid, firebaseUser);
-
-  if (auth.currentUser !== firebaseUser || sequence !== authTransitionSequence) {
-    throw new Error(AUTH_LOGIN_STALE_ERROR);
-  }
-
-  const claimUser = await mapFirebaseUser(firebaseUser, userData);
-  if (!claimUser) {
-    throw createAuthStateError('unauthenticated');
-  }
   currentUser = claimUser;
-
   return currentUser;
 }
 
@@ -534,13 +439,33 @@ export async function getCurrentUser(): Promise<User | null> {
   const firebaseUser = auth.currentUser;
   if (!firebaseUser) return null;
 
-  const mappedUser = await mapFirebaseUser(firebaseUser);
-  if (!mappedUser) await clearFirebaseSession(firebaseUser);
-  return mappedUser;
+  if (currentUser && currentUser.id === firebaseUser.uid) {
+    return currentUser;
+  }
+
+  try {
+    const res = await apiClient.get<{ user: any }>('/auth/me');
+    if (res && res.user && res.user.active !== false && res.user.active !== 0 && isValidUserRole(res.user.role)) {
+      currentUser = {
+        id: res.user.id || firebaseUser.uid,
+        email: res.user.email || firebaseUser.email || '',
+        displayName: res.user.displayName || res.user.display_name || firebaseUser.displayName || '',
+        role: res.user.role,
+        active: true,
+        createdAt: res.user.created_at || new Date(),
+      };
+      return currentUser;
+    }
+    await clearFirebaseSession(firebaseUser);
+    return null;
+  } catch {
+    await clearFirebaseSession(firebaseUser);
+    return null;
+  }
 }
 
 /**
- * Obtiene todos los usuarios (solo admin)
+ * Obtiene todos los usuarios (solo admin) desde /api/users
  */
 export async function getUsers(): Promise<User[]> {
   if (isMockMode()) {
@@ -550,19 +475,18 @@ export async function getUsers(): Promise<User[]> {
   requireFirebaseConfiguration();
 
   try {
-    const usersRef = collection(db, 'users');
-    const snapshot = await getDocs(usersRef);
-    const users: User[] = [];
-
-    snapshot.forEach((doc) => {
-      const user = {
-        id: doc.id,
-        ...(doc.data() as Omit<User, 'id'>),
-      };
-      if (!user.deletedAt) users.push(user);
-    });
-
-    return users;
+    const list = await apiClient.get<any[]>('/users');
+    return (list || []).map((u: any) => ({
+      id: u.id,
+      email: u.email,
+      displayName: u.display_name || u.displayName || '',
+      role: u.role as UserRole,
+      active: u.active === 1 || u.active === true,
+      createdAt: u.created_at || u.createdAt,
+      lastLogin: u.last_login || u.lastLogin,
+      deletedAt: u.deleted_at || u.deletedAt,
+      deletedByUid: u.deleted_by_uid || u.deletedByUid,
+    }));
   } catch {
     console.error('Error getting users.');
     throw new Error('Error al cargar usuarios');
@@ -584,8 +508,8 @@ export async function updateUserRole(userId: string, role: UserRole): Promise<vo
   requireFirebaseConfiguration();
 
   try {
-    const userRef = doc(db, 'users', userId);
-    await updateDoc(userRef, { role });
+    await apiClient.put(`/users/${encodeURIComponent(userId)}`, { role });
+    emitDataChange('users');
   } catch {
     console.error('Error updating user role.');
     throw new Error('Error al actualizar rol');
@@ -607,8 +531,8 @@ export async function toggleUserActive(userId: string, active: boolean): Promise
   requireFirebaseConfiguration();
 
   try {
-    const userRef = doc(db, 'users', userId);
-    await updateDoc(userRef, { active });
+    await apiClient.put(`/users/${encodeURIComponent(userId)}`, { active });
+    emitDataChange('users');
   } catch {
     console.error('Error toggling user status.');
     throw new Error('Error al actualizar estado');
@@ -630,15 +554,8 @@ export async function deleteUser(userId: string): Promise<void> {
   requireFirebaseConfiguration();
 
   try {
-    const firebaseUser = auth.currentUser;
-    if (!firebaseUser) throw new Error('No hay una sesion administrativa activa.');
-    const idToken = await firebaseUser.getIdToken();
-    const backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3000';
-    const response = await fetch(`${backendUrl}/api/auth/users/${encodeURIComponent(userId)}`, {
-      method: 'DELETE',
-      headers: { Authorization: `Bearer ${idToken}` },
-    });
-    if (!response.ok) throw new Error('Unable to deactivate user');
+    await apiClient.delete(`/users/${encodeURIComponent(userId)}`);
+    emitDataChange('users');
   } catch {
     console.error('Error deleting user.');
     throw new Error('Error al eliminar usuario');
@@ -646,7 +563,7 @@ export async function deleteUser(userId: string): Promise<void> {
 }
 
 /**
- * Verifica si el usuario actual tiene un rol específico desde Firestore.
+ * Verifica si el usuario actual tiene un rol específico desde D1.
  */
 export async function hasRoleAsync(role: UserRole): Promise<boolean> {
   const user = await getCurrentUser();
@@ -656,7 +573,7 @@ export async function hasRoleAsync(role: UserRole): Promise<boolean> {
 }
 
 /**
- * Verifica si el usuario actual es admin desde Firestore.
+ * Verifica si el usuario actual es admin desde D1.
  */
 export async function isAdminAsync(): Promise<boolean> {
   return hasRoleAsync('admin');
@@ -664,8 +581,7 @@ export async function isAdminAsync(): Promise<boolean> {
 
 /**
  * Verifica si el usuario actual tiene un rol específico.
- * Solo funciona con el cache del modo mock explícito. En Firebase configurado
- * devuelve false para evitar autorizar antes de leer el documento vigente.
+ * Solo funciona con el cache del modo mock explícito.
  */
 export function hasRole(role: UserRole): boolean {
   if (!isMockMode()) return false;
@@ -678,7 +594,6 @@ export function hasRole(role: UserRole): boolean {
 
 /**
  * Verifica si el usuario actual es admin (cache local).
- * Para gates de seguridad reales usar isAdminAsync().
  */
 export function isAdmin(): boolean {
   return hasRole('admin');

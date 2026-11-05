@@ -1,14 +1,5 @@
-import {
-  addDoc,
-  collection,
-  deleteDoc,
-  doc,
-  onSnapshot,
-  serverTimestamp,
-  updateDoc,
-} from 'firebase/firestore';
-import { db } from '../firebase/config';
 import { Product } from '../firebase/db';
+import { apiClient, emitDataChange, onDataChange } from './apiClient';
 import { mockProducts } from './mockData';
 
 function isMockMode(): boolean {
@@ -32,7 +23,23 @@ function sortByName(products: Product[]): Product[] {
   return [...products].sort((a, b) => (a.name || '').localeCompare(b.name || '', 'es'));
 }
 
-// Suscriptores en modo mock: permiten "refrescar" tras una venta local sin Firestore.
+function mapProduct(row: any): Product {
+  return {
+    id: row.id,
+    name: row.name,
+    price_cents: row.price_cents,
+    stock: row.stock ?? 0,
+    category: row.category || undefined,
+    barcode: row.barcode || undefined,
+    supplier_id: row.supplier_id || undefined,
+    createdAt: row.created_at || row.createdAt,
+    last_cost_cents: row.last_cost_cents ?? undefined,
+    last_cost_source: row.last_cost_source || undefined,
+    last_cost_updated_at: row.last_cost_updated_at || undefined,
+  };
+}
+
+// Suscriptores en modo mock
 const mockListeners = new Set<ProductsListener>();
 
 function emitMock() {
@@ -41,9 +48,9 @@ function emitMock() {
 }
 
 /**
- * Se suscribe a la colección de productos. En modo configurado usa un listener
- * de Firestore (una lectura inicial y luego solo los documentos que cambian),
- * lo que reemplaza el sondeo periódico anterior. Devuelve la función para cancelar.
+ * Se suscribe al catálogo de productos en tiempo real.
+ * En modo D1 consulta /api/products y escucha el bus de eventos de mutaciones.
+ * En modo mock emite el estado local en memoria.
  */
 export function subscribeToProducts(onData: ProductsListener, onError: ProductsErrorListener): () => void {
   if (isMockMode()) {
@@ -54,31 +61,42 @@ export function subscribeToProducts(onData: ProductsListener, onError: ProductsE
     };
   }
 
-  try {
-    return onSnapshot(
-      collection(db, 'products'),
-      (snapshot) => {
-        const products: Product[] = [];
-        snapshot.forEach((document) => {
-          products.push({ id: document.id, ...(document.data() as Omit<Product, 'id'>) });
-        });
-        onData(sortByName(products));
-      },
-      () => {
-        console.error('Error subscribing to products.');
-        onError(new Error(LOAD_ERROR));
-      },
-    );
-  } catch {
-    console.error('Error subscribing to products.');
-    onError(new Error(LOAD_ERROR));
-    return () => {};
-  }
+  let active = true;
+
+  const fetchAndEmit = async () => {
+    try {
+      const data = await apiClient.get<any[]>('/products');
+      if (!active) return;
+      const mapped = (data || []).map(mapProduct);
+      onData(sortByName(mapped));
+    } catch {
+      if (!active) return;
+      console.error('Error subscribing to products.');
+      onError(new Error(LOAD_ERROR));
+    }
+  };
+
+  // Carga inicial
+  void fetchAndEmit();
+
+  // Escuchar mutaciones locales o refrescos
+  const unsubscribeBus = onDataChange('products', () => {
+    if (active) void fetchAndEmit();
+  });
+
+  return () => {
+    active = false;
+    unsubscribeBus();
+  };
 }
 
-/** Reenvía el estado actual a los suscriptores en modo mock; sin efecto con Firestore. */
+/** Reenvía el estado actual o notifica a los suscriptores. */
 export function refreshProducts(): void {
-  if (isMockMode()) emitMock();
+  if (isMockMode()) {
+    emitMock();
+  } else {
+    emitDataChange('products');
+  }
 }
 
 export async function addProduct(input: NewProductInput): Promise<Product> {
@@ -98,8 +116,9 @@ export async function addProduct(input: NewProductInput): Promise<Product> {
   }
 
   try {
-    const reference = await addDoc(collection(db, 'products'), { ...payload, createdAt: serverTimestamp() });
-    return { id: reference.id, ...payload };
+    const created = await apiClient.post<any>('/products', payload);
+    emitDataChange('products');
+    return mapProduct(created);
   } catch {
     console.error('Error adding product.');
     throw new Error('Error al agregar producto');
@@ -125,7 +144,8 @@ export async function updateProduct(product: Product): Promise<void> {
   }
 
   try {
-    await updateDoc(doc(db, 'products', product.id), changes);
+    await apiClient.put(`/products/${encodeURIComponent(product.id)}`, changes);
+    emitDataChange('products');
   } catch {
     console.error('Error updating product.');
     throw new Error('Error al editar producto');
@@ -141,7 +161,8 @@ export async function deleteProduct(productId: string): Promise<void> {
   }
 
   try {
-    await deleteDoc(doc(db, 'products', productId));
+    await apiClient.delete(`/products/${encodeURIComponent(productId)}`);
+    emitDataChange('products');
   } catch {
     console.error('Error deleting product.');
     throw new Error('Error al eliminar producto');

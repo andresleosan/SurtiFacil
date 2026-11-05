@@ -1,22 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-
-vi.mock('../firebase/config', () => ({ db: {} }));
-const firestoreMock = vi.hoisted(() => ({
-  addDoc: vi.fn(),
-  collection: vi.fn((_db: unknown, name: string) => ({ name })),
-  doc: vi.fn((_dbOrCollection: unknown, ...segments: string[]) => ({ path: segments.join('/') || 'auto-id', id: segments[1] || 'entry-auto' })),
-  getDocs: vi.fn(),
-  limit: vi.fn(),
-  onSnapshot: vi.fn(),
-  orderBy: vi.fn(),
-  query: vi.fn(),
-  runTransaction: vi.fn(),
-  serverTimestamp: vi.fn(() => 'server-time'),
-  updateDoc: vi.fn(),
-  where: vi.fn(),
-}));
-vi.mock('firebase/firestore', () => firestoreMock);
-
+import { apiClient } from '../services/apiClient';
 import { mockCreditCustomers } from '../services/mockData';
 import {
   addCreditCustomer,
@@ -78,8 +61,6 @@ describe('creditService', () => {
       expect(mockCreditCustomers.find((candidate) => candidate.id === customer.id)).toMatchObject({ name: 'Marta P.', active: false });
 
       unsubscribe();
-      expect(firestoreMock.addDoc).not.toHaveBeenCalled();
-      expect(firestoreMock.runTransaction).not.toHaveBeenCalled();
     });
 
     it('valida nombre y montos', async () => {
@@ -89,71 +70,64 @@ describe('creditService', () => {
     });
   });
 
-  describe('Firebase configurado', () => {
+  describe('Cloudflare D1 configurado', () => {
     beforeEach(() => vi.stubEnv('VITE_USE_MOCK_DATA', 'false'));
 
     it('registra el movimiento y el saldo en una transacción', async () => {
-      const writes: unknown[] = [];
-      firestoreMock.runTransaction.mockImplementation(async (_db: unknown, callback: (tx: unknown) => Promise<void>) => {
-        await callback({
-          get: async () => ({ exists: () => true, data: () => ({ balance_cents: 1000 }) }),
-          set: (ref: unknown, data: unknown) => writes.push({ op: 'set', ref, data }),
-          update: (ref: unknown, data: unknown) => writes.push({ op: 'update', ref, data }),
-        });
+      const postSpy = vi.spyOn(apiClient, 'post').mockResolvedValueOnce({
+        id: 'centry-1',
+        customer_id: 'cc9',
+        type: 'payment',
+        amount_cents: 400,
+        description: 'Abono',
       });
 
       const entry = await addCreditEntry('cc9', { type: 'payment', amount_cents: 400, description: 'Abono' }, actor);
 
       expect(entry).toMatchObject({ customer_id: 'cc9', type: 'payment', amount_cents: 400 });
-      expect(writes).toEqual([
-        { op: 'set', ref: expect.anything(), data: expect.objectContaining({ customer_id: 'cc9', type: 'payment', amount_cents: 400, created_by_uid: 'cashier-1', created_by_role: 'cashier' }) },
-        { op: 'update', ref: expect.anything(), data: expect.objectContaining({ balance_cents: 600 }) },
-      ]);
+      expect(postSpy).toHaveBeenCalledWith('/credits/entries', {
+        customer_id: 'cc9',
+        type: 'payment',
+        amount_cents: 400,
+        description: 'Abono',
+      });
     });
 
     it('rechaza abonos mayores a la deuda dentro de la transacción y no expone errores crudos', async () => {
-      firestoreMock.runTransaction.mockImplementation(async (_db: unknown, callback: (tx: unknown) => Promise<void>) => {
-        await callback({
-          get: async () => ({ exists: () => true, data: () => ({ balance_cents: 100 }) }),
-          set: () => {},
-          update: () => {},
-        });
-      });
+      vi.spyOn(apiClient, 'post').mockRejectedValueOnce(new Error('El abono supera la deuda pendiente'));
+
       await expect(addCreditEntry('cc9', { type: 'payment', amount_cents: 400, description: '' }, actor))
         .rejects.toThrow('El abono supera la deuda pendiente');
 
       const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
-      firestoreMock.runTransaction.mockRejectedValue(new Error('permission-denied token=secret'));
+      vi.spyOn(apiClient, 'post').mockRejectedValueOnce(new Error('permission-denied token=secret'));
+
       await expect(addCreditEntry('cc9', { type: 'debt', amount_cents: 400, description: '' }, actor))
         .rejects.toThrow('Error al registrar el movimiento');
       expect(consoleError.mock.calls.flat().join(' ')).not.toContain('secret');
       consoleError.mockRestore();
     });
 
-    it('mapea los clientes del listener y reporta un error seguro', () => {
-      firestoreMock.onSnapshot.mockImplementationOnce((_ref: unknown, next: (snapshot: unknown) => void) => {
-        next({
-          forEach: (callback: (document: { id: string; data: () => unknown }) => void) => {
-            callback({ id: 'b', data: () => ({ name: 'Zoe', balance_cents: 10 }) });
-            callback({ id: 'a', data: () => ({ name: 'Ana', active: false }) });
-          },
-        });
-        return vi.fn();
-      });
+    it('mapea los clientes del listener y reporta un error seguro', async () => {
+      vi.spyOn(apiClient, 'get').mockResolvedValueOnce([
+        { id: 'b', name: 'Zoe', balance_cents: 10, active: 1 },
+        { id: 'a', name: 'Ana', active: 0, balance_cents: 0 },
+      ]);
       const listener = vi.fn();
       subscribeToCreditCustomers(listener, () => {});
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
       expect(listener).toHaveBeenCalledWith([
         expect.objectContaining({ id: 'a', name: 'Ana', balance_cents: 0, active: false }),
         expect.objectContaining({ id: 'b', name: 'Zoe', balance_cents: 10, active: true }),
       ]);
 
-      firestoreMock.onSnapshot.mockImplementationOnce((_ref: unknown, _next: unknown, error: (err: Error) => void) => {
-        error(new Error('permission-denied'));
-        return vi.fn();
-      });
+      vi.spyOn(apiClient, 'get').mockRejectedValueOnce(new Error('permission-denied'));
       const onError = vi.fn();
       const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
       subscribeToCreditCustomers(() => {}, onError);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
       expect(onError).toHaveBeenCalledWith(expect.objectContaining({ message: 'Error al cargar los fiados' }));
       consoleError.mockRestore();
     });

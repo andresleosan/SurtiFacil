@@ -1,20 +1,6 @@
-import {
-  addDoc,
-  collection,
-  doc,
-  getDocs,
-  limit,
-  onSnapshot,
-  orderBy,
-  query,
-  runTransaction,
-  serverTimestamp,
-  updateDoc,
-  where,
-} from 'firebase/firestore';
-import { db } from '../firebase/config';
 import { CreditCustomer, CreditEntry, CreditEntryType, UserRole } from '../firebase/db';
 import { addLocalCreditEntry, getLocalCreditEntries, mockCreditCustomers } from './mockData';
+import { apiClient, emitDataChange, onDataChange } from './apiClient';
 
 function isMockMode(): boolean {
   return import.meta.env.VITE_USE_MOCK_DATA === 'true';
@@ -70,6 +56,34 @@ function validateEntryInput(input: CreditEntryInput): CreditEntryInput {
   return { type: input.type, amount_cents: input.amount_cents, description };
 }
 
+function mapCustomer(row: any): CreditCustomer {
+  return {
+    id: row.id,
+    name: row.name,
+    phone: row.phone || undefined,
+    notes: row.notes || undefined,
+    balance_cents: row.balance_cents ?? 0,
+    active: row.active === 1 || row.active === true,
+    createdAt: row.created_at || row.createdAt,
+    updatedAt: row.updated_at || row.updatedAt,
+    last_entry_at: row.last_entry_at || row.lastEntryAt,
+  };
+}
+
+function mapEntry(row: any): CreditEntry {
+  return {
+    id: row.id,
+    customer_id: row.customer_id,
+    type: row.type,
+    amount_cents: row.amount_cents,
+    description: row.description,
+    sale_id: row.sale_id || undefined,
+    created_by_uid: row.created_by_uid || 'system',
+    created_by_role: row.created_by_role || undefined,
+    createdAt: row.created_at || row.createdAt,
+  };
+}
+
 // ---------- modo mock ----------
 const mockListeners = new Set<CreditCustomersListener>();
 
@@ -78,13 +92,17 @@ function emitMock() {
   mockListeners.forEach((listener) => listener(snapshot));
 }
 
-/** Notifica a los suscriptores en modo mock (por ejemplo tras una venta fiada local). */
+/** Notifica a los suscriptores en modo mock o D1. */
 export function refreshCreditCustomers(): void {
-  if (isMockMode()) emitMock();
+  if (isMockMode()) {
+    emitMock();
+  } else {
+    emitDataChange('credits');
+  }
 }
 
 /**
- * Suscripción en tiempo real a los clientes de fiado, ordenados por nombre.
+ * Suscripción reactiva a los clientes de fiado, ordenados por nombre.
  */
 export function subscribeToCreditCustomers(onData: CreditCustomersListener, onError: CreditErrorListener): () => void {
   if (isMockMode()) {
@@ -95,27 +113,31 @@ export function subscribeToCreditCustomers(onData: CreditCustomersListener, onEr
     };
   }
 
-  try {
-    return onSnapshot(
-      collection(db, 'credit_customers'),
-      (snapshot) => {
-        const customers: CreditCustomer[] = [];
-        snapshot.forEach((document) => {
-          const data = document.data() as Omit<CreditCustomer, 'id'>;
-          customers.push({ id: document.id, ...data, balance_cents: data.balance_cents ?? 0, active: data.active !== false });
-        });
-        onData(sortByName(customers));
-      },
-      () => {
-        console.error('Error subscribing to credit customers.');
-        onError(new Error(LOAD_ERROR));
-      },
-    );
-  } catch {
-    console.error('Error subscribing to credit customers.');
-    onError(new Error(LOAD_ERROR));
-    return () => {};
-  }
+  let active = true;
+
+  const fetchAndEmit = async () => {
+    try {
+      const list = await apiClient.get<any[]>('/credits/customers');
+      if (!active) return;
+      const mapped = (list || []).map(mapCustomer);
+      onData(sortByName(mapped));
+    } catch {
+      if (!active) return;
+      console.error('Error subscribing to credit customers.');
+      onError(new Error(LOAD_ERROR));
+    }
+  };
+
+  void fetchAndEmit();
+
+  const unsubscribeBus = onDataChange('credits', () => {
+    if (active) void fetchAndEmit();
+  });
+
+  return () => {
+    active = false;
+    unsubscribeBus();
+  };
 }
 
 export async function addCreditCustomer(input: CreditCustomerInput): Promise<CreditCustomer> {
@@ -130,12 +152,9 @@ export async function addCreditCustomer(input: CreditCustomerInput): Promise<Cre
   }
 
   try {
-    const reference = await addDoc(collection(db, 'credit_customers'), {
-      ...payload,
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-    });
-    return { id: reference.id, ...payload };
+    const created = await apiClient.post<any>('/credits/customers', payload);
+    emitDataChange('credits');
+    return mapCustomer(created);
   } catch {
     console.error('Error adding credit customer.');
     throw new Error('Error al crear el cliente');
@@ -157,7 +176,8 @@ export async function updateCreditCustomer(
   }
 
   try {
-    await updateDoc(doc(db, 'credit_customers', customerId), { ...changes, updatedAt: serverTimestamp() });
+    await apiClient.put(`/credits/customers/${encodeURIComponent(customerId)}`, changes);
+    emitDataChange('credits');
   } catch {
     console.error('Error updating credit customer.');
     throw new Error('Error al actualizar el cliente');
@@ -174,14 +194,10 @@ export async function getCreditEntries(customerId: string, pageSize = 50): Promi
   }
 
   try {
-    const entriesQuery = query(
-      collection(db, 'credit_entries'),
-      where('customer_id', '==', customerId),
-      orderBy('createdAt', 'desc'),
-      limit(pageSize),
+    const list = await apiClient.get<any[]>(
+      `/credits/entries?customer_id=${encodeURIComponent(customerId)}&limit=${pageSize}`
     );
-    const snapshot = await getDocs(entriesQuery);
-    return snapshot.docs.map((document) => ({ id: document.id, ...(document.data() as Omit<CreditEntry, 'id'>) }));
+    return (list || []).map(mapEntry);
   } catch {
     console.error('Error loading credit entries.');
     throw new Error('Error al cargar los movimientos');
@@ -189,8 +205,8 @@ export async function getCreditEntries(customerId: string, pageSize = 50): Promi
 }
 
 /**
- * Anota una deuda o un abono y actualiza el saldo del cliente en una sola
- * transacción. Un abono nunca puede dejar el saldo por debajo de cero.
+ * Anota una deuda o un abono y actualiza el saldo del cliente en el servidor.
+ * Un abono nunca puede dejar el saldo por debajo de cero.
  */
 export async function addCreditEntry(
   customerId: string,
@@ -221,48 +237,33 @@ export async function addCreditEntry(
   }
 
   try {
-    const customerRef = doc(db, 'credit_customers', customerId);
-    const entryRef = doc(collection(db, 'credit_entries'));
-    await runTransaction(db, async (transaction) => {
-      const snapshot = await transaction.get(customerRef);
-      if (!snapshot.exists()) {
-        const error = new Error('Cliente no encontrado');
-        error.name = 'CreditCustomerNotFound';
-        throw error;
-      }
-      const currentBalance = (snapshot.data() as CreditCustomer).balance_cents ?? 0;
-      const nextBalance = currentBalance + delta;
-      if (nextBalance < 0) {
-        const error = new Error('El abono supera la deuda pendiente');
-        error.name = 'CreditOverpayment';
-        throw error;
-      }
-      transaction.set(entryRef, {
-        customer_id: customerId,
-        type: entry.type,
-        amount_cents: entry.amount_cents,
-        description: entry.description,
-        created_by_uid: actor.uid,
-        created_by_role: actor.role,
-        createdAt: serverTimestamp(),
-      });
-      transaction.update(customerRef, {
-        balance_cents: nextBalance,
-        updatedAt: serverTimestamp(),
-        last_entry_at: serverTimestamp(),
-      });
-    });
+    const payload = {
+      customer_id: customerId,
+      type: entry.type,
+      amount_cents: entry.amount_cents,
+      description: entry.description,
+    };
+    const res = await apiClient.post<any>('/credits/entries', payload);
+    emitDataChange('credits');
     return {
-      id: entryRef.id,
+      id: res.id,
       customer_id: customerId,
       ...entry,
       created_by_uid: actor.uid,
       created_by_role: actor.role,
       createdAt: new Date(),
     };
-  } catch (error) {
-    if (error instanceof Error && (error.name === 'CreditCustomerNotFound' || error.name === 'CreditOverpayment')) {
-      throw error;
+  } catch (error: any) {
+    const message = error?.message || '';
+    if (message.includes('supera la deuda') || message.includes('no puede superar')) {
+      const err = new Error('El abono supera la deuda pendiente');
+      err.name = 'CreditOverpayment';
+      throw err;
+    }
+    if (message.includes('no encontrado') || message.includes('404')) {
+      const err = new Error('Cliente no encontrado');
+      err.name = 'CreditCustomerNotFound';
+      throw err;
     }
     console.error('Error adding credit entry.');
     throw new Error('Error al registrar el movimiento');

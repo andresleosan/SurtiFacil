@@ -1,25 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-
-vi.mock('../firebase/config', () => ({ db: {} }));
-const authMock = vi.hoisted(() => ({ currentUser: null as any }));
-vi.mock('firebase/auth', () => ({ getAuth: () => authMock }));
-vi.mock('firebase/firestore', () => ({
-  collection: vi.fn(),
-  count: vi.fn(() => 'count-spec'),
-  getAggregateFromServer: vi.fn(),
-  getDocs: vi.fn(),
-  limit: vi.fn((value: number) => ({ limit: value })),
-  orderBy: vi.fn((field: string, direction: string) => ({ orderBy: field, direction })),
-  query: vi.fn((...parts: unknown[]) => ({ parts })),
-  serverTimestamp: vi.fn(() => new Date()),
-  startAfter: vi.fn((cursor: unknown) => ({ startAfter: cursor })),
-  sum: vi.fn((field: string) => ({ sum: field })),
-  Timestamp: { fromDate: (date: Date) => ({ toMillis: () => date.getTime() }) },
-  where: vi.fn((field: string, op: string, value: unknown) => ({ where: field, op, value })),
-  doc: vi.fn(),
-}));
-
-import { getAggregateFromServer, getDocs, limit, query, startAfter, where } from 'firebase/firestore';
+import { apiClient } from '../services/apiClient';
 import { mockProducts } from '../services/mockData';
 import {
   createSale,
@@ -29,6 +9,9 @@ import {
   getSalesSince,
   getSalesTotals,
 } from '../services/saleService';
+
+const authMock = vi.hoisted(() => ({ currentUser: null as any }));
+vi.mock('firebase/auth', () => ({ getAuth: () => authMock }));
 
 describe('saleService', () => {
   beforeEach(() => {
@@ -44,12 +27,10 @@ describe('saleService', () => {
 
   it('mantiene los productos mock cuando Firebase no está configurado', async () => {
     await expect(getProducts()).resolves.toBe(mockProducts);
-    expect(getDocs).not.toHaveBeenCalled();
   });
 
   it('mantiene las ventas mock cuando Firebase no está configurado', async () => {
     await expect(getSales()).resolves.toEqual(expect.any(Array));
-    expect(getDocs).not.toHaveBeenCalled();
   });
 
   it('crea ventas mock con el mismo snapshot financiero v2', async () => {
@@ -87,10 +68,11 @@ describe('saleService', () => {
 
   it('no usa productos mock cuando el flag explícito está desactivado', async () => {
     vi.stubEnv('VITE_USE_MOCK_DATA', 'false');
+    vi.spyOn(apiClient, 'get').mockRejectedValue(new Error('Backend error'));
     await expect(getProducts()).rejects.toThrow('Error al cargar productos');
   });
 
-  describe('Firebase configurado', () => {
+  describe('Cloudflare D1 configurado', () => {
     beforeEach(() => {
       vi.stubEnv('VITE_USE_MOCK_DATA', 'false');
       vi.stubEnv('VITE_FIREBASE_API_KEY', 'test-api-key');
@@ -101,78 +83,62 @@ describe('saleService', () => {
       vi.stubEnv('VITE_FIREBASE_APP_ID', 'app-id');
     });
 
-    it('mantiene el resultado de una lectura exitosa de productos en Firestore', async () => {
-      vi.mocked(getDocs).mockResolvedValueOnce({
-        forEach: (callback: (document: { id: string; data: () => object }) => void) => {
-          callback({
-            id: 'product-1',
-            data: () => ({ name: 'Producto Firebase', price_cents: 500, stock: 8 }),
-          });
-        },
-      } as any);
+    it('mantiene el resultado de una lectura exitosa de productos en D1', async () => {
+      vi.spyOn(apiClient, 'get').mockResolvedValueOnce([
+        { id: 'product-1', name: 'Producto D1', price_cents: 500, stock: 8 },
+      ]);
 
       await expect(getProducts()).resolves.toEqual([
-        { id: 'product-1', name: 'Producto Firebase', price_cents: 500, stock: 8 },
+        expect.objectContaining({ id: 'product-1', name: 'Producto D1', price_cents: 500, stock: 8 }),
       ]);
     });
 
     it('rechaza la lectura de productos en vez de devolver datos mock', async () => {
       const secret = 'permission denied token=secret-token';
-      vi.mocked(getDocs).mockRejectedValueOnce(new Error(secret));
+      vi.spyOn(apiClient, 'get').mockRejectedValueOnce(new Error(secret));
       const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {});
 
       await expect(getProducts()).rejects.toThrow('Error al cargar productos');
       expect(errorLog.mock.calls.flat().join(' ')).not.toContain('secret-token');
       expect(errorLog).toHaveBeenCalledWith('Error getting products from Firebase');
+      errorLog.mockRestore();
     });
 
     it('rechaza la lectura de ventas en vez de devolver datos mock', async () => {
-      vi.mocked(getDocs).mockRejectedValueOnce(new Error('permission denied'));
+      vi.spyOn(apiClient, 'get').mockRejectedValueOnce(new Error('permission denied'));
 
       await expect(getSales()).rejects.toThrow('Error al cargar ventas');
     });
 
-    it('mantiene el resultado de una lectura exitosa de ventas en Firestore', async () => {
-      const sale = {
+    it('mantiene el resultado de una lectura exitosa de ventas en D1', async () => {
+      const saleRow = {
         id: 'sale-1',
-        date: { toMillis: () => 20 },
-        total: 1000,
+        total_cents: 1000,
         payment_method: 'cash' as const,
         items: [],
+        created_at: new Date(20).toISOString(),
       };
-      vi.mocked(getDocs).mockResolvedValueOnce({
-        forEach: (callback: (document: { id: string; data: () => object }) => void) => {
-          callback({
-            id: sale.id,
-            data: () => ({
-              date: sale.date,
-              total: sale.total,
-              payment_method: sale.payment_method,
-              items: sale.items,
-            }),
-          });
-        },
-      } as any);
+      vi.spyOn(apiClient, 'get').mockResolvedValueOnce([saleRow]);
 
-      await expect(getSales()).resolves.toEqual([sale]);
+      const sales = await getSales();
+      expect(sales).toHaveLength(1);
+      expect(sales[0].id).toBe('sale-1');
+      expect(sales[0].total).toBe(1000);
+      expect(sales[0].payment_method).toBe('cash');
     });
 
     it('envía solo IDs y cantidades al backend con el Firebase ID token', async () => {
       authMock.currentUser = { getIdToken: vi.fn(async () => 'firebase-id-token') };
-      const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(
-        JSON.stringify({ saleId: 'sale-1' }),
-        { status: 201, headers: { 'Content-Type': 'application/json' } },
-      ));
+      const postSpy = vi.spyOn(apiClient, 'post').mockResolvedValueOnce({ id: 'sale-1', saleId: 'sale-1' });
 
       await expect(createSale([{
         product_id: 'p1', product_name: 'Cliente', quantity: 2, price_cents: 1, subtotal: 1,
       }], 'cash')).resolves.toBe('sale-1');
 
-      expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining('/api/sales/create'), expect.objectContaining({
-        method: 'POST',
-        headers: { Authorization: 'Bearer firebase-id-token', 'Content-Type': 'application/json' },
-        body: JSON.stringify({ items: [{ product_id: 'p1', quantity: 2 }], payment_method: 'cash' }),
-      }));
+      expect(postSpy).toHaveBeenCalledWith('/sales', {
+        items: [{ product_id: 'p1', quantity: 2 }],
+        payment_method: 'cash',
+      });
     });
 
     it('rechaza la venta configurada cuando no hay una sesión Firebase activa', async () => {
@@ -183,10 +149,7 @@ describe('saleService', () => {
 
     it('preserva el error seguro del backend sin devolver datos mock', async () => {
       authMock.currentUser = { getIdToken: vi.fn(async () => 'firebase-id-token') };
-      vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(
-        JSON.stringify({ error: 'Demasiadas solicitudes' }),
-        { status: 429, headers: { 'Content-Type': 'application/json' } },
-      ));
+      vi.spyOn(apiClient, 'post').mockRejectedValueOnce(new Error('Demasiadas solicitudes'));
 
       await expect(createSale([{
         product_id: 'p1', product_name: 'Producto', quantity: 1, price_cents: 250, subtotal: 250,
@@ -197,7 +160,7 @@ describe('saleService', () => {
       authMock.currentUser = { getIdToken: vi.fn(async () => 'firebase-id-token') };
       const product = mockProducts[0];
       const stockBefore = product.stock;
-      vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('backend unavailable'));
+      vi.spyOn(apiClient, 'post').mockRejectedValueOnce(new Error('backend unavailable'));
 
       await expect(createSale([{
         product_id: product.id,
@@ -213,21 +176,23 @@ describe('saleService', () => {
     it('pagina el historial con un cursor y detecta si hay más páginas', async () => {
       const documents = [3, 2, 1].map((value) => ({
         id: `sale-${value}`,
-        data: () => ({ date: { toMillis: () => value }, total: value * 100, payment_method: 'cash', items: [] }),
+        total_cents: value * 100,
+        payment_method: 'cash',
+        items: [],
+        created_at: new Date(value).toISOString(),
       }));
-      vi.mocked(getDocs).mockResolvedValueOnce({ docs: documents } as any);
+
+      vi.spyOn(apiClient, 'get').mockResolvedValueOnce(documents);
 
       const firstPage = await getRecentSales(2);
 
       expect(firstPage.sales.map((sale) => sale.id)).toEqual(['sale-3', 'sale-2']);
       expect(firstPage.hasMore).toBe(true);
-      expect(firstPage.cursor).toBe(documents[1]);
-      expect(limit).toHaveBeenCalledWith(3);
+      expect(firstPage.cursor).toBe('sale-2');
 
-      vi.mocked(getDocs).mockResolvedValueOnce({ docs: [documents[2]] } as any);
+      vi.spyOn(apiClient, 'get').mockResolvedValueOnce([documents[2]]);
       const secondPage = await getRecentSales(2, firstPage.cursor);
 
-      expect(startAfter).toHaveBeenCalledWith(documents[1]);
       expect(secondPage.sales.map((sale) => sale.id)).toEqual(['sale-1']);
       expect(secondPage.hasMore).toBe(false);
       expect(secondPage.cursor).toBeNull();
@@ -235,33 +200,32 @@ describe('saleService', () => {
 
     it('consulta las ventas desde una fecha con un filtro del servidor', async () => {
       const since = new Date('2026-09-01T00:00:00');
-      vi.mocked(getDocs).mockResolvedValueOnce({
-        docs: [{ id: 'sale-9', data: () => ({ total: 900, payment_method: 'cash', items: [] }) }],
-      } as any);
+      const getSpy = vi.spyOn(apiClient, 'get').mockResolvedValueOnce([
+        { id: 'sale-9', total_cents: 900, payment_method: 'cash', items: [], created_at: since.toISOString() },
+      ]);
 
-      await expect(getSalesSince(since)).resolves.toEqual([
+      const result = await getSalesSince(since);
+      expect(result).toEqual([
         expect.objectContaining({ id: 'sale-9', total: 900 }),
       ]);
-      expect(where).toHaveBeenCalledWith('date', '>=', expect.objectContaining({ toMillis: expect.any(Function) }));
-      expect(query).toHaveBeenCalled();
+      expect(getSpy).toHaveBeenCalledWith(expect.stringContaining('/sales?since='));
     });
 
     it('obtiene los totales históricos con una agregación del servidor', async () => {
-      vi.mocked(getAggregateFromServer).mockResolvedValueOnce({ data: () => ({ count: 3, totalCents: 900 }) } as any);
+      vi.spyOn(apiClient, 'get').mockResolvedValueOnce({ count: 3, totalCents: 900 });
 
       await expect(getSalesTotals()).resolves.toEqual({ count: 3, totalCents: 900 });
     });
 
     it('usa mensajes genéricos cuando fallan las consultas acotadas', async () => {
       const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {});
-      vi.mocked(getDocs).mockRejectedValueOnce(new Error('permission denied token=secret'));
-      vi.mocked(getDocs).mockRejectedValueOnce(new Error('permission denied token=secret'));
-      vi.mocked(getAggregateFromServer).mockRejectedValueOnce(new Error('permission denied token=secret'));
+      vi.spyOn(apiClient, 'get').mockRejectedValue(new Error('permission denied token=secret'));
 
       await expect(getRecentSales(10)).rejects.toThrow('Error al cargar ventas');
       await expect(getSalesSince(new Date())).rejects.toThrow('Error al cargar ventas');
       await expect(getSalesTotals()).rejects.toThrow('Error al cargar ventas');
       expect(errorLog.mock.calls.flat().join(' ')).not.toContain('secret');
+      errorLog.mockRestore();
     });
   });
 
@@ -283,7 +247,6 @@ describe('saleService', () => {
         count: all.length,
         totalCents: all.reduce((sum, sale) => sum + sale.total, 0),
       });
-      expect(getDocs).not.toHaveBeenCalled();
     });
   });
 });

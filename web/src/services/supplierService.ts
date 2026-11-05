@@ -1,18 +1,6 @@
-import {
-  collection,
-  getDocs,
-  addDoc,
-  updateDoc,
-  doc,
-  deleteDoc,
-  serverTimestamp,
-  runTransaction,
-  getDoc,
-  setDoc,
-} from 'firebase/firestore';
-import { db } from '../firebase/config';
 import { Supplier, PurchaseOrder, OrderStatus, OrderItem, Product } from '../firebase/db';
 import { mockSuppliers, mockOrders, mockProducts } from './mockData';
+import { apiClient, emitDataChange } from './apiClient';
 
 const ALLOWED_TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
   draft: ['ordered', 'cancelled'],
@@ -30,24 +18,57 @@ function getErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : '';
 }
 
+function mapSupplier(row: any): Supplier {
+  return {
+    id: row.id,
+    name: row.name,
+    contactName: row.contact_name ?? row.contactName ?? undefined,
+    phone: row.phone ?? undefined,
+    email: row.email ?? undefined,
+    address: row.address ?? undefined,
+    category: row.category ?? undefined,
+    active: row.active === 1 || row.active === true,
+    totalOrders: row.total_orders ?? row.totalOrders ?? 0,
+    totalSpentCents: row.total_spent_cents ?? row.totalSpentCents ?? 0,
+    lead_time_days: row.lead_time_days ?? row.leadTimeDays ?? undefined,
+    createdAt: row.created_at || row.createdAt,
+  };
+}
+
+function mapOrder(row: any): PurchaseOrder {
+  return {
+    id: row.id,
+    supplierId: row.supplier_id ?? row.supplierId,
+    supplierName: row.supplier_name ?? row.supplierName,
+    status: row.status,
+    total_cents: row.total_cents,
+    received_total_cents: row.received_total_cents ?? 0,
+    date: row.created_at || row.date || new Date(),
+    expectedDate: row.expected_date ?? row.expectedDate ?? undefined,
+    receivedDate: row.received_date ?? row.receivedDate ?? undefined,
+    notes: row.notes ?? undefined,
+    createdAt: row.created_at || row.createdAt || new Date(),
+    items: (row.items || []).map((it: any) => ({
+      product_id: it.product_id ?? undefined,
+      name: it.name,
+      category: it.category ?? undefined,
+      quantity: it.quantity,
+      received_quantity: it.received_quantity ?? 0,
+      unit_cost_cents: it.unit_cost_cents,
+      final_cost_cents: it.final_cost_cents ?? undefined,
+      isNewProduct: it.is_new_product === 1 || it.is_new_product === true || it.isNewProduct === true,
+    })),
+  };
+}
+
 export async function getSuppliers(): Promise<Supplier[]> {
   if (isMockMode()) {
     return mockSuppliers.map((s) => ({ ...s }));
   }
 
   try {
-    const suppliersRef = collection(db, 'suppliers');
-    const snapshot = await getDocs(suppliersRef);
-    const suppliers: Supplier[] = [];
-
-    snapshot.forEach((doc) => {
-      suppliers.push({
-        id: doc.id,
-        ...(doc.data() as Omit<Supplier, 'id'>),
-      });
-    });
-
-    return suppliers;
+    const list = await apiClient.get<any[]>('/suppliers');
+    return (list || []).map(mapSupplier);
   } catch {
     console.error('Error getting suppliers from Firebase');
     throw new Error('Error al cargar proveedores');
@@ -70,19 +91,18 @@ export async function addSupplier(
   }
 
   try {
-    const docRef = await addDoc(collection(db, 'suppliers'), {
-      ...data,
-      totalOrders: 0,
-      totalSpentCents: 0,
-      createdAt: serverTimestamp(),
-    });
-
-    return {
-      id: docRef.id,
-      ...data,
-      totalOrders: 0,
-      totalSpentCents: 0,
+    const payload = {
+      name: data.name,
+      contact_name: data.contactName,
+      phone: data.phone,
+      email: data.email,
+      address: data.address,
+      category: data.category,
+      lead_time_days: data.lead_time_days,
     };
+    const created = await apiClient.post<any>('/suppliers', payload);
+    emitDataChange('suppliers');
+    return mapSupplier(created);
   } catch {
     console.error('Error adding supplier to Firebase');
     throw new Error('Error al crear proveedor');
@@ -102,7 +122,10 @@ export async function updateSupplier(
   }
 
   try {
-    await updateDoc(doc(db, 'suppliers', id), data);
+    const payload: any = { ...data };
+    if (data.contactName !== undefined) payload.contact_name = data.contactName;
+    await apiClient.put(`/suppliers/${encodeURIComponent(id)}`, payload);
+    emitDataChange('suppliers');
   } catch {
     console.error('Error updating supplier in Firebase');
     throw new Error('Error al actualizar proveedor');
@@ -130,25 +153,13 @@ export async function deleteSupplier(id: string): Promise<void> {
     return;
   }
 
-  let supplier: Supplier | undefined;
-
   try {
-    const suppliersRef = collection(db, 'suppliers');
-    const snapshot = await getDocs(suppliersRef);
-    snapshot.forEach((doc) => {
-      if (doc.id === id) {
-        supplier = { id: doc.id, ...(doc.data() as Omit<Supplier, 'id'>) };
-      }
-    });
-
-    if (supplier && supplier.totalOrders > 0) {
-      throw new Error('No se puede eliminar: tiene órdenes asociadas');
-    }
-
-    await deleteDoc(doc(db, 'suppliers', id));
+    await apiClient.delete(`/suppliers/${encodeURIComponent(id)}`);
+    emitDataChange('suppliers');
   } catch (error: any) {
-    if (getErrorMessage(error) === 'No se puede eliminar: tiene órdenes asociadas') {
-      throw error;
+    const msg = getErrorMessage(error);
+    if (msg.includes('No se puede eliminar: tiene órdenes asociadas') || msg.includes('órdenes asociadas')) {
+      throw new Error('No se puede eliminar: tiene órdenes asociadas');
     }
     console.error('Error deleting supplier from Firebase');
     throw new Error('Error al eliminar proveedor');
@@ -171,16 +182,8 @@ export async function getOrders(filters?: {
   }
 
   try {
-    const ordersRef = collection(db, 'purchase_orders');
-    const snapshot = await getDocs(ordersRef);
-    let orders: PurchaseOrder[] = [];
-
-    snapshot.forEach((d) => {
-      orders.push({
-        id: d.id,
-        ...(d.data() as Omit<PurchaseOrder, 'id'>),
-      });
-    });
+    const list = await apiClient.get<any[]>('/orders');
+    let orders = (list || []).map(mapOrder);
 
     if (filters?.status) {
       orders = orders.filter((o) => o.status === filters.status);
@@ -235,14 +238,25 @@ export async function createOrder(data: {
   }
 
   try {
-    const docRef = await addDoc(collection(db, 'purchase_orders'), {
-      ...orderData,
-      date: serverTimestamp(),
-      createdAt: serverTimestamp(),
-    });
+    const payload = {
+      supplier_id: data.supplierId,
+      supplier_name: data.supplierName,
+      items: items.map((it) => ({
+        product_id: it.product_id,
+        name: it.name,
+        category: it.category,
+        quantity: it.quantity,
+        unit_cost_cents: it.unit_cost_cents,
+      })),
+      expected_date: data.expectedDate,
+      notes: data.notes,
+    };
+
+    const res = await apiClient.post<any>('/orders', payload);
+    emitDataChange('orders');
 
     return {
-      id: docRef.id,
+      id: res.id,
       ...orderData,
       date: new Date(),
       createdAt: new Date(),
@@ -274,28 +288,22 @@ export async function updateOrderStatus(
   }
 
   try {
-    let currentStatus: OrderStatus | undefined;
-    const ordersRef = collection(db, 'purchase_orders');
-    const snapshot = await getDocs(ordersRef);
-    snapshot.forEach((d) => {
-      if (d.id === orderId) {
-        currentStatus = (d.data() as PurchaseOrder).status;
-      }
-    });
-
-    if (!currentStatus) {
+    const orders = await getOrders();
+    const current = orders.find((o) => o.id === orderId);
+    if (!current) {
       throw new Error('Orden no encontrada');
     }
 
-    const allowed = ALLOWED_TRANSITIONS[currentStatus];
+    const allowed = ALLOWED_TRANSITIONS[current.status];
     if (!allowed.includes(newStatus)) {
       throw new Error(
-        `Transición de estado no permitida: ${currentStatus} → ${newStatus}`
+        `Transición de estado no permitida: ${current.status} → ${newStatus}`
       );
     }
-    if (currentStatus === newStatus) return;
+    if (current.status === newStatus) return;
 
-    await updateDoc(doc(db, 'purchase_orders', orderId), { status: newStatus });
+    await apiClient.put(`/orders/${encodeURIComponent(orderId)}`, { status: newStatus });
+    emitDataChange('orders');
   } catch (error: any) {
     const message = getErrorMessage(error);
     if (message === 'Orden no encontrada' || message.includes('no permitida')) {
@@ -387,11 +395,10 @@ export async function receiveOrderItems(
     return order;
   }
 
-  return runTransaction(db, async (transaction) => {
-    const orderRef = doc(db, 'purchase_orders', orderId);
-    const orderSnap = await transaction.get(orderRef);
-    if (!orderSnap.exists()) throw new Error('Orden no encontrada');
-    const order = orderSnap.data() as PurchaseOrder;
+  try {
+    const orders = await getOrders();
+    const order = orders.find((o) => o.id === orderId);
+    if (!order) throw new Error('Orden no encontrada');
 
     for (const r of receives) {
       const item = order.items[r.index];
@@ -404,102 +411,26 @@ export async function receiveOrderItems(
       }
     }
 
-    const updatedItems: OrderItem[] = order.items.map((item, idx) => {
-      const r = receives.find((x) => x.index === idx);
-      if (!r || r.received_quantity === 0) return item;
-      return {
-        ...item,
-        received_quantity: item.received_quantity + r.received_quantity,
-        final_cost_cents: r.final_cost_cents,
-      };
-    });
+    await apiClient.put(`/orders/${encodeURIComponent(orderId)}`, { receives });
+    emitDataChange('orders');
+    emitDataChange('products');
+    emitDataChange('suppliers');
 
-    const createdProducts: { itemIndex: number; productId: string }[] = [];
-    for (let idx = 0; idx < updatedItems.length; idx++) {
-      const item = updatedItems[idx];
-      const r = receives.find((x) => x.index === idx);
-      if (!r || r.received_quantity === 0) continue;
-
-      if (item.product_id) {
-        const productRef = doc(db, 'products', item.product_id);
-        const productSnap = await transaction.get(productRef);
-        if (productSnap.exists()) {
-          const current = productSnap.data() as Product;
-          const updatePayload: Record<string, any> = {
-            stock: current.stock + r.received_quantity,
-          };
-          if (r.final_cost_cents !== undefined && r.final_cost_cents !== null) {
-            updatePayload.last_cost_cents = r.final_cost_cents;
-            updatePayload.last_cost_source = 'purchase';
-            updatePayload.last_cost_updated_at = serverTimestamp();
-          }
-          transaction.update(productRef, updatePayload);
-        }
-      } else if (item.isNewProduct && item.name) {
-        const newProductRef = doc(collection(db, 'products'));
-        transaction.set(newProductRef, {
-          name: item.name,
-          category: item.category,
-          price_cents: r.final_cost_cents * 2,
-          stock: r.received_quantity,
-          supplier_id: order.supplierId,
-          createdAt: serverTimestamp(),
-          last_cost_cents: r.final_cost_cents,
-          last_cost_source: 'purchase',
-          last_cost_updated_at: serverTimestamp(),
-        });
-        createdProducts.push({ itemIndex: idx, productId: newProductRef.id });
-        updatedItems[idx] = { ...item, product_id: newProductRef.id };
-      }
-    }
-
-    const totalReceived = updatedItems.reduce(
-      (s, i) => s + i.received_quantity * (i.final_cost_cents || 0),
-      0
-    );
-
-    const allReceived = updatedItems.every((i) => i.received_quantity >= i.quantity);
-    const somePartial = updatedItems.some(
-      (i) => i.received_quantity > 0 && i.received_quantity < i.quantity
-    );
-
-    const updatePayload: any = {
-      items: updatedItems,
-      received_total_cents: totalReceived,
-    };
-
-    if (allReceived) {
-      updatePayload.status = 'received';
-      updatePayload.receivedDate = serverTimestamp();
-    } else if (somePartial) {
-      updatePayload.status = 'partial';
-    }
-
-    transaction.update(orderRef, updatePayload);
-
-    if (allReceived) {
-      const supplierRef = doc(db, 'suppliers', order.supplierId);
-      const supplierSnap = await transaction.get(supplierRef);
-      if (supplierSnap.exists()) {
-        const current = supplierSnap.data() as Supplier;
-        transaction.update(supplierRef, {
-          totalOrders: (current.totalOrders || 0) + 1,
-          totalSpentCents: (current.totalSpentCents || 0) + totalReceived,
-        });
-      }
-    }
-
-    return { ...order, ...updatePayload, receivedDate: allReceived ? new Date() : order.receivedDate };
-  }).catch((error: any) => {
+    const updatedOrders = await getOrders();
+    const updated = updatedOrders.find((o) => o.id === orderId);
+    return updated || order;
+  } catch (error: any) {
     const message = getErrorMessage(error);
-    if (message === 'Orden no encontrada' ||
+    if (
+      message === 'Orden no encontrada' ||
       message.includes('Ítem en índice') ||
-      message.includes('No se puede recibir más')) {
+      message.includes('No se puede recibir más')
+    ) {
       throw error;
     }
     console.error('Error receiving order in Firebase');
     throw new Error('Error al recibir orden');
-  });
+  }
 }
 
 export async function cancelOrder(orderId: string): Promise<void> {
@@ -517,17 +448,19 @@ export async function cancelOrder(orderId: string): Promise<void> {
   }
 
   try {
-    const orderRef = doc(db, 'purchase_orders', orderId);
-    const orderSnap = await getDoc(orderRef);
-    if (!orderSnap.exists()) throw new Error('Orden no encontrada');
-    const order = orderSnap.data() as PurchaseOrder;
+    const orders = await getOrders();
+    const order = orders.find((o) => o.id === orderId);
+    if (!order) throw new Error('Orden no encontrada');
+
     const hasReception = order.items.some((i) => i.received_quantity > 0);
     if (hasReception) {
       throw new Error(
         `No se puede cancelar: ya se recibió stock (${order.items.reduce((s, i) => s + i.received_quantity, 0)} unidades)`
       );
     }
-    await updateDoc(orderRef, { status: 'cancelled' });
+
+    await apiClient.put(`/orders/${encodeURIComponent(orderId)}`, { status: 'cancelled' });
+    emitDataChange('orders');
   } catch (error: any) {
     const message = getErrorMessage(error);
     if (message.includes('No se puede cancelar') || message.includes('no encontrada')) {

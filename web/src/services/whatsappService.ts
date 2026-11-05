@@ -1,86 +1,64 @@
-import {
-  collection,
-  addDoc,
-  query,
-  where,
-  getDocs,
-  updateDoc,
-  doc,
-  Timestamp,
-  orderBy,
-} from 'firebase/firestore';
 import { getAuth } from 'firebase/auth';
-import { db } from '../firebase/config';
 import type {
   WhatsAppConversation,
   WhatsAppMessage,
   WhatsAppOrder,
   ProcessedMessageData,
 } from '../types/whatsapp';
+import { apiClient } from './apiClient';
 
 const auth = getAuth();
-const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3000';
+
+// Almacenamiento local temporal en memoria para WhatsApp (se sincronizará con D1 en Tarea 7)
+const localConversations: WhatsAppConversation[] = [];
+const localMessages: Record<string, WhatsAppMessage[]> = {};
+const localOrders: WhatsAppOrder[] = [];
 
 /**
  * Obtiene todas las conversaciones de WhatsApp
  */
 export async function getConversations(): Promise<WhatsAppConversation[]> {
-  const conversationsRef = collection(db, 'whatsapp_conversations');
-  const q = query(conversationsRef, orderBy('lastMessageDate', 'desc'));
-  const snapshot = await getDocs(q);
-
-  return snapshot.docs.map((doc) => ({
-    id: doc.id,
-    ...doc.data(),
-    firstMessageDate: doc.data().firstMessageDate?.toDate(),
-    lastMessageDate: doc.data().lastMessageDate?.toDate(),
-  })) as WhatsAppConversation[];
+  try {
+    return [...localConversations];
+  } catch {
+    console.error('Error loading conversations.');
+    throw new Error('Error al cargar conversaciones');
+  }
 }
 
 /**
  * Obtiene los mensajes de una conversación específica
  */
 export async function getMessages(conversationId: string): Promise<WhatsAppMessage[]> {
-  const messagesRef = collection(db, 'whatsapp_messages');
-  const q = query(
-    messagesRef,
-    where('conversationId', '==', conversationId),
-    orderBy('timestamp', 'asc')
-  );
-  const snapshot = await getDocs(q);
-
-  return snapshot.docs.map((doc) => ({
-    id: doc.id,
-    ...doc.data(),
-    timestamp: doc.data().timestamp?.toDate(),
-  })) as WhatsAppMessage[];
+  try {
+    return localMessages[conversationId] || [];
+  } catch {
+    console.error('Error loading messages.');
+    throw new Error('Error al cargar mensajes');
+  }
 }
 
 /**
- * Envía un mensaje en una conversación
+ * Envía un mensaje en una conversación mediante Cloudflare Pages Functions
  */
 export async function sendMessage(
   conversationId: string,
   message: string,
   messageType: 'text' | 'order_request' | 'location' | 'image' = 'text'
 ): Promise<string> {
-  const user = auth.currentUser;
+  let user = null;
+  try {
+    user = auth.currentUser;
+  } catch {
+    // Si auth no está inicializado
+  }
+
   if (!user) throw new Error('Debes iniciar sesión para enviar mensajes');
 
   try {
-    const idToken = await user.getIdToken();
-    const response = await fetch(`${BACKEND_URL}/api/whatsapp/send`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${idToken}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ conversationId, message, messageType }),
-    });
-
-    if (!response.ok) throw new Error('No se pudo enviar el mensaje');
-    const result = await response.json();
-    const providerMessageId = result?.data?.messages?.[0]?.id;
+    const payload = { conversationId, message, messageType };
+    const result = await apiClient.post<any>('/whatsapp/send', payload);
+    const providerMessageId = result?.data?.messages?.[0]?.id || result?.messageId || result?.id;
     if (typeof providerMessageId !== 'string' || providerMessageId.length === 0) {
       throw new Error('No se pudo enviar el mensaje');
     }
@@ -95,27 +73,16 @@ export async function sendMessage(
  * Obtiene todas las órdenes de WhatsApp
  */
 export async function getWhatsAppOrders(): Promise<WhatsAppOrder[]> {
-  const ordersRef = collection(db, 'whatsapp_orders');
-  const q = query(ordersRef, orderBy('createdAt', 'desc'));
-  const snapshot = await getDocs(q);
-
-  return snapshot.docs.map((doc) => ({
-    id: doc.id,
-    ...doc.data(),
-    createdAt: doc.data().createdAt?.toDate(),
-  })) as WhatsAppOrder[];
+  return [...localOrders];
 }
 
 /**
  * Crea una nueva orden desde WhatsApp
  */
 export async function createWhatsAppOrder(orderData: Omit<WhatsAppOrder, 'id'>): Promise<string> {
-  const ordersRef = collection(db, 'whatsapp_orders');
-  const docRef = await addDoc(ordersRef, {
-    ...orderData,
-    createdAt: Timestamp.now(),
-  });
-  return docRef.id;
+  const id = `wo-${Date.now()}`;
+  localOrders.unshift({ id, ...orderData, createdAt: new Date() });
+  return id;
 }
 
 /**
@@ -125,14 +92,14 @@ export async function updateOrderStatus(
   orderId: string,
   status: 'pending' | 'confirmed' | 'delivered' | 'cancelled'
 ): Promise<void> {
-  const orderRef = doc(db, 'whatsapp_orders', orderId);
-  await updateDoc(orderRef, { status });
+  const order = localOrders.find((o) => o.id === orderId);
+  if (order) {
+    order.status = status;
+  }
 }
 
 /**
  * Procesa un mensaje para detectar órdenes y direcciones
- * Esta es una implementación básica con regex.
- * Para IA más avanzada, usar OpenAI o Dialogflow
  */
 export function processMessageForOrder(messageText: string): ProcessedMessageData {
   const lowerText = messageText.toLowerCase();
@@ -180,25 +147,15 @@ export function processMessageForOrder(messageText: string): ProcessedMessageDat
  * Archiva una conversación
  */
 export async function archiveConversation(conversationId: string): Promise<void> {
-  const conversationRef = doc(db, 'whatsapp_conversations', conversationId);
-  await updateDoc(conversationRef, { status: 'archived' });
+  const conv = localConversations.find((c) => c.id === conversationId);
+  if (conv) {
+    conv.status = 'archived';
+  }
 }
 
 /**
  * Obtiene órdenes pendientes de WhatsApp
  */
 export async function getPendingWhatsAppOrders(): Promise<WhatsAppOrder[]> {
-  const ordersRef = collection(db, 'whatsapp_orders');
-  const q = query(
-    ordersRef,
-    where('status', '==', 'pending'),
-    orderBy('createdAt', 'desc')
-  );
-  const snapshot = await getDocs(q);
-
-  return snapshot.docs.map((doc) => ({
-    id: doc.id,
-    ...doc.data(),
-    createdAt: doc.data().createdAt?.toDate(),
-  })) as WhatsAppOrder[];
+  return localOrders.filter((o) => o.status === 'pending');
 }

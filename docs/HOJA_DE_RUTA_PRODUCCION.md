@@ -59,14 +59,14 @@ Para maximizar la eficiencia de tokens y la precisión de razonamiento en cada s
 
 ## Tareas Pendientes por Ejecutar con `/avanzar` (`[ ]`)
 
-- [ ] **Tarea 2 — Enlace Completo de Servicios Frontend a Cloudflare D1 y Eliminación de Firestore en Cliente:**
+- [x] **Tarea 2 — Enlace Completo de Servicios Frontend a Cloudflare D1 y Eliminación de Firestore en Cliente:**
   - **Nivel Recomendado:** `3.8 Flash (High)`
-  - **Objetivo:** Conectar todos los servicios de `web/src/services/` a la nueva API `/api/*` en Cloudflare Pages Functions, dejando Firebase exclusivamente para `firebase/auth`.
-  - **Alcance Técnico:**
-    1. Crear cliente HTTP unificado [`web/src/services/apiClient.ts`](../web/src/services/apiClient.ts) que obtenga el `idToken` vigente de `firebase/auth`, inyecte el header `Authorization: Bearer <token>` y el `X-Negocio-Id` activo, y maneje errores tipados.
-    2. Refactorizar [`authService.ts`](../web/src/services/authService.ts), [`productService.ts`](../web/src/services/productService.ts), [`saleService.ts`](../web/src/services/saleService.ts), [`creditService.ts`](../web/src/services/creditService.ts), [`supplierService.ts`](../web/src/services/supplierService.ts), [`reportService.ts`](../web/src/services/reportService.ts) y [`stockAlertService.ts`](../web/src/services/stockAlertService.ts) para consumir `/api/*` (con bus de eventos reactivo local para refrescar suscriptores tras mutaciones y modo mock intacto para tests aislados).
-    3. Limpiar imports de `firebase/firestore` del bundle de producción para reducir drásticamente el peso de `firebase-vendor` (~300 KB menos de JS descargado).
-    4. Actualizar y pasar el 100 % de las pruebas unitarias en Vitest y verificar el flujo en vivo con Playwright.
+  - **Estado:** ✅ Completada y Desplegada
+  - **Evidencia Técnica:**
+    1. Cliente HTTP unificado [`web/src/services/apiClient.ts`](../web/src/services/apiClient.ts) implementado con inyección automática de Bearer Token de Firebase Auth, header multi-tenant `X-Negocio-Id`, tipado de errores (`ApiError`), control de tenant override y bus de eventos reactivo (`emitDataChange` / `onDataChange`).
+    2. Refactorizados todos los servicios de dominio a Cloudflare D1 (`authService.ts`, `productService.ts`, `saleService.ts`, `creditService.ts`, `supplierService.ts`, `reportService.ts`, `stockAlertService.ts`, `whatsappService.ts`) manteniendo el modo mock para entornos de desarrollo y pruebas.
+    3. Eliminada completamente la dependencia de `firebase/firestore` en el cliente (`firebase/config.ts`), logrando una reducción de **323.37 kB** en el bundle de producción (`firebase-vendor` pasó de 493.69 kB a 170.32 kB; 35.86 kB gzip).
+    4. 100% de las pruebas unitarias en verde (33 suites, 282 tests aprobados en Vitest), build de producción (`npm run build:web`) sin advertencias ni errores y suite Playwright ejecutada.
 
 - [ ] **Tarea 3 — Rediseño de Navegación Administrativa (Patrón HoneyBook), Pasillos y Catálogo Táctil (Sinergia Rappi Aisles + Blinkit) y Configuración del Local (`/inventario` y `/configuracion`):**
   - **Nivel Recomendado:** `3.8 Flash (High)`

@@ -12,7 +12,7 @@ import {
   signOut,
   updateProfile,
 } from 'firebase/auth';
-import { doc, getDoc, setDoc, updateDoc } from 'firebase/firestore';
+import { apiClient, ApiError } from '../services/apiClient';
 
 vi.mock('../firebase/config', () => ({
   db: {},
@@ -200,17 +200,13 @@ describe('authService', () => {
       firebaseAuthMock.currentUser = firebaseUser;
 
       vi.mocked(signInWithEmailAndPassword).mockResolvedValue({ user: firebaseUser } as any);
-      const userRef = { path: 'users/missing-user-1' };
-      vi.mocked(doc).mockReturnValue(userRef as any);
-      vi.mocked(getDoc).mockResolvedValue({ exists: () => false } as any);
       vi.mocked(signOut).mockResolvedValue(undefined);
+      vi.spyOn(apiClient, 'get').mockRejectedValueOnce(new ApiError('Usuario no encontrado', 404));
 
       await expect(
         loginUser('missing@test.com', 'password123')
       ).rejects.toMatchObject({ code: 'unauthenticated' });
 
-      expect(doc).toHaveBeenCalledWith(expect.anything(), 'users', 'missing-user-1');
-      expect(getDoc).toHaveBeenCalledWith(userRef);
       expect(signOut).toHaveBeenCalled();
     });
 
@@ -221,18 +217,15 @@ describe('authService', () => {
       firebaseAuthMock.currentUser = firebaseUser;
 
       vi.mocked(signInWithEmailAndPassword).mockResolvedValue({ user: firebaseUser } as any);
-      const userRef = { path: 'users/inactive-user-1' };
-      vi.mocked(doc).mockReturnValue(userRef as any);
-      vi.mocked(getDoc).mockResolvedValue({
-        exists: () => true,
-        data: () => ({
+      vi.mocked(signOut).mockResolvedValue(undefined);
+      vi.spyOn(apiClient, 'get').mockResolvedValueOnce({
+        user: {
           email: 'inactive@test.com',
           displayName: 'Inactive User',
           role: 'cashier',
           active: false,
-        }),
-      } as any);
-      vi.mocked(signOut).mockResolvedValue(undefined);
+        },
+      });
 
       await expect(
         loginUser('inactive@test.com', 'password123')
@@ -247,16 +240,14 @@ describe('authService', () => {
       firebaseAuthMock.currentUser = firebaseUser;
 
       vi.mocked(signInWithEmailAndPassword).mockResolvedValue({ user: firebaseUser } as any);
-      vi.mocked(doc).mockReturnValue({ path: 'users/missing-active-flag-1' } as any);
-      vi.mocked(getDoc).mockResolvedValue({
-        exists: () => true,
-        data: () => ({
+      vi.mocked(signOut).mockResolvedValue(undefined);
+      vi.spyOn(apiClient, 'get').mockResolvedValueOnce({
+        user: {
           email: 'missing-active@test.com',
           displayName: 'Missing Active Flag',
           role: 'cashier',
-        }),
-      } as any);
-      vi.mocked(signOut).mockResolvedValue(undefined);
+        },
+      });
 
       await expect(
         loginUser('missing-active@test.com', 'password123'),
@@ -272,18 +263,15 @@ describe('authService', () => {
       firebaseAuthMock.currentUser = firebaseUser;
 
       vi.mocked(signInWithEmailAndPassword).mockResolvedValue({ user: firebaseUser } as any);
-      vi.mocked(doc).mockReturnValue({ path: 'users/invalid-role-user-1' } as any);
-      vi.mocked(getDoc).mockResolvedValue({
-        exists: () => true,
-        data: () => ({
+      vi.mocked(signOut).mockResolvedValue(undefined);
+      vi.spyOn(apiClient, 'get').mockResolvedValueOnce({
+        user: {
           email: 'invalid-role@test.com',
           displayName: 'Invalid Role',
           role: 'owner',
           active: true,
-        }),
-      } as any);
-      vi.mocked(signOut).mockResolvedValue(undefined);
-      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true }));
+        },
+      });
 
       await expect(
         loginUser('invalid-role@test.com', 'password123'),
@@ -296,17 +284,15 @@ describe('authService', () => {
         uid: 'invalid-session-role-1',
       };
       firebaseAuthMock.currentUser = firebaseUser;
-      vi.mocked(doc).mockReturnValue({ path: 'users/invalid-session-role-1' } as any);
-      vi.mocked(getDoc).mockResolvedValue({
-        exists: () => true,
-        data: () => ({
+      vi.mocked(signOut).mockResolvedValue(undefined);
+      vi.spyOn(apiClient, 'get').mockResolvedValueOnce({
+        user: {
           email: 'invalid-session-role@test.com',
           displayName: 'Invalid Session Role',
           role: 'owner',
           active: true,
-        }),
-      } as any);
-      vi.mocked(signOut).mockResolvedValue(undefined);
+        },
+      });
 
       await expect(getCurrentUser()).resolves.toBeNull();
       expect(signOut).toHaveBeenCalled();
@@ -334,18 +320,8 @@ describe('authService', () => {
       firebaseAuthMock.currentUser = firebaseUser;
       const sensitiveError = new Error('Firebase: permission-denied token=secret');
       vi.mocked(signInWithEmailAndPassword).mockResolvedValue({ user: firebaseUser } as any);
-      vi.mocked(doc).mockReturnValue({ path: 'users/post-auth-failure-1' } as any);
-      vi.mocked(getDoc).mockResolvedValue({
-        exists: () => true,
-        data: () => ({
-          email: 'post-auth@test.com',
-          displayName: 'Post Auth Failure',
-          role: 'cashier',
-          active: true,
-        }),
-      } as any);
-      vi.mocked(updateDoc).mockRejectedValue(sensitiveError);
       vi.mocked(signOut).mockResolvedValue(undefined);
+      vi.spyOn(apiClient, 'get').mockRejectedValueOnce(sensitiveError);
       const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
 
       await expect(
@@ -369,59 +345,33 @@ describe('authService', () => {
       };
       firebaseAuthMock.currentUser = firebaseUser;
       vi.mocked(signInWithEmailAndPassword).mockResolvedValue({ user: firebaseUser } as any);
-      vi.mocked(doc).mockReturnValue({ path: 'users/claims-rejected-1' } as any);
-      vi.mocked(getDoc).mockResolvedValue({
-        exists: () => true,
-        data: () => ({
+      vi.mocked(signOut).mockResolvedValue(undefined);
+      vi.spyOn(apiClient, 'get').mockResolvedValueOnce({
+        user: {
+          id: 'claims-rejected-1',
           email: 'claims-rejected@test.com',
           displayName: 'Claims Rejected',
           role: 'cashier',
           active: true,
-        }),
-      } as any);
-      vi.mocked(updateDoc).mockResolvedValue(undefined);
-      const fetchMock = vi.fn().mockResolvedValue({ ok: false, status: 503 });
-      vi.stubGlobal('fetch', fetchMock);
-      vi.mocked(signOut).mockResolvedValue(undefined);
+        },
+      });
 
-      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
-
-      // ADR-0001: el documento /users/{uid} es la autoridad; los claims son cache derivada,
-      // por lo que un backend caido no debe impedir el acceso.
       await expect(
         loginUser('claims-rejected@test.com', 'password123'),
       ).resolves.toMatchObject({ id: 'claims-rejected-1', role: 'cashier', active: true });
       expect(signOut).not.toHaveBeenCalled();
-      expect(warn).toHaveBeenCalledWith('No se pudieron sincronizar custom claims.');
-      warn.mockRestore();
-      const expectedBackendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3000';
-      expect(fetchMock).toHaveBeenCalledWith(
-        `${expectedBackendUrl}/api/auth/sync-claims`,
-        expect.objectContaining({
-          headers: {
-            Authorization: 'Bearer token',
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ uid: 'claims-rejected-1' }),
-        }),
-      );
     });
 
     it('inicia sesión con Google y valida el documento autoritativo del usuario', async () => {
       const firebaseUser = { uid: 'google-1', getIdToken: vi.fn().mockResolvedValue('token') };
       firebaseAuthMock.currentUser = firebaseUser;
       vi.mocked(signInWithPopup).mockResolvedValue({ user: firebaseUser } as any);
-      vi.mocked(doc).mockReturnValue({ path: 'users/google-1' } as any);
-      vi.mocked(getDoc).mockResolvedValue({
-        exists: () => true,
-        data: () => ({ email: 'admin@example.com', displayName: 'Admin', role: 'admin', active: true }),
-      } as any);
-      vi.mocked(updateDoc).mockResolvedValue(undefined);
-      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true }));
+      vi.spyOn(apiClient, 'get').mockResolvedValueOnce({
+        user: { id: 'google-1', email: 'admin@example.com', displayName: 'Admin', role: 'admin', active: true },
+      });
 
       await expect(loginWithGoogle()).resolves.toMatchObject({ id: 'google-1', role: 'admin', active: true });
       expect(signInWithPopup).toHaveBeenCalledOnce();
-      expect(updateDoc).toHaveBeenCalledWith({ path: 'users/google-1' }, expect.objectContaining({ lastLogin: expect.anything() }));
       expect(signOut).not.toHaveBeenCalled();
     });
 
@@ -429,8 +379,7 @@ describe('authService', () => {
       const firebaseUser = { uid: 'google-unknown', getIdToken: vi.fn().mockResolvedValue('token') };
       firebaseAuthMock.currentUser = firebaseUser;
       vi.mocked(signInWithPopup).mockResolvedValue({ user: firebaseUser } as any);
-      vi.mocked(doc).mockReturnValue({ path: 'users/google-unknown' } as any);
-      vi.mocked(getDoc).mockResolvedValue({ exists: () => false } as any);
+      vi.spyOn(apiClient, 'get').mockRejectedValueOnce(new ApiError('Usuario no encontrado', 404));
       vi.mocked(signOut).mockResolvedValue(undefined);
       const errorLog = vi.spyOn(console, 'error').mockImplementation(() => undefined);
 
