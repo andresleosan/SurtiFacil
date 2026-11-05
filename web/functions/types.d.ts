@@ -32,6 +32,8 @@ export interface Env {
   DB: D1Database;
   FIREBASE_PROJECT_ID?: string;
   DEEPSEEK_API_KEY?: string;
+  WHATSAPP_VERIFY_TOKEN?: string;
+  WHATSAPP_ACCESS_TOKEN?: string;
   ENVIRONMENT?: string;
   [key: string]: unknown;
 }
@@ -51,4 +53,3 @@ export type PagesFunction<
   Params extends string = any,
   Data extends Record<string, unknown> = Record<string, unknown>
 > = (context: EventContext<TEnv, Params, Data>) => Response | Promise<Response>;
-

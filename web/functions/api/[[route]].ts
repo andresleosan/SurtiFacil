@@ -1,6 +1,7 @@
 import { PagesFunction, Env, D1Database } from '../types';
 import { jsonResponse, errorResponse, handleOptions } from '../_lib/response';
 import { authenticateRequest, AuthContext } from '../_lib/authMiddleware';
+import { processSarinCustomerMessage, ensureWhatsAppTables } from '../_lib/sarinCustomerOrchestrator';
 
 interface ProductInput {
   name: string;
@@ -1963,6 +1964,276 @@ export const onRequest: PagesFunction<Env> = async (context) => {
           message: `Pedido ${order.order_code} facturado y descontado exitosamente.`,
           sale_id: saleId,
           order_id: orderId,
+        });
+      }
+    }
+
+    // 11. Webhooks de Meta WhatsApp Cloud API (Público / HMAC & Challenge)
+    if (path === '/webhooks/whatsapp' || path.startsWith('/webhooks/whatsapp')) {
+      await ensureWhatsAppTables(env.DB);
+
+      // 11.1 Verificación de Webhook (Meta GET challenge)
+      if (method === 'GET') {
+        const mode = url.searchParams.get('hub.mode');
+        const token = url.searchParams.get('hub.verify_token');
+        const challenge = url.searchParams.get('hub.challenge');
+
+        const expectedToken = (env.WHATSAPP_VERIFY_TOKEN as string) || 'surtifacil-webhook-secret';
+        if (mode === 'subscribe' && token === expectedToken && challenge) {
+          return new Response(challenge, {
+            status: 200,
+            headers: { 'Content-Type': 'text/plain; charset=utf-8' },
+          });
+        }
+        return errorResponse('Verificación de webhook fallida.', 403);
+      }
+
+      // 11.2 Recepción de Mensajes Entrantes (Meta POST)
+      if (method === 'POST') {
+        const body = (await request.json().catch(() => ({}))) as any;
+        const entry = body?.entry?.[0];
+        const change = entry?.changes?.[0];
+        const value = change?.value;
+        const messages = value?.messages;
+
+        if (Array.isArray(messages) && messages.length > 0) {
+          const firstMsg = messages[0];
+          const fromPhone = firstMsg.from || '';
+          const messageText = firstMsg.text?.body || '';
+          const contact = value?.contacts?.[0];
+          const customerName = contact?.profile?.name || 'Cliente WhatsApp';
+
+          if (fromPhone && messageText) {
+            // Identificar tienda por teléfono de WhatsApp o tomar negocio insignia
+            let store = await env.DB.prepare(
+              'SELECT id FROM negocios WHERE telefono_whatsapp = ? OR id = ? LIMIT 1'
+            )
+              .bind(fromPhone, 'surtifacil')
+              .first<any>();
+
+            if (!store) {
+              store = await env.DB.prepare('SELECT id FROM negocios LIMIT 1').first<any>();
+            }
+
+            if (store) {
+              await processSarinCustomerMessage(env.DB, env, {
+                negocioId: store.id,
+                customerPhone: fromPhone,
+                customerName,
+                userMessage: messageText,
+              });
+            }
+          }
+        }
+
+        return jsonResponse({ success: true });
+      }
+    }
+
+    // 12. Chat Vecinal Asistido por Sarin (/api/ai/sarin-chat - Público o Cliente Web)
+    if (path === '/ai/sarin-chat' && method === 'POST') {
+      await ensureWhatsAppTables(env.DB);
+      const body = (await request.json()) as any;
+      const slug = (body.slug || 'surtifacil').trim().toLowerCase();
+      const userMessage = (body.message || body.messageText || '').trim();
+
+      if (!userMessage) {
+        return errorResponse('El mensaje no puede estar vacío.', 400);
+      }
+
+      const store = await env.DB.prepare(
+        'SELECT id, slug, nombre FROM negocios WHERE slug = ? OR id = ? LIMIT 1'
+      )
+        .bind(slug, slug)
+        .first<any>();
+
+      if (!store) {
+        return errorResponse('Tienda no encontrada.', 404);
+      }
+
+      const result = await processSarinCustomerMessage(env.DB, env, {
+        negocioId: store.id,
+        conversationId: body.conversationId,
+        customerPhone: body.customerPhone || 'web-cliente',
+        customerName: body.customerName || 'Vecino Web',
+        userMessage,
+      });
+
+      return jsonResponse({
+        success: true,
+        ...result,
+      });
+    }
+
+    // 13. Endpoints de WhatsApp para Mostrador y Staff (Requieren Auth)
+    if (path === '/whatsapp' || path.startsWith('/whatsapp/')) {
+      await ensureWhatsAppTables(env.DB);
+      const auth = await authenticateRequest(request, env);
+      const subPath = path.replace(/^\/whatsapp\/?/, '');
+
+      // 13.1 GET /api/whatsapp/conversations (Bandeja de conversaciones del local)
+      if (method === 'GET' && subPath === 'conversations') {
+        const rows = await env.DB.prepare(
+          `SELECT id, phone_number, customer_name, status, bot_active, paused_until, cart_json, 
+                  last_message_text, last_message_at, created_at, updated_at 
+           FROM whatsapp_conversations 
+           WHERE negocio_id = ? 
+           ORDER BY updated_at DESC LIMIT 50`
+        )
+          .bind(auth.negocioId)
+          .all<any>();
+
+        const conversations = (rows.results || []).map((row) => {
+          let cart = [];
+          try {
+            cart = JSON.parse(row.cart_json || '[]');
+          } catch {}
+
+          return {
+            id: row.id,
+            phoneNumber: row.phone_number,
+            customerName: row.customer_name,
+            firstMessageDate: row.created_at,
+            lastMessageDate: row.last_message_at || row.updated_at,
+            status: row.status,
+            botActive: Boolean(row.bot_active),
+            pausedUntil: row.paused_until,
+            cart,
+            lastMessageText: row.last_message_text,
+          };
+        });
+
+        return jsonResponse(conversations);
+      }
+
+      // 13.2 GET /api/whatsapp/conversations/:id/messages (Historial de mensajes)
+      if (method === 'GET' && subPath.startsWith('conversations/') && subPath.endsWith('/messages')) {
+        const convId = subPath.replace(/^conversations\//, '').replace(/\/messages$/, '').trim();
+
+        const rows = await env.DB.prepare(
+          `SELECT id, conversation_id, direction, sender, message_text, message_type, metadata_json, created_at 
+           FROM whatsapp_messages 
+           WHERE conversation_id = ? AND negocio_id = ? 
+           ORDER BY created_at ASC LIMIT 100`
+        )
+          .bind(convId, auth.negocioId)
+          .all<any>();
+
+        const messages = (rows.results || []).map((m) => {
+          let metadata = {};
+          try {
+            metadata = JSON.parse(m.metadata_json || '{}');
+          } catch {}
+
+          return {
+            id: m.id,
+            conversationId: m.conversation_id,
+            sender: m.sender === 'customer' ? 'customer' : 'admin',
+            message: m.message_text,
+            timestamp: m.created_at,
+            messageType: m.message_type || 'text',
+            metadata,
+          };
+        });
+
+        return jsonResponse(messages);
+      }
+
+      // 13.3 POST /api/whatsapp/conversations/:id/toggle-bot (Activar / Pausar Bot Sarin)
+      if (method === 'POST' && subPath.startsWith('conversations/') && subPath.endsWith('/toggle-bot')) {
+        const convId = subPath.replace(/^conversations\//, '').replace(/\/toggle-bot$/, '').trim();
+        const body = (await request.json().catch(() => ({}))) as any;
+        const botActive = body.botActive !== undefined ? (body.botActive ? 1 : 0) : 1;
+        const pausedHours = Number(body.pausedHours || 2);
+
+        if (botActive === 1) {
+          await env.DB.prepare(
+            `UPDATE whatsapp_conversations 
+             SET bot_active = 1, status = 'active', paused_until = null, updated_at = datetime('now') 
+             WHERE id = ? AND negocio_id = ?`
+          )
+            .bind(convId, auth.negocioId)
+            .run();
+        } else {
+          await env.DB.prepare(
+            `UPDATE whatsapp_conversations 
+             SET bot_active = 0, status = 'paused', 
+                 paused_until = datetime('now', '+' || ? || ' hours'), 
+                 updated_at = datetime('now') 
+             WHERE id = ? AND negocio_id = ?`
+          )
+            .bind(pausedHours, convId, auth.negocioId)
+            .run();
+        }
+
+        return jsonResponse({
+          success: true,
+          botActive: botActive === 1,
+          conversationId: convId,
+        });
+      }
+
+      // 13.4 POST /api/whatsapp/send (Envío manual de tendero a cliente)
+      if (method === 'POST' && subPath === 'send') {
+        const body = (await request.json()) as any;
+        const convId = (body.conversationId || '').trim();
+        const text = (body.message || '').trim();
+        const msgType = body.messageType || 'text';
+
+        if (!text) {
+          return errorResponse('El contenido del mensaje es obligatorio.', 400);
+        }
+
+        const msgId = `wamid-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+
+        if (convId) {
+          await env.DB.prepare(
+            `INSERT INTO whatsapp_messages (
+              id, conversation_id, negocio_id, direction, sender, message_text, message_type, created_at
+            ) VALUES (?, ?, ?, 'outbound', 'human_staff', ?, ?, datetime('now'))`
+          )
+            .bind(msgId, convId, auth.negocioId, text, msgType)
+            .run();
+
+          await env.DB.prepare(
+            `UPDATE whatsapp_conversations 
+             SET last_message_text = ?, last_message_at = datetime('now'), updated_at = datetime('now') 
+             WHERE id = ? AND negocio_id = ?`
+          )
+            .bind(text, convId, auth.negocioId)
+            .run();
+        }
+
+        return jsonResponse({
+          success: true,
+          id: msgId,
+          messageId: msgId,
+          data: {
+            messages: [{ id: msgId }],
+          },
+        });
+      }
+
+      // 13.5 POST /api/whatsapp/simulate (Simulador interactivo de Sarin desde el panel staff)
+      if (method === 'POST' && subPath === 'simulate') {
+        const body = (await request.json()) as any;
+        const text = (body.messageText || body.message || '').trim();
+
+        if (!text) {
+          return errorResponse('El mensaje para simular no puede estar vacío.', 400);
+        }
+
+        const result = await processSarinCustomerMessage(env.DB, env, {
+          negocioId: auth.negocioId,
+          conversationId: body.conversationId,
+          customerPhone: body.phoneNumber || '+573001234567',
+          customerName: body.customerName || 'Vecino en Mostrador',
+          userMessage: text,
+        });
+
+        return jsonResponse({
+          success: true,
+          ...result,
         });
       }
     }

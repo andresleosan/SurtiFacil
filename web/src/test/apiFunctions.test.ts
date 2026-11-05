@@ -17,6 +17,8 @@ class MockD1Database implements D1Database {
     purchase_order_items: any[];
     combos: any[];
     customer_orders: any[];
+    whatsapp_conversations: any[];
+    whatsapp_messages: any[];
   };
 
   constructor() {
@@ -107,6 +109,23 @@ class MockD1Database implements D1Database {
       purchase_order_items: [],
       combos: [],
       customer_orders: [],
+      whatsapp_conversations: [
+        {
+          id: 'conv-1',
+          negocio_id: 'surtifacil',
+          phone_number: '+573001234567',
+          customer_name: 'Vecino Test',
+          status: 'active',
+          bot_active: 1,
+          paused_until: null,
+          cart_json: '[]',
+          last_message_text: 'Hola vecino',
+          last_message_at: new Date().toISOString(),
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        },
+      ],
+      whatsapp_messages: [],
     };
   }
 
@@ -272,6 +291,48 @@ class MockD1Database implements D1Database {
         if (q.includes('FROM combos WHERE negocio_id = ?')) {
           const c = db.tables.combos.filter((cb: any) => cb.negocio_id === boundValues[0]);
           return { results: c as T[], success: true };
+        }
+
+        if (q.includes('SELECT cuota_ia_total, cuota_ia_usada, estado FROM negocios WHERE id = ?')) {
+          const n = db.tables.negocios.find((neg) => neg.id === boundValues[0]);
+          return {
+            results: n
+              ? ([
+                  {
+                    cuota_ia_total: n.cuota_ia_total ?? 300,
+                    cuota_ia_usada: n.cuota_ia_usada ?? 0,
+                    estado: n.estado || 'activo',
+                  },
+                ] as unknown as T[])
+              : [],
+            success: true,
+          };
+        }
+
+        if (q.includes('FROM whatsapp_conversations') && q.includes('id = ? AND negocio_id = ?')) {
+          const c = db.tables.whatsapp_conversations.find(
+            (conv) => conv.id === boundValues[0] && conv.negocio_id === boundValues[1]
+          );
+          return { results: c ? [c as T] : [], success: true };
+        }
+
+        if (q.includes('FROM whatsapp_conversations') && q.includes('phone_number = ?')) {
+          const c = db.tables.whatsapp_conversations.find(
+            (conv) => conv.negocio_id === boundValues[0] && conv.phone_number === boundValues[1]
+          );
+          return { results: c ? [c as T] : [], success: true };
+        }
+
+        if (q.includes('FROM whatsapp_conversations') && q.includes('negocio_id = ?')) {
+          const list = db.tables.whatsapp_conversations.filter((c) => c.negocio_id === boundValues[0]);
+          return { results: list as T[], success: true };
+        }
+
+        if (q.includes('FROM whatsapp_messages') && q.includes('conversation_id = ?')) {
+          const list = db.tables.whatsapp_messages.filter(
+            (m) => m.conversation_id === boundValues[0] && (!boundValues[1] || m.negocio_id === boundValues[1])
+          );
+          return { results: list as T[], success: true };
         }
 
         return { results: [], success: true };
@@ -533,6 +594,77 @@ class MockD1Database implements D1Database {
               ord.sale_id = boundValues[1];
             }
           }
+        }
+
+        if (q.startsWith('INSERT INTO whatsapp_conversations')) {
+          const [id, negocio_id, phone_number, customer_name] = boundValues;
+          db.tables.whatsapp_conversations.push({
+            id,
+            negocio_id,
+            phone_number,
+            customer_name,
+            status: 'active',
+            bot_active: 1,
+            paused_until: null,
+            cart_json: '[]',
+            last_message_text: null,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          });
+        }
+
+        if (q.startsWith('INSERT INTO whatsapp_messages')) {
+          const [id, conversation_id, negocio_id, direction, sender, message_text, message_type, metadata_json] = boundValues;
+          db.tables.whatsapp_messages.push({
+            id,
+            conversation_id,
+            negocio_id,
+            direction,
+            sender,
+            message_text,
+            message_type,
+            metadata_json: metadata_json || '{}',
+            created_at: new Date().toISOString(),
+          });
+        }
+
+        if (q.startsWith('UPDATE whatsapp_conversations')) {
+          if (q.includes('bot_active = 1')) {
+            const [convId, negId] = boundValues;
+            const conv = db.tables.whatsapp_conversations.find((c) => c.id === convId && c.negocio_id === negId);
+            if (conv) {
+              conv.bot_active = 1;
+              conv.status = 'active';
+              conv.paused_until = null;
+            }
+          } else if (q.includes('bot_active = 0')) {
+            const [pausedHours, convId, negId] = boundValues;
+            const conv = db.tables.whatsapp_conversations.find((c) => c.id === convId && c.negocio_id === negId);
+            if (conv) {
+              conv.bot_active = 0;
+              conv.status = 'paused';
+              conv.paused_until = new Date(Date.now() + Number(pausedHours) * 3600 * 1000).toISOString();
+            }
+          } else if (q.includes('cart_json = ?')) {
+            const [cartJson, lastMsg, convId, negId] = boundValues;
+            const conv = db.tables.whatsapp_conversations.find((c) => c.id === convId && c.negocio_id === negId);
+            if (conv) {
+              conv.cart_json = cartJson;
+              conv.last_message_text = lastMsg;
+            }
+          } else if (q.includes('last_message_text = ?')) {
+            const [lastMsg, convId, negId] = boundValues;
+            const conv = db.tables.whatsapp_conversations.find((c) => c.id === convId && c.negocio_id === negId);
+            if (conv) {
+              conv.last_message_text = lastMsg;
+            }
+          }
+        }
+
+        if (q.includes('UPDATE negocios') && q.includes('cuota_ia_usada = cuota_ia_usada + 1')) {
+          const [negId] = boundValues;
+          const neg = db.tables.negocios.find((n) => n.id === negId);
+          if (neg) neg.cuota_ia_usada = (neg.cuota_ia_usada ?? 0) + 1;
         }
 
         return { success: true };
@@ -1043,5 +1175,143 @@ describe('Cloudflare Pages Functions API (/api/*)', () => {
     const convertData = await convertRes.json();
     expect(convertData.success).toBe(true);
     expect(convertData.sale_id).toBeDefined();
+  });
+
+  it('verifica el webhook de WhatsApp Cloud API mediante challenge GET', async () => {
+    const db = new MockD1Database();
+    const ctx = createMockContext(
+      'GET',
+      'http://localhost/api/webhooks/whatsapp?hub.mode=subscribe&hub.verify_token=surtifacil-webhook-secret&hub.challenge=test_challenge_123',
+      {},
+      null,
+      db
+    );
+
+    const res = await onRequest(ctx as any);
+    expect(res.status).toBe(200);
+    const text = await res.text();
+    expect(text).toBe('test_challenge_123');
+  });
+
+  it('recibe mensajes de WhatsApp vía webhook y responde con 200 OK', async () => {
+    const db = new MockD1Database();
+    const payload = {
+      entry: [
+        {
+          changes: [
+            {
+              value: {
+                contacts: [{ profile: { name: 'Doña Gloria' } }],
+                messages: [
+                  {
+                    from: '+573001234567',
+                    text: { body: 'Hola vecino, ¿tiene arroz?' },
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      ],
+    };
+
+    const ctx = createMockContext(
+      'POST',
+      'http://localhost/api/webhooks/whatsapp',
+      {},
+      payload,
+      db
+    );
+
+    const res = await onRequest(ctx as any);
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.success).toBe(true);
+  });
+
+  it('permite al tendero listar conversaciones, enviar mensajes y alternar el Bot Sarin', async () => {
+    const db = new MockD1Database();
+
+    // 1. Listar conversaciones
+    const listCtx = createMockContext(
+      'GET',
+      'http://localhost/api/whatsapp/conversations',
+      { Authorization: 'Bearer mock:admin-1:admin@surtifacil.com:admin' },
+      null,
+      db
+    );
+    const listRes = await onRequest(listCtx as any);
+    expect(listRes.status).toBe(200);
+    const convs = await listRes.json();
+    expect(Array.isArray(convs)).toBe(true);
+    expect(convs.length).toBeGreaterThan(0);
+
+    // 2. Enviar mensaje del tendero a cliente
+    const sendCtx = createMockContext(
+      'POST',
+      'http://localhost/api/whatsapp/send',
+      { Authorization: 'Bearer mock:admin-1:admin@surtifacil.com:admin' },
+      { conversationId: 'conv-1', message: '¡Hola! Ya te alisto el pedido.' },
+      db
+    );
+    const sendRes = await onRequest(sendCtx as any);
+    expect(sendRes.status).toBe(200);
+    const sendData = await sendRes.json();
+    expect(sendData.success).toBe(true);
+    expect(sendData.id).toMatch(/^wamid-/);
+
+    // 3. Alternar estado del bot (pausar para atención personal)
+    const toggleCtx = createMockContext(
+      'POST',
+      'http://localhost/api/whatsapp/conversations/conv-1/toggle-bot',
+      { Authorization: 'Bearer mock:admin-1:admin@surtifacil.com:admin' },
+      { botActive: false, pausedHours: 2 },
+      db
+    );
+    const toggleRes = await onRequest(toggleCtx as any);
+    expect(toggleRes.status).toBe(200);
+    const toggleData = await toggleRes.json();
+    expect(toggleData.success).toBe(true);
+    expect(toggleData.botActive).toBe(false);
+  });
+
+  it('procesa simulación interactiva de Sarin y chat web vecinal', async () => {
+    const db = new MockD1Database();
+
+    // 1. Simulación desde panel staff
+    const simCtx = createMockContext(
+      'POST',
+      'http://localhost/api/whatsapp/simulate',
+      { Authorization: 'Bearer mock:admin-1:admin@surtifacil.com:admin' },
+      {
+        phoneNumber: '+573009998877',
+        customerName: 'Don Jaime',
+        messageText: 'Hola vecino, ¿qué tiene de despensa?',
+      },
+      db
+    );
+    const simRes = await onRequest(simCtx as any);
+    expect(simRes.status).toBe(200);
+    const simData = await simRes.json();
+    expect(simData.success).toBe(true);
+    expect(simData.reply).toBeDefined();
+
+    // 2. Chat web público con Sarin
+    const webCtx = createMockContext(
+      'POST',
+      'http://localhost/api/ai/sarin-chat',
+      {},
+      {
+        slug: 'surtifacil',
+        customerName: 'Vecina Web',
+        messageText: '¿Tienen arroz disponible?',
+      },
+      db
+    );
+    const webRes = await onRequest(webCtx as any);
+    expect(webRes.status).toBe(200);
+    const webData = await webRes.json();
+    expect(webData.success).toBe(true);
+    expect(webData.reply).toContain('Arroz');
   });
 });

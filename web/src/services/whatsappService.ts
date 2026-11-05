@@ -4,21 +4,39 @@ import type {
   WhatsAppMessage,
   WhatsAppOrder,
   ProcessedMessageData,
+  SarinSimulationResult,
 } from '../types/whatsapp';
 import { apiClient } from './apiClient';
 
 const auth = getAuth();
 
-// Almacenamiento local temporal en memoria para WhatsApp (se sincronizará con D1 en Tarea 7)
+// Almacenamiento local temporal en memoria para WhatsApp
 const localConversations: WhatsAppConversation[] = [];
 const localMessages: Record<string, WhatsAppMessage[]> = {};
 const localOrders: WhatsAppOrder[] = [];
 
 /**
- * Obtiene todas las conversaciones de WhatsApp
+ * Obtiene todas las conversaciones de WhatsApp para el negocio activo
  */
 export async function getConversations(): Promise<WhatsAppConversation[]> {
   try {
+    let user = null;
+    try {
+      user = auth.currentUser;
+    } catch {
+      // Auth no inicializado en pruebas
+    }
+
+    if (user) {
+      const data = await apiClient.get<any[]>('/whatsapp/conversations').catch(() => null);
+      if (Array.isArray(data) && data.length > 0) {
+        return data.map((c) => ({
+          ...c,
+          firstMessageDate: new Date(c.firstMessageDate || Date.now()),
+          lastMessageDate: new Date(c.lastMessageDate || Date.now()),
+        }));
+      }
+    }
     return [...localConversations];
   } catch {
     console.error('Error loading conversations.');
@@ -31,6 +49,24 @@ export async function getConversations(): Promise<WhatsAppConversation[]> {
  */
 export async function getMessages(conversationId: string): Promise<WhatsAppMessage[]> {
   try {
+    let user = null;
+    try {
+      user = auth.currentUser;
+    } catch {
+      // Auth no inicializado en pruebas
+    }
+
+    if (user) {
+      const data = await apiClient
+        .get<any[]>(`/whatsapp/conversations/${conversationId}/messages`)
+        .catch(() => null);
+      if (Array.isArray(data)) {
+        return data.map((m) => ({
+          ...m,
+          timestamp: new Date(m.timestamp || Date.now()),
+        }));
+      }
+    }
     return localMessages[conversationId] || [];
   } catch {
     console.error('Error loading messages.');
@@ -66,6 +102,44 @@ export async function sendMessage(
   } catch (error) {
     if (error instanceof Error && error.message === 'No se pudo enviar el mensaje') throw error;
     throw new Error('No se pudo enviar el mensaje');
+  }
+}
+
+/**
+ * Alterna el estado del Bot Sarin (Activo automático vs Pausado para atención humana)
+ */
+export async function toggleBotStatus(
+  conversationId: string,
+  botActive: boolean,
+  pausedHours = 2
+): Promise<boolean> {
+  try {
+    const res = await apiClient.post<any>(
+      `/whatsapp/conversations/${conversationId}/toggle-bot`,
+      { botActive, pausedHours }
+    );
+    return res?.botActive ?? botActive;
+  } catch (error) {
+    console.warn('Error cambiando estado del bot:', error);
+    return botActive;
+  }
+}
+
+/**
+ * Ejecuta una simulación interactiva de Sarin Vecino desde el panel staff
+ */
+export async function simulateSarinMessage(params: {
+  messageText: string;
+  conversationId?: string;
+  phoneNumber?: string;
+  customerName?: string;
+}): Promise<SarinSimulationResult> {
+  try {
+    const res = await apiClient.post<any>('/whatsapp/simulate', params);
+    return res;
+  } catch (error) {
+    console.error('Error en simulación de Sarin:', error);
+    throw new Error('No se pudo procesar la simulación');
   }
 }
 

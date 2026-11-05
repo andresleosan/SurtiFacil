@@ -937,3 +937,4 @@ export default function PublicStorefront({ slug = 'surtifacil', onExit }: Public
     </div>
   );
 }
+

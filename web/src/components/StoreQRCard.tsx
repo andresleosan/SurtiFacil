@@ -278,3 +278,4 @@ export function StoreQRCard({
 }
 
 export default StoreQRCard;
+

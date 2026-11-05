@@ -3,6 +3,7 @@ import type {
   WhatsAppConversation,
   WhatsAppMessage,
   WhatsAppOrder,
+  SarinSimulationResult,
 } from "../types/whatsapp";
 import {
   getConversations,
@@ -13,20 +14,31 @@ import {
   createWhatsAppOrder,
   updateOrderStatus,
   archiveConversation,
+  toggleBotStatus,
+  simulateSarinMessage,
 } from "../services/whatsappService";
 import { getProducts } from "../services/saleService";
 import { useIsMobile } from "../hooks/useMediaQuery";
 import { Icon } from "./ui/Icon";
+import { formatCentsCOP } from "../utils/currency";
 
-type TabType = "conversations" | "orders" | "statistics";
+type TabType = "conversations" | "simulator" | "orders" | "statistics";
 
 const POLL_INTERVAL_MS = 5000;
 
+interface SimMessage {
+  id: string;
+  sender: "customer" | "bot_sarin";
+  text: string;
+  timestamp: Date;
+  tools?: string[];
+  orderCode?: string;
+  trackingToken?: string;
+}
+
 export default function WhatsAppChat() {
   const isMobile = useIsMobile();
-  const [conversations, setConversations] = useState<WhatsAppConversation[]>(
-    [],
-  );
+  const [conversations, setConversations] = useState<WhatsAppConversation[]>([]);
   const [selectedConversation, setSelectedConversation] =
     useState<WhatsAppConversation | null>(null);
   const [messages, setMessages] = useState<WhatsAppMessage[]>([]);
@@ -36,6 +48,22 @@ export default function WhatsAppChat() {
   const [loading, setLoading] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const [sendError, setSendError] = useState<string | null>(null);
+  const [togglingBot, setTogglingBot] = useState(false);
+
+  // Estado para el Simulador de Sarin
+  const [simCustomerName, setSimCustomerName] = useState("Doña Gloria (Vecina)");
+  const [simCustomerPhone, setSimCustomerPhone] = useState("+573009876543");
+  const [simInput, setSimInput] = useState("");
+  const [simLoading, setSimLoading] = useState(false);
+  const [simMessages, setSimMessages] = useState<SimMessage[]>([
+    {
+      id: "sim-init",
+      sender: "bot_sarin",
+      text: "¡Hola vecino/vecina! Soy Sarin, el bot asistente de la tienda. ¿Qué le provoca llevar hoy de nuestro mercado de abastos?",
+      timestamp: new Date(),
+    },
+  ]);
+  const [simOrderCreated, setSimOrderCreated] = useState<SarinSimulationResult["orderCreated"]>(null);
 
   // Referencia a la conversación seleccionada para que el polling lea el valor actual
   const selectedConversationRef = useRef<WhatsAppConversation | null>(null);
@@ -45,8 +73,6 @@ export default function WhatsAppChat() {
     loadConversations();
     loadOrders();
 
-    // Polling cada 5 segundos para simular tiempo real,
-    // solo mientras la pestaña está visible.
     let interval: ReturnType<typeof setInterval> | null = null;
 
     const poll = () => {
@@ -130,20 +156,17 @@ export default function WhatsAppChat() {
 
     setLoading(true);
     try {
-      // Enviar mensaje
       await sendMessage(selectedConversation.id, newMessage);
 
-      // Procesar el mensaje para detectar órdenes
       const processedData = processMessageForOrder(newMessage);
 
-      // Si el mensaje contiene una orden potencial, crear un borrador
       if (processedData.hasOrder && processedData.products) {
-        // Buscar precios reales de productos
         const allProducts = await getProducts();
         const findProduct = (name: string) =>
           allProducts.find(
-            (p) => p.name.toLowerCase().includes(name.toLowerCase()) ||
-                   name.toLowerCase().includes(p.name.toLowerCase())
+            (p) =>
+              p.name.toLowerCase().includes(name.toLowerCase()) ||
+              name.toLowerCase().includes(p.name.toLowerCase())
           );
 
         let totalPrice = 0;
@@ -184,6 +207,28 @@ export default function WhatsAppChat() {
     }
   };
 
+  const handleToggleBot = async () => {
+    if (!selectedConversation || togglingBot) return;
+    setTogglingBot(true);
+    try {
+      const currentActive = selectedConversation.botActive !== false && selectedConversation.status !== "paused";
+      const nextActive = !currentActive;
+      await toggleBotStatus(selectedConversation.id, nextActive, 2);
+
+      const updated = {
+        ...selectedConversation,
+        botActive: nextActive,
+        status: (nextActive ? "active" : "paused") as WhatsAppConversation["status"],
+      };
+      setSelectedConversation(updated);
+      setConversations((prev) =>
+        prev.map((c) => (c.id === updated.id ? updated : c))
+      );
+    } finally {
+      setTogglingBot(false);
+    }
+  };
+
   const handleArchiveConversation = async () => {
     if (!selectedConversation) return;
     try {
@@ -204,6 +249,60 @@ export default function WhatsAppChat() {
     }
   };
 
+  // Enviar mensaje en el simulador
+  const handleSendSimulation = async (textToSend?: string) => {
+    const text = (textToSend || simInput).trim();
+    if (!text || simLoading) return;
+
+    const userMsgId = `sim-user-${Date.now()}`;
+    const userMsg: SimMessage = {
+      id: userMsgId,
+      sender: "customer",
+      text,
+      timestamp: new Date(),
+    };
+
+    setSimMessages((prev) => [...prev, userMsg]);
+    setSimInput("");
+    setSimLoading(true);
+
+    try {
+      const res = await simulateSarinMessage({
+        messageText: text,
+        phoneNumber: simCustomerPhone,
+        customerName: simCustomerName,
+      });
+
+      if (res?.reply) {
+        const botMsg: SimMessage = {
+          id: `sim-bot-${Date.now()}`,
+          sender: "bot_sarin",
+          text: res.reply,
+          timestamp: new Date(),
+          tools: res.toolsInvoked?.map((t) => t.tool),
+          orderCode: res.orderCreated?.orderCode,
+          trackingToken: res.orderCreated?.trackingToken,
+        };
+        setSimMessages((prev) => [...prev, botMsg]);
+      }
+
+      if (res?.orderCreated) {
+        setSimOrderCreated(res.orderCreated);
+        loadOrders();
+      }
+    } catch {
+      const errMsg: SimMessage = {
+        id: `sim-err-${Date.now()}`,
+        sender: "bot_sarin",
+        text: "¡Hola vecino! Hubo una pequeña interrupción en la simulación. Por favor intenta de nuevo.",
+        timestamp: new Date(),
+      };
+      setSimMessages((prev) => [...prev, errMsg]);
+    } finally {
+      setSimLoading(false);
+    }
+  };
+
   const quickResponses = [
     "¿Cuál es tu dirección de envío?",
     "Perfecto, confirmo tu orden. Te llegará hoy.",
@@ -212,10 +311,18 @@ export default function WhatsAppChat() {
     "Gracias por tu compra, que disfrutes 🎉",
   ];
 
+  const simulationPresets = [
+    { label: "🥑 Consultar verduras y frutas", text: "¡Hola vecino! ¿Qué verduras y frutas tiene frescas hoy?" },
+    { label: "🥛 Pedir leche y arroz", text: "Quiero 2 leches y una libra de arroz" },
+    { label: "🛵 Domicilio en Laureles", text: "Por favor a domicilio a la Carrera 70 # 45-20 en Laureles" },
+    { label: "📦 Rastrear pedido", text: "¿Cómo va mi pedido #W-01?" },
+    { label: "👨‍🌾 Transferir al tendero", text: "Quiero hablar con el tendero" },
+  ];
+
   const filteredConversations = conversations.filter(
     (conv) =>
       conv.customerName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      conv.phoneNumber.includes(searchTerm),
+      conv.phoneNumber.includes(searchTerm)
   );
 
   const pendingOrders = orders.filter((o) => o.status === "pending");
@@ -233,166 +340,92 @@ export default function WhatsAppChat() {
         : "border-transparent text-gray-600 hover:text-sf-text"
     }`;
 
-  const renderStatistics = () => (
-    <div className="p-4 md:p-6 bg-gradient-to-br from-sf-light to-gray-50">
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6 mb-6 md:mb-8">
-        {/* Total de conversaciones */}
-        <div className="bg-white rounded-lg shadow-md p-4 md:p-6 border-l-4 border-sf-primary">
-          <p className="text-gray-600 text-sm font-semibold mb-2">
-            Total Conversaciones
-          </p>
-          <p className="text-3xl md:text-4xl font-bold text-sf-primary">
-            {conversations.length}
-          </p>
-          <p className="text-xs text-gray-500 mt-2">Clientes únicos</p>
-        </div>
-
-        {/* Órdenes pendientes */}
-        <div className="bg-white rounded-lg shadow-md p-4 md:p-6 border-l-4 border-yellow-500">
-          <p className="text-gray-600 text-sm font-semibold mb-2">
-            Órdenes Pendientes
-          </p>
-          <p className="text-3xl md:text-4xl font-bold text-yellow-600">
-            {pendingOrders.length}
-          </p>
-          <p className="text-xs text-gray-500 mt-2">Por confirmar</p>
-        </div>
-
-        {/* Órdenes confirmadas */}
-        <div className="bg-white rounded-lg shadow-md p-4 md:p-6 border-l-4 border-green-500">
-          <p className="text-gray-600 text-sm font-semibold mb-2">
-            Órdenes Confirmadas
-          </p>
-          <p className="text-3xl md:text-4xl font-bold text-green-600">
-            {confirmedOrders.length}
-          </p>
-          <p className="text-xs text-gray-500 mt-2">En procesamiento</p>
-        </div>
-
-        {/* Total de ventas */}
-        <div className="bg-white rounded-lg shadow-md p-4 md:p-6 border-l-4 border-sf-cyan">
-          <p className="text-gray-600 text-sm font-semibold mb-2">
-            Total Ventas WhatsApp
-          </p>
-          <p className="text-2xl md:text-3xl font-bold text-sf-cyan break-words">
-            ${totalSales.toLocaleString()}
-          </p>
-          <p className="text-xs text-gray-500 mt-2">Todas las órdenes</p>
-        </div>
-      </div>
-
-      {/* Últimas órdenes */}
-      <div className="bg-white rounded-lg shadow-md p-4 md:p-6">
-        <h3 className="text-lg font-bold text-sf-text mb-4">Últimas Órdenes</h3>
-        <div className="space-y-3 max-h-96 overflow-y-auto">
-          {orders.length === 0 ? (
-            <p className="text-gray-500 text-center py-8">Sin órdenes aún</p>
-          ) : (
-            orders.slice(0, 10).map((order) => (
-              <div
-                key={order.id}
-                className="flex justify-between items-center gap-3 p-3 bg-sf-light rounded-lg border border-gray-200"
-              >
-                <div className="min-w-0">
-                  <p className="font-semibold text-sf-text truncate">
-                    {order.customerName}
-                  </p>
-                  <p className="text-xs text-gray-500">
-                    {order.items.length} productos
-                  </p>
-                </div>
-                <div className="text-right shrink-0">
-                  <p className="font-bold text-sf-text">${order.totalPrice}</p>
-                  <span
-                    className={`text-xs font-semibold px-2 py-1 rounded ${
-                      order.status === "pending"
-                        ? "bg-yellow-100 text-yellow-800"
-                        : "bg-green-100 text-green-800"
-                    }`}
-                  >
-                    {order.status === "pending" ? "Pendiente" : "Confirmada"}
-                  </span>
-                </div>
-              </div>
-            ))
-          )}
-        </div>
-      </div>
-    </div>
-  );
-
   const renderConversationList = () => (
-    <div
-      className={`${
-        isMobile ? "w-full" : "w-72 lg:w-80 shrink-0 border-r"
-      } border-slate-200 bg-white flex flex-col min-h-0`}
-    >
+    <div className="w-full md:w-80 lg:w-96 border-r border-slate-200 bg-white flex flex-col min-h-0">
+      {/* Buscador de clientes */}
       <div className="p-3 md:p-4 border-b border-slate-200">
-        <label htmlFor="whatsapp-search" className="sr-only">
+        <label htmlFor="search-customers" className="sr-only">
           Buscar cliente
         </label>
-        <input
-          id="whatsapp-search"
-          type="search"
-          placeholder="Buscar cliente..."
-          value={searchTerm}
-          onChange={(e) => setSearchTerm(e.target.value)}
-          className="input text-sm"
-        />
+        <div className="relative">
+          <input
+            id="search-customers"
+            type="text"
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            placeholder="Buscar cliente..."
+            className="input pl-9 text-sm w-full"
+          />
+          <span className="absolute left-3 top-2.5 text-slate-400">🔍</span>
+        </div>
       </div>
+
+      {/* Lista de conversaciones */}
       <div className="flex-1 min-h-0 overflow-y-auto">
         {filteredConversations.length === 0 ? (
-          <div className="text-center text-slate-500 py-12">
-            <p className="text-sm">
-              {searchTerm
-                ? "No coinciden resultados"
-                : "No hay conversaciones aún"}
-            </p>
+          <div className="text-center text-slate-400 py-12 px-4">
+            <p>No se encontraron conversaciones</p>
           </div>
         ) : (
-          <ul className="space-y-1 p-2" aria-label="Conversaciones">
-            {filteredConversations.map((conv) => (
-              <li key={conv.id}>
-                <button
-                  type="button"
-                  onClick={() => setSelectedConversation(conv)}
-                  className={`w-full min-h-[44px] text-left p-3 rounded-lg transition-all text-sm flex items-center justify-between gap-2 ${
-                    selectedConversation?.id === conv.id
-                      ? "bg-blue-50 border-l-4 border-blue-500 text-slate-900"
-                      : "hover:bg-slate-50 text-slate-800"
-                  }`}
-                >
-                  <span className="min-w-0">
-                    <span className="block font-semibold truncate">
-                      {conv.customerName}
-                    </span>
-                    <span className="block text-xs text-slate-500">
-                      {conv.phoneNumber}
-                    </span>
-                    <span className="block text-xs text-slate-400 mt-1">
-                      {new Date(conv.lastMessageDate).toLocaleTimeString()}
-                    </span>
-                  </span>
-                  {isMobile && (
-                    <Icon
-                      name="chevron-right"
-                      size={18}
-                      className="shrink-0 text-slate-400"
-                    />
-                  )}
-                </button>
-              </li>
-            ))}
+          <ul className="divide-y divide-slate-100">
+            {filteredConversations.map((conv) => {
+              const isBotActive = conv.botActive !== false && conv.status !== "paused";
+              return (
+                <li key={conv.id}>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedConversation(conv)}
+                    className={`w-full text-left p-3 md:p-4 hover:bg-slate-50 transition-all flex items-start justify-between gap-2 min-h-[56px] ${
+                      selectedConversation?.id === conv.id
+                        ? "bg-blue-50/70 border-l-4 border-sf-primary"
+                        : ""
+                    }`}
+                  >
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2 mb-1">
+                        <p className="font-semibold text-slate-900 truncate text-sm md:text-base">
+                          {conv.customerName}
+                        </p>
+                        {isBotActive ? (
+                          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 shrink-0">
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                            Sarin
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200 shrink-0">
+                            ⏸️ Tendero
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-xs text-slate-500 font-mono">
+                        {conv.phoneNumber}
+                      </p>
+                      {conv.lastMessageText && (
+                        <p className="text-xs text-slate-600 truncate mt-1">
+                          {conv.lastMessageText}
+                        </p>
+                      )}
+                    </div>
+                    {isMobile && (
+                      <Icon
+                        name="chevron-right"
+                        className="shrink-0 text-slate-400 mt-2"
+                      />
+                    )}
+                  </button>
+                </li>
+              );
+            })}
           </ul>
         )}
       </div>
 
-      {/* Sección de Configuración */}
-      <div className="border-t border-slate-200 p-3 md:p-4 bg-blue-50">
-        <p className="text-xs font-semibold text-blue-900 mb-3 flex items-center gap-2">
+      {/* Sección de Configuración de Meta Webhook */}
+      <div className="border-t border-slate-200 p-3 md:p-4 bg-blue-50 shrink-0">
+        <p className="text-xs font-semibold text-blue-900 mb-2 flex items-center gap-2">
           <span>⚙️</span> Configuración Requerida
         </p>
-        <ul className="space-y-2 text-xs text-blue-900">
+        <ul className="space-y-1.5 text-xs text-blue-900">
           <li className="flex items-start gap-2">
             <span className="text-blue-500 mt-0.5">•</span>
             <span>Backend con webhooks de Meta configurado</span>
@@ -423,8 +456,8 @@ export default function WhatsAppChat() {
       {selectedConversation ? (
         <>
           {/* Header del chat */}
-          <div className="bg-gradient-to-r from-blue-50 to-slate-50 border-b border-slate-200 px-3 md:px-6 py-2 md:py-4 flex justify-between items-center gap-2">
-            <div className="flex items-center gap-1 min-w-0">
+          <div className="bg-gradient-to-r from-blue-50 to-slate-50 border-b border-slate-200 px-3 md:px-6 py-2 md:py-3 flex justify-between items-center gap-2 shrink-0">
+            <div className="flex items-center gap-2 min-w-0">
               {isMobile && (
                 <button
                   type="button"
@@ -436,22 +469,78 @@ export default function WhatsAppChat() {
                 </button>
               )}
               <div className="min-w-0">
-                <p className="font-bold text-base md:text-lg text-slate-900 truncate">
-                  {selectedConversation.customerName}
-                </p>
-                <p className="text-sm text-slate-600">
+                <div className="flex items-center gap-2">
+                  <p className="font-bold text-base md:text-lg text-slate-900 truncate">
+                    {selectedConversation.customerName}
+                  </p>
+                  {selectedConversation.botActive !== false && selectedConversation.status !== "paused" ? (
+                    <span className="px-2 py-0.5 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
+                      🤖 Sarin Activo
+                    </span>
+                  ) : (
+                    <span className="px-2 py-0.5 rounded-full text-xs font-bold bg-amber-100 text-amber-800 border border-amber-200">
+                      ⏸️ Pausado (Atención Humana)
+                    </span>
+                  )}
+                </div>
+                <p className="text-xs text-slate-600 font-mono">
                   {selectedConversation.phoneNumber}
                 </p>
               </div>
             </div>
-            <button
-              type="button"
-              onClick={handleArchiveConversation}
-              className="min-h-[44px] shrink-0 px-4 bg-red-100 text-red-700 rounded-lg hover:bg-red-200 text-sm font-semibold transition-all"
-            >
-              Archivar
-            </button>
+
+            <div className="flex items-center gap-2 shrink-0">
+              {/* Botón de alternancia de bot */}
+              <button
+                type="button"
+                onClick={handleToggleBot}
+                disabled={togglingBot}
+                aria-label="Alternar Bot Sarin"
+                className={`min-h-[40px] px-3 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 border ${
+                  selectedConversation.botActive !== false && selectedConversation.status !== "paused"
+                    ? "bg-amber-50 text-amber-700 border-amber-300 hover:bg-amber-100"
+                    : "bg-emerald-50 text-emerald-700 border-emerald-300 hover:bg-emerald-100"
+                }`}
+              >
+                {selectedConversation.botActive !== false && selectedConversation.status !== "paused" ? (
+                  <>
+                    <span>⏸️</span>
+                    <span className="hidden sm:inline">Pausar Bot (2h)</span>
+                  </>
+                ) : (
+                  <>
+                    <span>🤖</span>
+                    <span className="hidden sm:inline">Reanudar Sarin</span>
+                  </>
+                )}
+              </button>
+
+              <button
+                type="button"
+                onClick={handleArchiveConversation}
+                className="min-h-[40px] px-3 bg-red-50 text-red-700 border border-red-200 rounded-lg hover:bg-red-100 text-xs font-semibold transition-all"
+              >
+                Archivar
+              </button>
+            </div>
           </div>
+
+          {/* Banner de canasta actual si existe */}
+          {selectedConversation.cart && selectedConversation.cart.length > 0 && (
+            <div className="bg-emerald-50 border-b border-emerald-200 px-4 py-2 flex items-center justify-between gap-3 text-xs text-emerald-900 shrink-0">
+              <div className="flex items-center gap-2 truncate">
+                <span className="font-bold">🛒 Canasta en curso:</span>
+                <span className="truncate">
+                  {selectedConversation.cart.map((c) => `${c.productName} ×${c.quantity}`).join(", ")}
+                </span>
+              </div>
+              <span className="font-bold text-sm shrink-0">
+                {formatCentsCOP(
+                  selectedConversation.cart.reduce((a, b) => a + (b.subtotalCents || b.quantity * b.priceCents), 0)
+                )}
+              </span>
+            </div>
+          )}
 
           {/* Mensajes */}
           <div className="flex-1 min-h-0 overflow-y-auto p-4 md:p-6 space-y-4 bg-gradient-to-b from-slate-50 to-white">
@@ -460,43 +549,73 @@ export default function WhatsAppChat() {
                 <p>Sin mensajes aún</p>
               </div>
             ) : (
-              messages.map((msg) => (
-                <div
-                  key={msg.id}
-                  className={`flex ${msg.sender === "admin" ? "justify-end" : "justify-start"}`}
-                >
+              messages.map((msg) => {
+                const isOutbound = msg.sender === "admin" || msg.sender === "bot_sarin";
+                const isSarin = msg.sender === "bot_sarin";
+
+                return (
                   <div
-                    className={`max-w-[85%] md:max-w-md px-4 py-3 rounded-lg shadow-sm ${
-                      msg.sender === "admin"
-                        ? "bg-blue-500 text-white rounded-br-none"
-                        : "bg-slate-100 text-slate-900 rounded-bl-none border border-slate-200"
-                    }`}
+                    key={msg.id}
+                    className={`flex ${isOutbound ? "justify-end" : "justify-start"}`}
                   >
-                    <p className="text-sm break-words">{msg.message}</p>
-                    <p className="text-xs mt-2 opacity-70">
-                      {new Date(msg.timestamp).toLocaleTimeString([], {
-                        hour: "2-digit",
-                        minute: "2-digit",
-                      })}
-                    </p>
+                    <div
+                      className={`max-w-[85%] md:max-w-md px-4 py-3 rounded-2xl shadow-sm ${
+                        isSarin
+                          ? "bg-emerald-600 text-white rounded-br-none border border-emerald-700"
+                          : isOutbound
+                          ? "bg-sf-primary text-white rounded-br-none"
+                          : "bg-white text-slate-900 rounded-bl-none border border-slate-200"
+                      }`}
+                    >
+                      {isSarin && (
+                        <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-emerald-100 mb-1">
+                          <span>🤖</span>
+                          <span>Bot Sarin (Automático)</span>
+                        </div>
+                      )}
+                      <p className="text-sm break-words whitespace-pre-wrap">{msg.message}</p>
+                      
+                      {msg.metadata?.orderCode && (
+                        <div className="mt-2 pt-2 border-t border-white/20 text-xs">
+                          <span className="font-bold">Turno: {msg.metadata.orderCode}</span>
+                          {msg.metadata.trackingToken && (
+                            <a
+                              href={`#/pedido/${msg.metadata.trackingToken}`}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="block mt-1 underline font-semibold text-emerald-100 hover:text-white"
+                            >
+                              🔍 Ver rastreo en vivo ➔
+                            </a>
+                          )}
+                        </div>
+                      )}
+
+                      <p className="text-[10px] mt-1.5 opacity-75 text-right font-mono">
+                        {new Date(msg.timestamp).toLocaleTimeString([], {
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        })}
+                      </p>
+                    </div>
                   </div>
-                </div>
-              ))
+                );
+              })
             )}
           </div>
 
           {/* Respuestas rápidas */}
-          <div className="border-t border-slate-200 bg-slate-50 p-3 md:p-4">
-            <p className="text-xs font-semibold text-slate-700 mb-2">
-              Respuestas rápidas:
+          <div className="border-t border-slate-200 bg-slate-50 p-2 md:p-3 shrink-0">
+            <p className="text-[11px] font-semibold text-slate-700 mb-1.5">
+              Respuestas rápidas para el tendero:
             </p>
-            <div className="flex gap-2 overflow-x-auto pb-1 md:grid md:grid-cols-1 md:overflow-visible md:pb-0">
+            <div className="flex gap-2 overflow-x-auto pb-1">
               {quickResponses.map((response, idx) => (
                 <button
                   key={idx}
                   type="button"
                   onClick={() => setNewMessage(response)}
-                  className="min-h-[44px] shrink-0 whitespace-nowrap md:whitespace-normal md:shrink text-left text-xs px-3 py-2 bg-white hover:bg-blue-50 rounded border border-slate-300 transition-all text-slate-700 hover:text-blue-600"
+                  className="min-h-[36px] shrink-0 whitespace-nowrap text-left text-xs px-3 py-1.5 bg-white hover:bg-blue-50 rounded-lg border border-slate-300 transition-all text-slate-700 hover:text-blue-600"
                 >
                   {response}
                 </button>
@@ -505,7 +624,7 @@ export default function WhatsAppChat() {
           </div>
 
           {/* Input de mensaje */}
-          <div className="border-t border-slate-200 p-3 md:p-4 bg-white">
+          <div className="border-t border-slate-200 p-3 md:p-4 bg-white shrink-0">
             {sendError && (
               <div
                 role="alert"
@@ -550,6 +669,258 @@ export default function WhatsAppChat() {
     </div>
   );
 
+  // Pestaña del Simulador de Sarin IA
+  const renderSimulatorPane = () => (
+    <div className="flex-1 min-w-0 flex flex-col bg-white min-h-0">
+      {/* Cabecera del Simulador */}
+      <div className="bg-gradient-to-r from-emerald-600 to-teal-700 text-white p-4 shrink-0 flex flex-col md:flex-row md:items-center justify-between gap-3 shadow-sm">
+        <div>
+          <div className="flex items-center gap-2">
+            <span className="text-2xl">🤖</span>
+            <h2 className="text-lg font-bold">Simulador Interactivo de Sarin Vecino (DeepSeek)</h2>
+          </div>
+          <p className="text-xs text-emerald-100 mt-0.5">
+            Prueba cómo Sarin consulta el inventario en D1, arma la canasta y confirma pedidos en tiempo real.
+          </p>
+        </div>
+
+        <div className="flex items-center gap-2 text-xs">
+          <div className="bg-white/10 px-3 py-1.5 rounded-lg border border-white/20">
+            <span className="text-emerald-200">Simulando como:</span>{" "}
+            <span className="font-bold">{simCustomerName}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              setSimMessages([
+                {
+                  id: "sim-reset",
+                  sender: "bot_sarin",
+                  text: "¡Hola vecino! Canasta reiniciada. ¿Qué le colaboro hoy de la tienda?",
+                  timestamp: new Date(),
+                },
+              ]);
+              setSimOrderCreated(null);
+            }}
+            className="px-3 py-1.5 bg-white/20 hover:bg-white/30 rounded-lg font-semibold transition-all"
+          >
+            🔄 Reiniciar
+          </button>
+        </div>
+      </div>
+
+      {/* Chips de prueba rápida */}
+      <div className="bg-emerald-50/80 border-b border-emerald-100 p-3 shrink-0">
+        <p className="text-xs font-bold text-emerald-900 mb-2 flex items-center gap-1.5">
+          <span>⚡</span>
+          <span>Casos de prueba rápida (haz clic para probar al instante):</span>
+        </p>
+        <div className="flex gap-2 overflow-x-auto pb-1">
+          {simulationPresets.map((preset, idx) => (
+            <button
+              key={idx}
+              type="button"
+              disabled={simLoading}
+              onClick={() => handleSendSimulation(preset.text)}
+              className="min-h-[36px] shrink-0 text-xs px-3 py-1.5 bg-white hover:bg-emerald-100 text-emerald-800 rounded-lg border border-emerald-200 transition-all font-medium shadow-2xs"
+            >
+              {preset.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Historial de la simulación */}
+      <div className="flex-1 min-h-0 overflow-y-auto p-4 md:p-6 space-y-4 bg-slate-50/60">
+        {simMessages.map((msg) => {
+          const isBot = msg.sender === "bot_sarin";
+          return (
+            <div
+              key={msg.id}
+              className={`flex ${isBot ? "justify-start" : "justify-end"}`}
+            >
+              <div
+                className={`max-w-[85%] md:max-w-xl p-4 rounded-2xl shadow-xs ${
+                  isBot
+                    ? "bg-white text-slate-800 border border-slate-200 rounded-bl-none"
+                    : "bg-sf-primary text-white rounded-br-none"
+                }`}
+              >
+                <div className="flex items-center justify-between gap-3 mb-1 text-[11px] opacity-75 font-semibold">
+                  <span>{isBot ? "🤖 Sarin Vecino (Bot IA)" : `👤 ${simCustomerName}`}</span>
+                  <span className="font-mono">
+                    {msg.timestamp.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                  </span>
+                </div>
+
+                <p className="text-sm whitespace-pre-wrap">{msg.text}</p>
+
+                {/* Badges de herramientas invocadas */}
+                {msg.tools && msg.tools.length > 0 && (
+                  <div className="mt-3 pt-2.5 border-t border-slate-100 flex flex-wrap gap-1.5">
+                    <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wide">
+                      Herramientas D1:
+                    </span>
+                    {msg.tools.map((t, i) => (
+                      <span
+                        key={i}
+                        className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-purple-50 text-purple-700 border border-purple-200"
+                      >
+                        ⚡ {t}
+                      </span>
+                    ))}
+                  </div>
+                )}
+
+                {/* Tarjeta de turno generado */}
+                {msg.orderCode && (
+                  <div className="mt-3 p-3 bg-emerald-50 rounded-xl border border-emerald-200">
+                    <p className="text-xs font-bold text-emerald-800">
+                      🎉 Pedido confirmado: {msg.orderCode}
+                    </p>
+                    {msg.trackingToken && (
+                      <a
+                        href={`#/pedido/${msg.trackingToken}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-block mt-1 text-xs text-emerald-700 font-bold underline hover:text-emerald-900"
+                      >
+                        Ver vista pública de rastreo en vivo ➔
+                      </a>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        })}
+
+        {simLoading && (
+          <div className="flex justify-start">
+            <div className="bg-white border border-slate-200 p-4 rounded-2xl rounded-bl-none shadow-xs flex items-center gap-3 text-slate-600 text-sm">
+              <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-ping" />
+              <span>Sarin está consultando el catálogo y calculando tu pedido...</span>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Input de la simulación */}
+      <div className="p-3 md:p-4 bg-white border-t border-slate-200 shrink-0">
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            handleSendSimulation();
+          }}
+          className="flex gap-2"
+        >
+          <input
+            type="text"
+            value={simInput}
+            onChange={(e) => setSimInput(e.target.value)}
+            placeholder="Escribe como si fueras un vecino de Medellín pidiendo por WhatsApp..."
+            className="input flex-1 text-sm"
+            disabled={simLoading}
+          />
+          <button
+            type="submit"
+            disabled={simLoading || !simInput.trim()}
+            className="btn-primary shrink-0 bg-emerald-600 hover:bg-emerald-700"
+          >
+            {simLoading ? "Procesando..." : "Enviar a Sarin"}
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+
+  const renderStatistics = () => (
+    <div className="p-4 md:p-6 bg-gradient-to-br from-sf-light to-gray-50">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6 mb-6 md:mb-8">
+        <div className="bg-white rounded-lg shadow-md p-4 md:p-6 border-l-4 border-sf-primary">
+          <p className="text-gray-600 text-sm font-semibold mb-2">
+            Total Conversaciones
+          </p>
+          <p className="text-3xl md:text-4xl font-bold text-sf-primary">
+            {conversations.length}
+          </p>
+          <p className="text-xs text-gray-500 mt-2">Clientes únicos</p>
+        </div>
+
+        <div className="bg-white rounded-lg shadow-md p-4 md:p-6 border-l-4 border-yellow-500">
+          <p className="text-gray-600 text-sm font-semibold mb-2">
+            Órdenes Pendientes
+          </p>
+          <p className="text-3xl md:text-4xl font-bold text-yellow-600">
+            {pendingOrders.length}
+          </p>
+          <p className="text-xs text-gray-500 mt-2">Por confirmar</p>
+        </div>
+
+        <div className="bg-white rounded-lg shadow-md p-4 md:p-6 border-l-4 border-green-500">
+          <p className="text-gray-600 text-sm font-semibold mb-2">
+            Órdenes Confirmadas
+          </p>
+          <p className="text-3xl md:text-4xl font-bold text-green-600">
+            {confirmedOrders.length}
+          </p>
+          <p className="text-xs text-gray-500 mt-2">En procesamiento</p>
+        </div>
+
+        <div className="bg-white rounded-lg shadow-md p-4 md:p-6 border-l-4 border-sf-cyan">
+          <p className="text-gray-600 text-sm font-semibold mb-2">
+            Total Ventas WhatsApp
+          </p>
+          <p className="text-2xl md:text-3xl font-bold text-sf-cyan break-words">
+            ${totalSales.toLocaleString()}
+          </p>
+          <p className="text-xs text-gray-500 mt-2">Todas las órdenes</p>
+        </div>
+      </div>
+
+      <div className="bg-white rounded-lg shadow-md p-4 md:p-6">
+        <h3 className="text-lg font-bold text-sf-text mb-4">Últimas Órdenes</h3>
+        <div className="space-y-3 max-h-96 overflow-y-auto">
+          {orders.length === 0 ? (
+            <p className="text-gray-500 text-center py-8">Sin órdenes aún</p>
+          ) : (
+            orders.slice(0, 10).map((order) => (
+              <div
+                key={order.id}
+                className="flex justify-between items-center gap-3 p-3 bg-sf-light rounded-lg border border-gray-200"
+              >
+                <div className="min-w-0">
+                  <p className="font-semibold text-sf-text truncate">
+                    {order.customerName}
+                  </p>
+                  <p className="text-xs text-gray-500">
+                    {order.phoneNumber} • {order.items.length} productos
+                  </p>
+                </div>
+                <div className="text-right shrink-0">
+                  <p className="font-bold text-sf-text">
+                    ${order.totalPrice.toLocaleString()}
+                  </p>
+                  <span
+                    className={`inline-block px-2 py-0.5 rounded text-xs font-semibold ${
+                      order.status === "confirmed"
+                        ? "bg-green-100 text-green-800"
+                        : order.status === "delivered"
+                        ? "bg-blue-100 text-blue-800"
+                        : "bg-yellow-100 text-yellow-800"
+                    }`}
+                  >
+                    {order.status}
+                  </span>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+    </div>
+  );
+
   const renderOrders = () => (
     <div className="flex-1 min-w-0 flex flex-col bg-white min-h-0">
       <div className="flex-1 min-h-0 overflow-y-auto p-4 md:p-6">
@@ -578,20 +949,20 @@ export default function WhatsAppChat() {
                       order.status === "pending"
                         ? "bg-yellow-100 text-yellow-800"
                         : order.status === "confirmed"
-                          ? "bg-green-100 text-green-800"
-                          : "bg-slate-100 text-slate-800"
+                        ? "bg-green-100 text-green-800"
+                        : "bg-blue-100 text-blue-800"
                     }`}
                   >
                     {order.status === "pending"
                       ? "Pendiente"
                       : order.status === "confirmed"
-                        ? "Confirmada"
-                        : order.status}
+                      ? "Confirmada"
+                      : "Entregada"}
                   </span>
                 </div>
 
-                <div className="mb-4 space-y-2">
-                  <p className="font-semibold text-sm text-slate-800">
+                <div className="mb-4">
+                  <p className="text-xs font-semibold text-slate-600 mb-2">
                     Productos:
                   </p>
                   <div className="space-y-1">
@@ -652,16 +1023,30 @@ export default function WhatsAppChat() {
       <div className="bg-white border-b border-gray-200 px-4 md:px-6 py-3 md:py-4 shrink-0">
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-3 min-w-0">
-            <div className="w-10 h-10 shrink-0 bg-gradient-to-br from-green-400 to-green-600 rounded-full flex items-center justify-center text-white text-xl">
-              💬
+            <div className="w-10 h-10 shrink-0 bg-gradient-to-br from-emerald-500 to-green-600 rounded-full flex items-center justify-center text-white text-xl shadow-xs">
+              🤖
             </div>
-            <h1 className="text-xl md:text-2xl font-bold text-sf-text truncate">
-              Gestor de WhatsApp
-            </h1>
+            <div>
+              <h1 className="text-xl md:text-2xl font-bold text-sf-text truncate flex items-center gap-2">
+                <span>Bandeja WhatsApp y Bot Sarin</span>
+                <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 hidden sm:inline-block">
+                  DeepSeek IA
+                </span>
+              </h1>
+              <p className="text-xs text-slate-500 hidden sm:block">
+                Atención automática 24/7 y pedidos en vivo desde WhatsApp para tu tienda
+              </p>
+            </div>
           </div>
-          <div className="text-sm text-gray-600 shrink-0 hidden sm:block">
-            {conversations.length > 0 &&
-              `${conversations.length} conversaciones activas`}
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={() => setActiveTab("simulator")}
+              className="btn-secondary text-xs px-3 py-1.5 flex items-center gap-1.5 border-emerald-300 text-emerald-800 bg-emerald-50 hover:bg-emerald-100"
+            >
+              <span>🤖</span>
+              <span>Probar Simulador</span>
+            </button>
           </div>
         </div>
       </div>
@@ -677,6 +1062,13 @@ export default function WhatsAppChat() {
           className={tabClass("conversations")}
         >
           Conversaciones ({conversations.length})
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveTab("simulator")}
+          className={tabClass("simulator")}
+        >
+          🤖 Simulador Sarin IA
         </button>
         <button
           type="button"
@@ -701,6 +1093,8 @@ export default function WhatsAppChat() {
             {showConversationList && renderConversationList()}
             {showConversationPane && renderConversationPane()}
           </>
+        ) : activeTab === "simulator" ? (
+          renderSimulatorPane()
         ) : activeTab === "statistics" ? (
           <div className="flex-1 min-w-0 overflow-y-auto">
             {renderStatistics()}
