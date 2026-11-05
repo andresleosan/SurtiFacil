@@ -45,3 +45,4 @@ test.describe('Modo Kiosco iPad y Bandeja de Pedidos en Vivo', () => {
     await expect(page.getByRole('button', { name: /Hacer Otro Pedido Ahora/i })).toBeVisible();
   });
 });
+

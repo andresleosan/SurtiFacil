@@ -42,7 +42,12 @@ export type IconName =
   | 'shield'
   | 'crown'
   | 'maximize'
-  | 'minimize';
+  | 'minimize'
+  | 'printer'
+  | 'download'
+  | 'copy'
+  | 'share'
+  | 'qr';
 
 const PATHS: Record<IconName, string> = {
   home: 'M3 11.5 12 4l9 7.5M5 10v10h5v-6h4v6h5V10',
@@ -87,6 +92,11 @@ const PATHS: Record<IconName, string> = {
   crown: 'm2 4 3 12h14l3-12-6 7-4-7-4 7-6-7zm3 16h14v2H5v-2z',
   maximize: 'M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3',
   minimize: 'M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3',
+  printer: 'M6 9V2h12v7M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2m-12 0v4h12v-4',
+  download: 'M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4m4-5l5 5l5-5m-5 5V3',
+  copy: 'M8 4v12a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V7.242a2 2 0 0 0-.602-1.43L16.083 2.57A2 2 0 0 0 14.685 2H10a2 2 0 0 0-2 2Zm-4 4H3a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-1',
+  share: 'M18 8a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM6 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Zm12 7a3 3 0 1 0 0-6 3 3 0 0 0 0 6Zm-9.41-4.41l6.83 3.98m0-13.14l-6.82 3.98',
+  qr: 'M3 3h6v6H3V3Zm12 0h6v6h-6V3ZM3 15h6v6H3v-6Zm12 0h3v3h-3v-3Zm3 3h3v3h-3v-3Zm-3 3h3v-3m3-3v3m-3-9h6v3h-6v-3ZM6 6h0m12 0h0M6 18h0',
 };
 
 interface IconProps extends Omit<SVGProps<SVGSVGElement>, 'name'> {

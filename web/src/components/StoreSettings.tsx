@@ -5,6 +5,7 @@ import { useHasRole } from '../auth/CurrentUserContext';
 import { getStoreSettings, updateStoreSettings } from '../services/settingsService';
 import { StoreSettings as IStoreSettings } from '../types/storeSettings';
 import { formatCOP } from '../utils/currency';
+import { StoreQRCard } from './StoreQRCard';
 
 const BARRIOS_MEDELLIN = [
   'La Candelaria / Centro',
@@ -463,6 +464,16 @@ const StoreSettings = () => {
             </div>
           </div>
         </div>
+
+        {/* Bloque 5: Afiches y Códigos QR Imprimibles */}
+        <StoreQRCard
+          storeSlug={settings?.slug || 'surtifacil'}
+          storeName={nombre || settings?.nombre || 'SurtiFácil Abastos Central'}
+          neighborhood={`${barrio || settings?.barrio || 'Medellín'}, ${settings?.ciudad || 'Medellín'}`}
+          phone={telefonoWhatsapp || settings?.telefono_whatsapp || ''}
+          address={direccion || settings?.direccion || ''}
+          hours={horario || settings?.horario || ''}
+        />
 
         {/* Botón de Guardado */}
         {canEdit && (

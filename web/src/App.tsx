@@ -28,6 +28,8 @@ const PAGE_COMPONENTS: Record<Page, ComponentType> = {
 const LandingPage = lazy(() => import('./components/LandingPage'));
 const RegisterStore = lazy(() => import('./components/RegisterStore'));
 const KioskMode = lazy(() => import('./components/KioskMode'));
+const PublicStorefront = lazy(() => import('./components/PublicStorefront'));
+const OrderTracking = lazy(() => import('./components/OrderTracking'));
 
 function PageFallback() {
   return (
@@ -63,7 +65,9 @@ function App() {
         rawHash.includes('registro') ||
         rawHash.includes('landing') ||
         rawHash.includes('inicio') ||
-        rawHash.includes('kiosco')
+        rawHash.includes('kiosco') ||
+        rawHash.includes('tienda') ||
+        rawHash.includes('pedido')
       ) {
         return;
       }
@@ -135,6 +139,46 @@ function App() {
       <Suspense fallback={<PageFallback />}>
         <KioskMode
           slug={kioskSlug}
+          onExit={
+            currentUser
+              ? () => {
+                  window.location.hash = '#/dashboard';
+                }
+              : undefined
+          }
+        />
+      </Suspense>
+    );
+  }
+
+  // Ruta pública: Rastreo de Pedido en Vivo (#/pedido/:token)
+  const orderTrackMatch = currentHash.match(/pedido(?:\/([^/?#]+))?/);
+  if (orderTrackMatch) {
+    const token = orderTrackMatch[1] || '';
+    return (
+      <Suspense fallback={<PageFallback />}>
+        <OrderTracking
+          token={token}
+          onExit={
+            currentUser
+              ? () => {
+                  window.location.hash = '#/dashboard';
+                }
+              : undefined
+          }
+        />
+      </Suspense>
+    );
+  }
+
+  // Ruta pública: Catálogo de Tienda Vecinal Online (#/tienda/:slug)
+  const storefrontMatch = currentHash.match(/tienda(?:\/([^/?#]+))?/);
+  if (storefrontMatch) {
+    const storeSlug = storefrontMatch[1] || 'surtifacil';
+    return (
+      <Suspense fallback={<PageFallback />}>
+        <PublicStorefront
+          slug={storeSlug}
           onExit={
             currentUser
               ? () => {

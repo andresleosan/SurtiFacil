@@ -1059,3 +1059,4 @@ export default function KioskMode({ slug = 'surtifacil', onExit }: KioskModeProp
     </div>
   );
 }
+
