@@ -68,20 +68,26 @@ Este archivo es la **fuente de verdad persistente entre sesiones** para el coman
     4. Crear gestor de **Combos y Kits de Mercado** (ej. *"Combo Desayuno Paisa"*, *"Kit Aseo Mes"*) donde el staff agrupa productos existentes con precio especial.
     5. Crear la vista **Configuración del Negocio** (`web/src/components/StoreSettings.tsx`) para editar: nombre comercial, barrio en Medellín, dirección, teléfono WhatsApp de pedidos, horario de atención, valor del domicilio, datos informativos de pago (Nequi / Bancolombia) y mensaje de bienvenida.
 
-- [ ] **Tarea 4 — Plataforma SaaS Multi-Tenant para Abastos en Medellín: Planes, Registro de Locales (`/registro-negocio`), Selector de Tienda y Panel SuperAdmin (`/super-admin`):**
-  - **Objetivo:** Convertir SurtiFácil en un SaaS comercializable para cientos de tiendas de barrio en Medellín, con control centralizado de suscripciones y cuotas de IA por tienda.
+- [ ] **Tarea 4 — Plataforma SaaS Multi-Tenant para Abastos en Medellín: Landing Comercial (Patrón Mobbin Food & Drink), Rediseño de Login, Planes, Registro de Locales (`/registro-negocio`) y Panel SuperAdmin (`/super-admin`):**
+  - **Objetivo:** Convertir SurtiFácil en un SaaS comercializable para cientos de tiendas de barrio en Medellín, dotándolo de una landing page pública de alta conversión, login moderno con split-screen, control centralizado de suscripciones y cuotas de IA por tienda.
   - **Alcance Técnico:**
-    1. Implementar los 4 planes SaaS offline en `web/src/types/tenant.ts` y endpoints `/api/super-admin/negocios`:
+    1. **Landing Page Comercial ([Patrón Food & Drink Home en Mobbin](https://mobbin.com/screens/a205105f-d2be-4377-86b1-5f9302b2ec46)):**
+       - Construir la portada pública (`LandingPage.tsx`) con hero visual: *"El software POS y vitrina digital para tiendas de barrio, abastos y minimercados en Medellín"*.
+       - Call to Actions claros (`[ Registrar mi Tienda Gratis ]` y `[ Ver Demostración en Vivo ]`), vitrina interactiva de pasillos de abastos y selector visual de los 4 planes.
+    2. **Rediseño de Login ([Patrón Food & Drink Login en Mobbin](https://mobbin.com/screens/fccbb1ba-89e3-4295-8765-776a97487bc7)):**
+       - Renovar [`Login.tsx`](../web/src/components/Login.tsx) con diseño split-screen (fotografía cálida de abastos a la izquierda en desktop/tablet y tarjeta ergonómica a la derecha).
+       - Botón social Google estilizado, campos con iconos, toggle para ver/ocultar contraseña (👁️) y enlace a registro de nuevos comercios.
+    3. Implementar los 4 planes SaaS offline en `web/src/types/tenant.ts` y endpoints `/api/super-admin/negocios`:
        - **Plan Prueba (3 días):** \$ 5.000 COP · 300 turnos Sarin IA.
        - **Plan Semanal (7 días):** \$ 19.900 COP · 700 turnos Sarin IA.
        - **Plan Quincenal (15 días):** \$ 34.900 COP · 1.500 turnos Sarin IA.
        - **Plan Mensual (30 días):** \$ 59.900 COP · 3.000 turnos Sarin IA.
        - **Plan Enterprise Insignia:** Ilimitado para la sede principal `surtifacil`.
-    2. Construir la página pública de captación y registro de tenderos (`#/registro-negocio` — `RegisterStore.tsx`) con selector visual de planes, selección de barrio/comuna de Medellín y creación de tienda en estado `pendiente` o `prueba_activa`.
-    3. Construir el **Centro de Control SuperAdmin** (`#/super-admin` — `SuperAdminStores.tsx`) exclusivo para `andres.san1404@gmail.com`:
+    4. Construir la página pública de captación y registro de tenderos (`#/registro-negocio` — `RegisterStore.tsx`) con selector visual de planes, selección de barrio/comuna de Medellín y creación de tienda en estado `pendiente` o `prueba_activa`.
+    5. Construir el **Centro de Control SuperAdmin** (`#/super-admin` — `SuperAdminStores.tsx`) exclusivo para `andres.san1404@gmail.com`:
        - 4 KPIs de plataforma (Total Tiendas, Tiendas Activas, Recaudo Estimado Mensual, Consumo Global Sarin IA).
        - Filtros por estado/barrio, activación y renovación rápida a 1 clic (`+3d`, `+7d`, `+15d`, `+30d`), barra de progreso de cuota IA y botón **"Operar esta tienda"** con selector de tienda activa en la barra superior (`AppShell.tsx`).
-    4. Agregar `SubscriptionBanner.tsx` en el `Dashboard` del tendero mostrando días restantes de su plan, consumo de Sarin IA y botón directo para renovar por WhatsApp con el administrador de la plataforma.
+    6. Agregar `SubscriptionBanner.tsx` en el `Dashboard` del tendero mostrando días restantes de su plan, consumo de Sarin IA y botón directo para renovar por WhatsApp con el administrador de la plataforma.
 
 - [ ] **Tarea 5 — Modo Kiosco Táctil / iPad Afuera del Local (`#/kiosco/:slug`) y Bandeja de Pedidos en Vivo en POS con Alerta Sonora:**
   - **Objetivo:** Habilitar una interfaz táctil de autoatención tipo Kiosco para tablets/iPads ubicados afuera o en la entrada del local de abastos, conectada en tiempo real con la caja del tendero.

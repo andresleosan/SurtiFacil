@@ -132,5 +132,27 @@ Este documento define las reglas visuales, ergonómicas, de accesibilidad, voz (
   - **Vista General / Kiosco:** El usuario o cliente explora los departamentos con la cuadrícula de pasillos ilustrados de **Rappi**.
   - **Al Seleccionar un Pasillo:** Entra a la cuadrícula de productos con el riel vertical izquierdo de **Blinkit**, permitiendo al cajero o cliente alternar rápidamente entre pasillos sin devolverse de pantalla.
 
+### 6.4 Landing Page Pública y Vitrina Comercial ([Patrón Food & Drink Home en Mobbin](https://mobbin.com/screens/a205105f-d2be-4377-86b1-5f9302b2ec46))
+- **Hero Section Visual:**
+  - Encabezado con propuesta de valor directa: *"El software POS y vitrina digital para tiendas de barrio, abastos y minimercados en Medellín"*.
+  - Call to Action dual de alto impacto: `[ Registrar mi Tienda Gratis ]` y `[ Ver Demostración en Vivo ]`.
+  - Banners de beneficios visuales: Arqueo en COP sin descuadres, Libro de Fiados en WhatsApp, Modo Kiosco iPad y Asistente Sarin con IA.
+- **Vitrina Interactiva de Productos y Pasillos:**
+  - Vista previa en vivo del catálogo vecinal interactivo con productos típicos colombianos y cálculo inmediato de canasta.
+- **Sección de Confianza y Planes:**
+  - Selector claro de los 4 planes offline (\$ 5.000 COP prueba a \$ 59.900 COP mensual) con activación por WhatsApp.
+
+### 6.5 Pantalla de Inicio de Sesión / Login ([Patrón Food & Drink Login en Mobbin](https://mobbin.com/screens/fccbb1ba-89e3-4295-8765-776a97487bc7))
+- **Layout Adaptable (Split-Screen en Desktop y Tarjeta Elevada en Móvil):**
+  - **Lado Izquierdo / Ilustración en Desktop:** Imagen fotográfica cálida de alta calidad (mostrador de abastos ordenado, alimentos frescos y tecnología POS rápida) con el eslogan *"El motor digital de la tienda paisa"*.
+  - **Lado Derecho / Tarjeta Frontal:**
+    - Logo oficial de SurtiFácil con subtítulo *"Bienvenido de vuelta, tendero"*.
+    - Botón de acceso de 1 toque con **Google** con diseño refinado y feedback inmediato.
+    - Divisor sutil *"o ingresa con tu correo"*.
+    - Campos ergonómicos con iconos flotantes (`Email` y `Contraseña` con botón de alternar visibilidad de clave 👁️).
+    - Botón primario de acceso `min-h-[48px]` con estado de carga animado.
+    - Enlace inferior destacado para tenderos nuevos: *"¿No tienes cuenta aún? Registra tu tienda aquí"*.
+
+
 
 
