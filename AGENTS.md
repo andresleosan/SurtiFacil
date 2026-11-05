@@ -94,8 +94,18 @@ npm run test:e2e
 
 ---
 
-## 6. Flujo de Trabajo con `/avanzar`
+## 6. Flujo de Trabajo con `/avanzar` y Matriz de Modelos
 
 1. La fuente de verdad del progreso entre sesiones es [`docs/HOJA_DE_RUTA_PRODUCCION.md`](docs/HOJA_DE_RUTA_PRODUCCION.md).
 2. Todo diseño de interfaz e interacción debe cumplir estrictamente [`DESIGN.md`](DESIGN.md).
-3. Ninguna tarea se da por terminada sin compilar sin errores (`npm run build:web`), pasar las pruebas (`npm test` + Playwright) y subir los cambios con `git commit` y `git push` para su despliegue automático en `https://surtifacil.pages.dev/`.
+3. Cada tarea se ejecuta en una **sesión limpia e independiente** para preservar la frescura y capacidad de contexto.
+4. **Matriz de 6 Niveles de Modelo y Esfuerzo (3.8 Flash + Argon):**
+   Para maximizar la eficiencia de tokens y precisión de razonamiento, cada tarea en la hoja de ruta y cada cierre de `/avanzar` debe clasificar la próxima tarea eligiendo exactamente uno de estos 6 niveles:
+   - **`3.8 Flash (Low)`**: Cambios cosméticos, copy, variables de entorno o ajustes CSS aislados.
+   - **`3.8 Flash (Medium)`**: Modales, formularios estándar, generadores Canvas (afiches QR) y reportes de solo lectura.
+   - **`3.8 Flash (High)`**: Refactorizaciones modulares masivas, integración de múltiples componentes y APIs REST serverless (ej. Tareas 2, 3 y 4).
+   - **`Argon (Low)`**: Lógica de mostrador con APIs de hardware (Fullscreen API, alertas acústicas Web Audio API, ej. Tarea 5 Kiosco).
+   - **`Argon (Medium)`**: Orquestación de IA con Function Calling, DeepSeek API en Cloudflare Functions y reconocimiento de voz continuo en POS (ej. Tareas 7 y 8).
+   - **`Argon (High)`**: Arquitecturas distribuidas complejas, sincronización offline bidireccional (IndexedDB + replay de colas) y suites E2E completas (ej. Tarea 10).
+5. Ninguna tarea se da por terminada sin compilar sin errores (`npm run build:web`), pasar las pruebas (`npm test` + Playwright) y subir los cambios con `git commit` y `git push` para su despliegue automático en `https://surtifacil.pages.dev/`.
+

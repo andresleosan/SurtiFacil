@@ -44,9 +44,23 @@ Este archivo es la **fuente de verdad persistente entre sesiones** para el coman
 
 ---
 
+## Matriz de 6 Niveles de Modelo y Esfuerzo (3.8 Flash + Argon)
+
+Para maximizar la eficiencia de tokens y la precisión de razonamiento en cada sesión independiente con `/avanzar`, cada tarea pendiente se clasifica eligiendo **exactamente uno** de estos 6 niveles:
+
+1. **`3.8 Flash (Low)`**: Cambios cosméticos, copy, variables de entorno o ajustes CSS aislados.
+2. **`3.8 Flash (Medium)`**: Modales, formularios estándar, generadores Canvas (afiches QR) y reportes de solo lectura.
+3. **`3.8 Flash (High)`**: Refactorizaciones modulares masivas, integración de múltiples componentes y APIs REST serverless.
+4. **`Argon (Low)`**: Lógica de mostrador sensible con APIs de hardware (Fullscreen API, alertas acústicas Web Audio API).
+5. **`Argon (Medium)`**: Algoritmos complejos de servidor, transacciones atómicas multitabla y orquestación de IA (DeepSeek + Function Calling / Web Speech).
+6. **`Argon (High)`**: Arquitecturas complejas, sincronización offline bidireccional (IndexedDB + replay de colas) y suites E2E integrales.
+
+---
+
 ## Tareas Pendientes por Ejecutar con `/avanzar` (`[ ]`)
 
 - [ ] **Tarea 2 — Enlace Completo de Servicios Frontend a Cloudflare D1 y Eliminación de Firestore en Cliente:**
+  - **Nivel Recomendado:** `3.8 Flash (High)`
   - **Objetivo:** Conectar todos los servicios de `web/src/services/` a la nueva API `/api/*` en Cloudflare Pages Functions, dejando Firebase exclusivamente para `firebase/auth`.
   - **Alcance Técnico:**
     1. Crear cliente HTTP unificado [`web/src/services/apiClient.ts`](../web/src/services/apiClient.ts) que obtenga el `idToken` vigente de `firebase/auth`, inyecte el header `Authorization: Bearer <token>` y el `X-Negocio-Id` activo, y maneje errores tipados.
@@ -55,6 +69,7 @@ Este archivo es la **fuente de verdad persistente entre sesiones** para el coman
     4. Actualizar y pasar el 100 % de las pruebas unitarias en Vitest y verificar el flujo en vivo con Playwright.
 
 - [ ] **Tarea 3 — Rediseño de Navegación Administrativa (Patrón HoneyBook), Pasillos y Catálogo Táctil (Sinergia Rappi Aisles + Blinkit) y Configuración del Local (`/inventario` y `/configuracion`):**
+  - **Nivel Recomendado:** `3.8 Flash (High)`
   - **Objetivo:** Renovar la experiencia visual y operativa del staff implementando la navegación jerárquica inspirada en HoneyBook en el AppShell, la matriz de exploración visual de pasillos inspirada en Rappi Aisles y el catálogo de productos con riel vertical táctil inspirado en Blinkit, permitiendo administrar productos, unidades de medida, combos y configuración comercial.
   - **Alcance Técnico:**
     1. **Navegación Administrativa ([Patrón HoneyBook en Mobbin](https://mobbin.com/screens/bcce288e-c338-41f8-a1d1-fb6b6d6dc709)):**
@@ -69,6 +84,7 @@ Este archivo es la **fuente de verdad persistente entre sesiones** para el coman
     5. Crear la vista **Configuración del Negocio** (`web/src/components/StoreSettings.tsx`) para editar: nombre comercial, barrio en Medellín, dirección, teléfono WhatsApp de pedidos, horario de atención, valor del domicilio, datos informativos de pago (Nequi / Bancolombia) y mensaje de bienvenida.
 
 - [ ] **Tarea 4 — Plataforma SaaS Multi-Tenant para Abastos en Medellín: Landing Comercial (Patrón Mobbin Food & Drink), Rediseño de Login, Planes, Registro de Locales (`/registro-negocio`) y Panel SuperAdmin (`/super-admin`):**
+  - **Nivel Recomendado:** `3.8 Flash (High)`
   - **Objetivo:** Convertir SurtiFácil en un SaaS comercializable para cientos de tiendas de barrio en Medellín, dotándolo de una landing page pública de alta conversión, login moderno con split-screen, control centralizado de suscripciones y cuotas de IA por tienda.
   - **Alcance Técnico:**
     1. **Landing Page Comercial ([Patrón Food & Drink Home en Mobbin](https://mobbin.com/screens/a205105f-d2be-4377-86b1-5f9302b2ec46)):**
@@ -90,6 +106,7 @@ Este archivo es la **fuente de verdad persistente entre sesiones** para el coman
     6. Agregar `SubscriptionBanner.tsx` en el `Dashboard` del tendero mostrando días restantes de su plan, consumo de Sarin IA y botón directo para renovar por WhatsApp con el administrador de la plataforma.
 
 - [ ] **Tarea 5 — Modo Kiosco Táctil / iPad Afuera del Local (`#/kiosco/:slug`) y Bandeja de Pedidos en Vivo en POS con Alerta Sonora:**
+  - **Nivel Recomendado:** `Argon (Low)`
   - **Objetivo:** Habilitar una interfaz táctil de autoatención tipo Kiosco para tablets/iPads ubicados afuera o en la entrada del local de abastos, conectada en tiempo real con la caja del tendero.
   - **Alcance Técnico:**
     1. Crear tabla `customer_orders` en D1 (`id`, `negocio_id`, `order_code`, `source` ['kiosk' | 'web' | 'whatsapp'], `customer_name`, `customer_phone`, `delivery_type` ['pickup_counter' | 'delivery'], `delivery_address`, `delivery_neighborhood`, `payment_method` ['cash' | 'transfer' | 'credit'], `items_json`, `total_cents`, `status` ['pending' | 'preparing' | 'ready_or_on_way' | 'completed' | 'cancelled'], `tracking_token`, `created_at`) y endpoints públicos/privados en `/api/customer-orders`.
@@ -101,6 +118,7 @@ Este archivo es la **fuente de verdad persistente entre sesiones** para el coman
     3. Integrar en el POS (`CreateSale.tsx`) y en la navegación una **Bandeja de Pedidos de Clientes (Kiosco / Web / WhatsApp)** con timbre acústico Web Audio API (`playNewOrderChime`), permitiendo al tendero ver lo que pidió el cliente en el iPad y **Facturarlo / Descontar Stock en 1 clic**.
 
 - [ ] **Tarea 6 — Catálogo Web Vecinal por Negocio (`#/tienda/:slug`), Rastreo de Pedido en Vivo (`#/pedido/:token`) y Generador de Afiche QR Imprimible:**
+  - **Nivel Recomendado:** `3.8 Flash (Medium)`
   - **Objetivo:** Darle a cada local de abastos su propia tienda virtual pública para recibir domicilios del barrio y un generador de carteles QR listos para imprimir y pegar en el mostrador o vitrina.
   - **Alcance Técnico:**
     1. Construir el Storefront Vecinal (`web/src/components/PublicStorefront.tsx` en `#/tienda/:slug`) con cabecera personalizada del negocio (nombre, barrio, horario, estado Abierto/Cerrado), ofertas destacadas, combos de mercado, carrito de compras y checkout de domicilio o retiro en tienda.
@@ -108,6 +126,7 @@ Este archivo es la **fuente de verdad persistente entre sesiones** para el coman
     3. Crear el componente [`StoreQRCard.tsx`](../web/src/components/StoreQRCard.tsx) y generador en Canvas (`qrPosterGenerator.ts`) dentro de Configuración de la Tienda para descargar en PNG de alta resolución (1200×1600 px) el **Afiche QR de Tienda Vecinal** y el **Acceso Directo al Modo Kiosco iPad**.
 
 - [ ] **Tarea 7 — Integración de DeepSeek API y Bot Sarin Vecino para Pedidos Automáticos por WhatsApp y Chat Web:**
+  - **Nivel Recomendado:** `Argon (Medium)`
   - **Objetivo:** Conectar la API de **DeepSeek** (`deepseek-chat`) para que el bot **Sarin** atienda automáticamente a los clientes de cada tienda por WhatsApp y por el widget de chat web, consultando el inventario real en D1 y creando los pedidos sin intervención manual.
   - **Alcance Técnico:**
     1. Implementar `web/functions/_lib/deepseekEngine.ts` compatible con el formato OpenAI/DeepSeek Chat Completions (`https://api.deepseek.com/chat/completions`), leyendo el secreto `DEEPSEEK_API_KEY` en Cloudflare y verificando/descontando atómicamente la cuota `cuota_ia_usada` del `negocio_id` en D1.
@@ -119,6 +138,7 @@ Este archivo es la **fuente de verdad persistente entre sesiones** para el coman
     3. Conectar el endpoint de webhook `/api/webhooks/whatsapp` (con validación HMAC y soporte multi-tenant) y renovar [`WhatsAppChat.tsx`](../web/src/components/WhatsAppChat.tsx) con bandeja en vivo, interruptor de Bot Activo / Pausa Manual por conversación y **Simulador Interactivo de Sarin** para probar pedidos desde el panel.
 
 - [ ] **Tarea 8 — Bot Sarin Copiloto del Tendero: Voz Manos Libres en POS y Consultor Gerencial de Negocio con DeepSeek:**
+  - **Nivel Recomendado:** `Argon (Medium)`
   - **Objetivo:** Dotar al tendero y administrador de un copiloto inteligente por voz y texto que acelere el cobro en mostrador cuando tiene las manos ocupadas y responda preguntas operativas y financieras de su negocio en tiempo real.
   - **Alcance Técnico:**
     1. Construir `SarinVoicePOS.tsx` integrado en [`CreateSale.tsx`](../web/src/components/CreateSale.tsx):
@@ -128,6 +148,7 @@ Este archivo es la **fuente de verdad persistente entre sesiones** para el coman
        - Consultas al instante por voz o chat: *"¿Cuánto llevamos vendido hoy y cuál es la ganancia?"*, *"¿Quiénes son los 5 clientes que más me deben en fiados?"*, *"¿Qué productos tienen stock crítico hoy?"*, *"Ármame la lista sugerida de compra para el proveedor"*.
 
 - [ ] **Tarea 9 — Cierre de Caja con Arqueo Físico de Billetes/Monedas COP, Ticket Térmico (58mm/80mm) y Cobro Amigable de Fiados por WhatsApp:**
+  - **Nivel Recomendado:** `3.8 Flash (Medium)`
   - **Objetivo:** Blindar el control del efectivo diario del tendero con arqueo físico en denominaciones colombianas, impresión de tirillas térmicas de mostrador y gestión de cobro de cartera de fiados a 1 clic.
   - **Alcance Técnico:**
     1. Crear módulo de **Cierre de Caja y Arqueo Físico COP** (`CashClosingModal.tsx` y tabla `cash_closings` en D1):
@@ -137,6 +158,7 @@ Este archivo es la **fuente de verdad persistente entre sesiones** para el coman
     3. En [`Credits.tsx`](../web/src/components/Credits.tsx), agregar botón **"Enviar Recordatorio por WhatsApp"** que abre un mensaje cordial pre-formateado con el nombre del vecino, el saldo pendiente en `formatCOP`, los últimos movimientos y los datos de Nequi/Bancolombia de la tienda.
 
 - [ ] **Tarea 10 — Modo Offline Resiliente en Mostrador (IndexedDB + Cola de Sincronización Multi-Tenant) y Suite E2E Completa con Playwright:**
+  - **Nivel Recomendado:** `Argon (High)`
   - **Objetivo:** Garantizar que ninguna tienda de barrio detenga sus ventas o abonos si falla el internet del sector, y certificar toda la plataforma de punta a punta con Playwright.
   - **Alcance Técnico:**
     1. Implementar `offlineSyncService.ts` sobre IndexedDB con aislamiento por `negocio_id`:
@@ -148,4 +170,5 @@ Este archivo es la **fuente de verdad persistente entre sesiones** para el coman
        - Flujo completo de pedido en **Modo Kiosco iPad** (`#/kiosco/surtifacil`) y recepción en POS.
        - Flujo de **Tienda Vecinal** (`#/tienda/surtifacil`) y rastreo de pedido.
        - Venta en POS con Copiloto Sarin, Libro de Fiados, Arqueo de Caja COP y Panel SuperAdmin.
+
 

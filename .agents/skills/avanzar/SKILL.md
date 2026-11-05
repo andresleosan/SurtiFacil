@@ -9,7 +9,26 @@ description: >-
 
 # Skill `/avanzar` — Ciclo Completo de Planificación, Construcción Limpia, QA con Playwright y Despliegue a Producción
 
-Cuando el usuario invoque `/avanzar` (o pida avanzar con las tareas pendientes en una nueva sesión), ejecuta estrictamente este protocolo de 5 fases en orden secuencial:
+Cuando el usuario invoque `/avanzar` (o pida avanzar con las tareas pendientes en una nueva sesión), ejecuta estrictamente este protocolo secuencial:
+
+---
+
+## Matriz de 6 Niveles de Modelo y Esfuerzo (3.8 Flash + Argon)
+
+Para maximizar la eficiencia de tokens y la precisión de razonamiento en cada sesión independiente, cada tarea en la hoja de ruta y cada cierre de `/avanzar` debe clasificar la próxima tarea eligiendo **exactamente uno** de estos 6 niveles:
+
+| Nivel | Cuándo Elegirlo (Criterio de Selección) | Ejemplos Típicos en SurtiFácil |
+|---|---|---|
+| **`3.8 Flash (Low)`** | Tareas directas de configuración, copy, textos, ajustes CSS puntuales o cambios aislados de 1 solo archivo sin lógica de estado ni transacciones. | Corrección de copy, etiquetas de UI, variables de entorno, estilos cosméticos. |
+| **`3.8 Flash (Medium)`** | Maquetación de componentes visuales estándar (cards, modales, formularios simples), generadores gráficos en Canvas (afiches QR) y reportes de solo lectura. | `StoreQRCard.tsx`, modal de arqueo físico COP, comprobante térmico 58mm/80mm. |
+| **`3.8 Flash (High)`** | Refactorización masiva de servicios, integración de múltiples componentes interactivos, consumo de APIs REST serverless y vistas con catálogos fluidos. | Enlace de servicios a D1 (`Tarea 2`), Navegación HoneyBook + Catálogo Blinkit (`Tarea 3`), Landing + Login (`Tarea 4`). |
+| **`Argon (Low)`** | Lógica de negocio sensible pero acotada (pantallas táctiles de mostrador con estados de hardware como Fullscreen API, alertas acústicas Web Audio API). | Modo Kiosco iPad (`Tarea 5`) con emisión de turnos gigantes y alerta sonora en caja. |
+| **`Argon (Medium)`** | Algoritmos complejos de servidor, transacciones financieras atómicas multitabla, orquestación de IA con Function Calling o reconocimiento de voz continuo en POS. | Integración DeepSeek API + Bot Sarin WhatsApp (`Tarea 7`), Copiloto de Voz Manos Libres en POS (`Tarea 8`). |
+| **`Argon (High)`** | Arquitecturas distribuidas de alta complejidad, sincronización offline bidireccional (IndexedDB + colas de replay y resolución de conflictos) y suite E2E general. | Modo Offline Resiliente de Mostrador con IndexedDB + Suite E2E Completa con Playwright (`Tarea 10`). |
+
+---
+
+## Protocolo de Ejecución de 5 Fases
 
 ---
 
@@ -64,6 +83,9 @@ Una vez finalizado por completo el ciclo de construcción de la tarea:
    git -c safe.directory=E:/Proyectos/SurtiFacil push origin main
    ```
    *(Usa `BypassSandbox: true` únicamente en el comando `git push` si el sandbox bloquea la salida de red).*
-3. Finaliza tu respuesta confirmando el despliegue y diciéndole explícitamente al usuario:
-   > **"✅ Todo quedó implementado, probado con Playwright y subido a producción en `https://surtifacil.pages.dev/`. Cuando revises, puedes escribir `/avanzar` para continuar con la siguiente tarea."**
+3. Identifica la **siguiente tarea pendiente** en la hoja de ruta y clasifícala seleccionando exactamente uno de los niveles de la **Matriz de 6 Niveles de Modelo y Esfuerzo (3.8 Flash + Argon)**.
+4. Finaliza tu respuesta confirmando el despliegue y guiando explícitamente al usuario para su próxima sesión fresca:
+   > **"🎯 Próxima Tarea: <Nombre y número de la tarea siguiente>"**
+   > **"⚙️ Modelo y Esfuerzo Recomendado para la próxima sesión: `<Nivel de la Matriz>`"**
+   > **"✅ Todo quedó implementado, probado con Playwright y subido a producción en `https://surtifacil.pages.dev/`. Cuando abras una nueva sesión fresca configurada con ese modelo, escribe `/avanzar` para continuar."**
 
