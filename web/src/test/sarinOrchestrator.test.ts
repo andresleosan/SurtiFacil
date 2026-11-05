@@ -205,3 +205,4 @@ describe('Sarin Customer Orchestrator & DeepSeek Engine', () => {
     expect(res.mensaje).toContain('He notificado al tendero');
   });
 });
+

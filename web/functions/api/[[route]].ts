@@ -2,6 +2,7 @@ import { PagesFunction, Env, D1Database } from '../types';
 import { jsonResponse, errorResponse, handleOptions } from '../_lib/response';
 import { authenticateRequest, AuthContext } from '../_lib/authMiddleware';
 import { processSarinCustomerMessage, ensureWhatsAppTables } from '../_lib/sarinCustomerOrchestrator';
+import { processSarinCopilotMessage } from '../_lib/sarinCopilotOrchestrator';
 
 interface ProductInput {
   name: string;
@@ -2057,6 +2058,28 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         customerPhone: body.customerPhone || 'web-cliente',
         customerName: body.customerName || 'Vecino Web',
         userMessage,
+      });
+
+      return jsonResponse({
+        success: true,
+        ...result,
+      });
+    }
+
+    // 12.1 Copiloto Gerencial Sarin (/api/ai/copilot - Requiere Auth de Staff)
+    if (path === '/ai/copilot' && method === 'POST') {
+      const auth = await authenticateRequest(request, env);
+      const body = (await request.json()) as any;
+      const userMessage = (body.message || body.userMessage || '').trim();
+
+      if (!userMessage) {
+        return errorResponse('El mensaje para el copiloto no puede estar vacío.', 400);
+      }
+
+      const result = await processSarinCopilotMessage(env.DB, env, {
+        negocioId: auth.negocioId,
+        userMessage,
+        conversationHistory: body.conversationHistory || [],
       });
 
       return jsonResponse({

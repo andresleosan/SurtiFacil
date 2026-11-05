@@ -6,6 +6,7 @@ import { getActiveNegocioId, setActiveNegocioId } from '../../services/apiClient
 import { Icon } from '../ui/Icon';
 import { Modal } from '../ui/Modal';
 import { findNavItem, MOBILE_TAB_LABELS, MOBILE_TAB_PAGES, NAV_GROUPS, NAV_ITEMS } from './navItems';
+import { SarinBusinessCopilot } from '../SarinBusinessCopilot';
 
 const SIDEBAR_STORAGE_KEY = 'surtifacil.sidebar.collapsed';
 
@@ -53,6 +54,7 @@ function initials(user: User): string {
  */
 export function AppShell({ user, page, onNavigate, onLogout, children }: AppShellProps) {
   const isMobile = useIsMobile();
+  const [copilotOpen, setCopilotOpen] = useState(false);
   const visibleItems = useMemo(
     () => NAV_ITEMS.filter((item) => canAccessPage(user.role, item.page)),
     [user.role],
@@ -61,21 +63,44 @@ export function AppShell({ user, page, onNavigate, onLogout, children }: AppShel
   return (
     <div className="min-h-screen bg-sf-light font-poppins text-sf-text md:flex">
       {!isMobile && (
-        <Sidebar user={user} page={page} items={visibleItems} onNavigate={onNavigate} onLogout={onLogout} />
+        <Sidebar
+          user={user}
+          page={page}
+          items={visibleItems}
+          onNavigate={onNavigate}
+          onLogout={onLogout}
+          onOpenCopilot={() => setCopilotOpen(true)}
+        />
       )}
       <div className="flex min-w-0 flex-1 flex-col">
         {isMobile ? (
-          <MobileTopBar user={user} page={page} />
+          <MobileTopBar user={user} page={page} onOpenCopilot={() => setCopilotOpen(true)} />
         ) : (
-          <DesktopTopBar user={user} page={page} onNavigate={onNavigate} onLogout={onLogout} />
+          <DesktopTopBar
+            user={user}
+            page={page}
+            onNavigate={onNavigate}
+            onLogout={onLogout}
+            onOpenCopilot={() => setCopilotOpen(true)}
+          />
         )}
         <main className={`container mx-auto w-full flex-1 px-4 py-4 md:px-6 md:py-8 ${isMobile ? 'pb-tabbar' : ''}`}>
           {children}
         </main>
       </div>
       {isMobile && (
-        <MobileTabBar user={user} page={page} items={visibleItems} onNavigate={onNavigate} onLogout={onLogout} />
+        <MobileTabBar
+          user={user}
+          page={page}
+          items={visibleItems}
+          onNavigate={onNavigate}
+          onLogout={onLogout}
+          onOpenCopilot={() => setCopilotOpen(true)}
+        />
       )}
+
+      {/* Modal / Asesor Copiloto Gerencial Sarin */}
+      <SarinBusinessCopilot isOpen={copilotOpen} onClose={() => setCopilotOpen(false)} />
     </div>
   );
 }
@@ -86,9 +111,10 @@ interface NavProps {
   items: readonly (typeof NAV_ITEMS)[number][];
   onNavigate: (page: Page) => void;
   onLogout: () => void;
+  onOpenCopilot?: () => void;
 }
 
-function Sidebar({ user, page, items, onNavigate, onLogout }: NavProps) {
+function Sidebar({ user, page, items, onNavigate, onLogout, onOpenCopilot }: NavProps) {
   const isWide = useIsWideScreen();
   const [storedCollapsed, setStoredCollapsed] = useState<boolean | null>(() => readStoredCollapsed());
   const collapsed = storedCollapsed ?? !isWide;
@@ -148,6 +174,28 @@ function Sidebar({ user, page, items, onNavigate, onLogout }: NavProps) {
           className="icon-btn text-white/80 hover:bg-white/10 hover:text-white"
         >
           <Icon name={collapsed ? 'chevron-right' : 'chevron-left'} />
+        </button>
+      </div>
+
+      {/* Botón Acceso Rápido a Copiloto Sarin */}
+      <div className="px-2 pt-2 pb-1">
+        <button
+          type="button"
+          onClick={onOpenCopilot}
+          className={`flex w-full items-center gap-2 rounded-xl bg-gradient-to-r from-sf-primary/40 to-sf-cyan/30 border border-sf-cyan/40 px-2.5 py-2 text-xs font-bold text-white shadow-xs hover:border-sf-cyan transition ${
+            collapsed ? 'justify-center' : 'justify-between'
+          }`}
+          aria-label="Abrir Sarin Copiloto Gerencial"
+        >
+          <span className="flex items-center gap-2">
+            <span className="text-base">🤖</span>
+            {!collapsed && <span>Sarin Copiloto</span>}
+          </span>
+          {!collapsed && (
+            <span className="rounded-full bg-sf-cyan/20 px-1.5 py-0.5 text-[9px] font-extrabold text-sf-cyan uppercase">
+              IA
+            </span>
+          )}
         </button>
       </div>
 
@@ -304,9 +352,10 @@ interface DesktopTopBarProps {
   page: Page;
   onNavigate: (page: Page) => void;
   onLogout: () => void;
+  onOpenCopilot?: () => void;
 }
 
-function DesktopTopBar({ user, page, onNavigate, onLogout }: DesktopTopBarProps) {
+function DesktopTopBar({ user, page, onNavigate, onLogout, onOpenCopilot }: DesktopTopBarProps) {
   const current = findNavItem(page);
   const [profileOpen, setProfileOpen] = useState(false);
   const isSuperAdmin = user.email.toLowerCase() === 'andres.san1404@gmail.com' || (user as any).isSuperAdmin;
@@ -340,6 +389,17 @@ function DesktopTopBar({ user, page, onNavigate, onLogout }: DesktopTopBarProps)
       </div>
 
       <div className="flex items-center gap-3">
+        {/* Botón Sarin Copiloto Gerencial */}
+        <button
+          type="button"
+          onClick={onOpenCopilot}
+          className="flex min-h-[40px] items-center gap-2 rounded-lg border border-slate-200 bg-white px-3.5 py-2 text-xs font-bold text-slate-700 shadow-2xs hover:border-sf-primary hover:text-sf-primary transition active:scale-95"
+          aria-label="Abrir Sarin Copiloto Gerencial"
+        >
+          <span className="text-base">🤖</span>
+          <span className="hidden sm:inline">Copiloto Sarin</span>
+        </button>
+
         {isSuperAdmin && (
           <button
             type="button"
@@ -447,7 +507,7 @@ function DesktopTopBar({ user, page, onNavigate, onLogout }: DesktopTopBarProps)
   );
 }
 
-function MobileTopBar({ user, page }: { user: User; page: Page }) {
+function MobileTopBar({ user, page, onOpenCopilot }: { user: User; page: Page; onOpenCopilot?: () => void }) {
   const current = findNavItem(page);
   return (
     <header className="sticky top-0 z-30 flex h-14 items-center justify-between bg-sf-primary px-4 text-white shadow-md">
@@ -455,18 +515,28 @@ function MobileTopBar({ user, page }: { user: User; page: Page }) {
         <span aria-hidden="true">🛒</span>
         <span className="truncate text-base font-bold">{current?.label ?? 'Surti Fácil'}</span>
       </div>
-      <span
-        className="flex h-9 w-9 items-center justify-center rounded-full bg-white/20 text-sm font-bold"
-        aria-label={`${user.displayName || user.email}, ${ROLE_LABELS[user.role]}`}
-        role="img"
-      >
-        {initials(user)}
-      </span>
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={onOpenCopilot}
+          aria-label="Abrir Sarin Copiloto"
+          className="flex h-9 w-9 items-center justify-center rounded-full bg-white/20 text-base transition active:scale-95"
+        >
+          🤖
+        </button>
+        <span
+          className="flex h-9 w-9 items-center justify-center rounded-full bg-white/20 text-sm font-bold"
+          aria-label={`${user.displayName || user.email}, ${ROLE_LABELS[user.role]}`}
+          role="img"
+        >
+          {initials(user)}
+        </span>
+      </div>
     </header>
   );
 }
 
-function MobileTabBar({ user, page, items, onNavigate, onLogout }: NavProps) {
+function MobileTabBar({ user, page, items, onNavigate, onLogout, onOpenCopilot }: NavProps) {
   const [moreOpen, setMoreOpen] = useState(false);
   const tabItems = items.filter((item) => MOBILE_TAB_PAGES.includes(item.page));
   const moreItems = items.filter((item) => !MOBILE_TAB_PAGES.includes(item.page));
@@ -550,6 +620,20 @@ function MobileTabBar({ user, page, items, onNavigate, onLogout }: NavProps) {
               </button>
             </li>
           ))}
+          <li key="copilot-mobile-launcher">
+            <button
+              type="button"
+              onClick={() => {
+                setMoreOpen(false);
+                onOpenCopilot?.();
+              }}
+              className="flex min-h-[52px] w-full items-center gap-3 px-4 text-left text-sm font-semibold hover:bg-gray-50 transition text-sf-primary"
+            >
+              <span className="text-lg">🤖</span>
+              <span className="flex-1">Sarin Copiloto Gerencial (IA)</span>
+              <Icon name="chevron-right" className="text-gray-400" size={18} />
+            </button>
+          </li>
           <li key="storefront-mobile-launcher">
             <a
               href={`#/tienda/${getActiveNegocioId() || 'surtifacil'}`}

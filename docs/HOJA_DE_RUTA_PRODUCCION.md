@@ -134,15 +134,25 @@ Para maximizar la eficiencia de tokens y la precisión de razonamiento en cada s
     4. **Renovación de Vista Mostrador (`WhatsAppChat.tsx`):** Bandeja en vivo con indicadores de estado (*Bot Sarin Activo* / *Pausado por Tendero*), botón de alternancia rápida a 1 toque, visor de canasta en curso del cliente, y **Simulador Interactivo de Sarin** con presets rápidos (*"Consultar verduras y frutas"*, *"Pedir leche y arroz"*, *"Domicilio en Laureles"*), visualización en tiempo real de herramientas invocadas y link a turno generado.
     5. **100% de Pruebas en Verde:** 40 suites de prueba en Vitest (329 tests aprobados), build de producción impecable (`tsc && vite build`) y 15/15 pruebas activas de Playwright aprobadas en navegadores desktop, mobile y tablet.
 
-- [ ] **Tarea 8 — Bot Sarin Copiloto del Tendero: Voz Manos Libres en POS y Consultor Gerencial de Negocio con DeepSeek:**
+- [x] **Tarea 8 — Bot Sarin Copiloto del Tendero: Voz Manos Libres en POS y Consultor Gerencial de Negocio con DeepSeek:**
   - **Nivel Recomendado:** `Argon (Medium)`
-  - **Objetivo:** Dotar al tendero y administrador de un copiloto inteligente por voz y texto que acelere el cobro en mostrador cuando tiene las manos ocupadas y responda preguntas operativas y financieras de su negocio en tiempo real.
-  - **Alcance Técnico:**
-    1. Construir `SarinVoicePOS.tsx` integrado en [`CreateSale.tsx`](../web/src/components/CreateSale.tsx):
-       - Reconocimiento de voz continuo (`Web Speech API` `es-CO`) con palabra de activación **"Sarin"** y botón táctil de micrófono (`min-h-[44px]`).
-       - Interpretación de comandos de venta rápida (*"Sarin, agrega dos leches y una libra de arroz, pagan con 20 mil"*), validación contra precios oficiales, cálculo de vueltas con **doble confirmación didáctica** (voz hablada + tarjeta visual de alto contraste) y botones de **Deshacer** / **Repetir**.
-    2. Construir el **Copiloto Gerencial Sarin** (`SarinBusinessCopilot.tsx` y endpoint `/api/ai/copilot`) impulsado por DeepSeek con herramientas analíticas de solo lectura sobre D1 para el dueño del negocio:
-       - Consultas al instante por voz o chat: *"¿Cuánto llevamos vendido hoy y cuál es la ganancia?"*, *"¿Quiénes son los 5 clientes que más me deben en fiados?"*, *"¿Qué productos tienen stock crítico hoy?"*, *"Ármame la lista sugerida de compra para el proveedor"*.
+  - **Estado:** ✅ Completada y Desplegada
+  - **Evidencia Técnica de Implementación:**
+    1. **Motor de Voz Manos Libres en POS (`sarinVoiceParser.ts` y `SarinVoicePOS.tsx`):**
+       - Reconocimiento de voz continuo con palabra de activación **"Sarin"** (`Web Speech API` `es-CO`) y botón táctil de micrófono (`min-h-[44px]`).
+       - Parser de lenguaje natural con soporte de modismos colombianos ("dos leches", "una libra de arroz", "pagan con 20 mil / 50 mil", "fiado a Don Carlos", "limpiar", "cobrar"), matching difuso contra catálogo y control de stock.
+       - Cálculo autoritativo de totales, cálculo de **Vueltas en Tamaño Gigante** (`text-2xl font-black`), alerta de seguridad si el dinero recibido es insuficiente y **Doble Confirmación Didáctica** (síntesis de voz hablada `speakSarinResponse` + tarjeta visual de alto contraste con botones de *Aplicar a la Venta*, *Deshacer* y *Repetir por Voz*).
+    2. **Orquestador Analítico y Endpoint Serverless en Cloudflare D1 (`sarinCopilotOrchestrator.ts` y `/api/ai/copilot`):**
+       - Integración con DeepSeek API (`callDeepSeekChat` con function calling), verificación y descuento atómico de `cuota_ia_usada` en tabla `negocios` y fallback heurístico determinístico con tono paisa.
+       - 4 herramientas analíticas de solo lectura sobre D1:
+         * `consultar_ventas_y_ganancias`: ventas totales, costo, ganancia neta en COP y margen % por período (hoy, semana, mes).
+         * `consultar_deudores_fiados`: ranking del top 5 de clientes deudores en libro de fiados con saldo en `formatCOP` y teléfonos.
+         * `consultar_stock_critico`: productos bajo el mínimo o agotados con datos de proveedor.
+         * `sugerir_orden_compra`: cantidades recomendadas de reposición e inversión estimada en COP.
+    3. **Copiloto Gerencial Interactivo (`SarinBusinessCopilot.tsx`):**
+       - Modal accesible desde la cabecera Desktop (`DesktopTopBar`), menú móvil (`MobileTopBar` y hoja "Más"), barra lateral (`Sidebar`) y tarjeta destacada en el `Dashboard`.
+       - Chips de acceso rápido a 1 toque (*"Ventas y Ganancias de Hoy"*, *"Top Clientes en Fiados"*, *"Stock Crítico y Agotados"*, *"Lista Sugerida de Compra"*), chat interactivo con voz y texto, síntesis de voz (`🔊 Escuchar`) y tarjetas visuales ricas para cada herramienta ejecutada.
+    4. **100% de Pruebas en Verde:** 42 suites de prueba en Vitest (343 tests aprobados), build de producción impecable (`tsc && vite build`) y 16/16 pruebas activas de Playwright aprobadas en navegadores desktop, mobile y tablet.
 
 - [ ] **Tarea 9 — Cierre de Caja con Arqueo Físico de Billetes/Monedas COP, Ticket Térmico (58mm/80mm) y Cobro Amigable de Fiados por WhatsApp:**
   - **Nivel Recomendado:** `3.8 Flash (Medium)`

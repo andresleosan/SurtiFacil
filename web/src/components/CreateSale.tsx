@@ -12,6 +12,8 @@ import { PageHeader } from './ui/PageHeader';
 import { formatCentsCOP } from '../utils/currency';
 import { LiveOrdersTray } from './LiveOrdersTray';
 import type { CustomerOrder } from '../types/customerOrder';
+import { SarinVoicePOS } from './SarinVoicePOS';
+import type { VoiceSaleCommandResult } from '../utils/sarinVoiceParser';
 
 const PAYMENT_OPTIONS: Array<{ value: PaymentMethod; label: string; emoji: string }> = [
   { value: 'cash', label: 'Efectivo', emoji: '💵' },
@@ -67,6 +69,57 @@ const CreateSale = () => {
     }
     setSuccess(false);
     setError('');
+  };
+
+  const handleApplyVoiceCommand = (command: VoiceSaleCommandResult) => {
+    setError('');
+    setSuccess(false);
+
+    // Actualizar método de pago
+    setPaymentMethod(command.paymentMethod);
+
+    // Si es fiado y viene un nombre de cliente, buscar coincidencia en cartera
+    if (command.paymentMethod === 'credit' && command.creditCustomerName) {
+      const normQuery = normalize(command.creditCustomerName);
+      const foundCustomer = creditCustomers.find(
+        (c) => normalize(c.name).includes(normQuery) || normQuery.includes(normalize(c.name))
+      );
+      if (foundCustomer) {
+        setCreditCustomerId(foundCustomer.id);
+      }
+    }
+
+    // Agregar o actualizar ítems interpretados
+    setCartItems((prevItems) => {
+      const updated = [...prevItems];
+      for (const voiceItem of command.items) {
+        const prod = voiceItem.product;
+        const existingIdx = updated.findIndex((i) => i.product_id === prod.id);
+        if (existingIdx >= 0) {
+          const nextQty = updated[existingIdx].quantity + voiceItem.quantity;
+          const cappedQty = Math.min(nextQty, prod.stock);
+          updated[existingIdx] = {
+            ...updated[existingIdx],
+            quantity: cappedQty,
+            subtotal: cappedQty * prod.price_cents,
+          };
+        } else {
+          const cappedQty = Math.min(voiceItem.quantity, prod.stock);
+          updated.push({
+            product_id: prod.id,
+            product_name: prod.name,
+            quantity: cappedQty,
+            price_cents: prod.price_cents,
+            subtotal: cappedQty * prod.price_cents,
+          });
+        }
+      }
+      return updated;
+    });
+
+    if (isMobile) {
+      setCartOpen(true);
+    }
   };
 
   const availableProducts = useMemo(() => {
@@ -281,6 +334,14 @@ const CreateSale = () => {
 
           <div className="grid gap-4 lg:grid-cols-5">
             <div className="space-y-3 lg:col-span-3">
+              {/* Copiloto de Voz Manos Libres Sarin */}
+              <SarinVoicePOS
+                products={products}
+                onApplyCommand={handleApplyVoiceCommand}
+                onClearCart={() => setCartItems([])}
+                onFinalizeSale={handleConfirmSale}
+              />
+
               <form onSubmit={handleSearchSubmit} className="flex gap-2" role="search">
                 <label htmlFor="pos-search" className="sr-only">
                   Buscar producto o código

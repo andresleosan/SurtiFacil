@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { getSalesSince, getSalesTotals } from '../services/saleService';
 import StockAlerts from './StockAlerts';
 import SubscriptionBanner from './SubscriptionBanner';
+import SarinBusinessCopilot from './SarinBusinessCopilot';
 import { Icon } from './ui/Icon';
 import { PageHeader } from './ui/PageHeader';
 
@@ -29,6 +30,7 @@ const Dashboard = () => {
   const [metrics, setMetrics] = useState<DashboardMetrics>(EMPTY_METRICS);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [copilotOpen, setCopilotOpen] = useState(false);
 
   const loadDashboardData = useCallback(async () => {
     try {
@@ -119,6 +121,36 @@ const Dashboard = () => {
     <section className="space-y-4">
       {header}
       <SubscriptionBanner />
+
+      {/* Widget Copiloto Gerencial Sarin */}
+      <div className="card p-4 bg-gradient-to-r from-slate-900 to-sf-dark text-white border-none shadow-md">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-sf-primary text-2xl shadow-inner">
+              🤖
+            </span>
+            <div>
+              <div className="flex items-center gap-2">
+                <h3 className="text-base font-bold text-white">Sarin Copiloto Gerencial</h3>
+                <span className="rounded-full bg-emerald-500/20 border border-emerald-500/40 px-2 py-0.5 text-[10px] font-bold text-emerald-300">
+                  En Línea
+                </span>
+              </div>
+              <p className="text-xs text-slate-300">
+                Pregúntale por voz o chat: <em>"¿Cuánto vendimos hoy y cuál es la ganancia?"</em> o <em>"¿Quiénes son los clientes que más deben?"</em>
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => setCopilotOpen(true)}
+            className="flex min-h-[44px] items-center justify-center gap-2 rounded-xl bg-sf-primary px-4 text-sm font-bold text-white hover:bg-sf-primary/90 transition shadow-sm shrink-0 active:scale-95"
+          >
+            <span>🎙️ Consultar con Sarin</span>
+          </button>
+        </div>
+      </div>
+
       {loading && (
         <p className="text-sm text-gray-500" role="status">Cargando datos...</p>
       )}
@@ -148,6 +180,9 @@ const Dashboard = () => {
       </div>
 
       <StockAlerts />
+
+      {/* Modal Asesor Sarin Copiloto */}
+      <SarinBusinessCopilot isOpen={copilotOpen} onClose={() => setCopilotOpen(false)} />
     </section>
   );
 };
