@@ -81,7 +81,12 @@ Para maximizar la eficiencia de tokens y la precisión de razonamiento en cada s
        - Cuadrícula de tarjetas de producto de 2-3 columnas con fotografía, nombre, badge de peso/unidad (`libra`, `kilo`, `litro`, `cubeta`, `paquete`), precio `formatCOP`, botón verde táctil `+ AGREGAR` y switches de visibilidad (*Kiosco iPad*, *Tienda Web* y *En Oferta*).
        - Edición rápida en línea de precio y stock para cuando llega mercancía nueva al mostrador.
     4. Crear gestor de **Combos y Kits de Mercado** (ej. *"Combo Desayuno Paisa"*, *"Kit Aseo Mes"*) donde el staff agrupa productos existentes con precio especial.
-    5. Crear la vista **Configuración del Negocio** (`web/src/components/StoreSettings.tsx`) para editar: nombre comercial, barrio en Medellín, dirección, teléfono WhatsApp de pedidos, horario de atención, valor del domicilio, datos informativos de pago (Nequi / Bancolombia) y mensaje de bienvenida.
+    5. Crear la vista **Configuración del Negocio** (`web/src/components/StoreSettings.tsx`) para editar:
+       - Nombre comercial, barrio en Medellín, dirección, teléfono WhatsApp de pedidos, horario de atención, datos informativos de pago (Nequi / Bancolombia) y mensaje de bienvenida.
+       - **Interruptores de Modalidades de Entrega por WhatsApp y Web:**
+         * Switch táctil **"Habilitar Domicilios" (`permite_domicilio`)** con campo para valor del envío en COP (`costo_domicilio_cents`).
+         * Switch táctil **"Habilitar Retiro en Tienda / Mostrador" (`permite_retiro`)**.
+         * Guardados en `negocios.config_json` en D1 para gobernar en tiempo real las opciones que ofrece el bot Sarin en WhatsApp y el catálogo web.
 
 - [ ] **Tarea 4 — Plataforma SaaS Multi-Tenant para Abastos en Medellín: Landing Comercial (Patrón Mobbin Food & Drink), Rediseño de Login, Planes, Registro de Locales (`/registro-negocio`) y Panel SuperAdmin (`/super-admin`):**
   - **Nivel Recomendado:** `3.8 Flash (High)`
@@ -133,7 +138,13 @@ Para maximizar la eficiencia de tokens y la precisión de razonamiento en cada s
     2. Implementar el orquestador **Sarin Vecino** (`web/functions/_lib/sarinCustomerOrchestrator.ts`) con 4 herramientas (*Function Calling*) verificadas contra D1:
        - `consultar_catalogo_abastos`: busca productos disponibles, precios, ofertas y combos del local.
        - `modificar_canasta_pedido`: arma y actualiza la canasta temporal del cliente validando stock real.
-       - `confirmar_pedido_domicilio`: calcula precios autoritativos en servidor, crea la orden en `customer_orders` con origen `whatsapp` y genera el link de rastreo `/pedido/:token`.
+       - `confirmar_pedido_cliente`:
+         * Lee de D1 las modalidades activas de la tienda (`permite_domicilio` y `permite_retiro` desde `negocios.config_json`).
+         * Si **ambas** están activas, ofrece al cliente por WhatsApp las opciones: **🛵 Solicitar a Domicilio** o **🏪 Retirar en Tienda**.
+         * Si elige **Domicilio**, solicita barrio y dirección exacta, sumando el valor del envío configurado (`costo_domicilio_cents`).
+         * Si elige **Retiro en Tienda**, confirma que se alistará el mercado en el mostrador para recoger (costo de envío $0).
+         * Si el tendero tiene activa solo una modalidad, la aplica automáticamente e informa al cliente; si ambas están desactivadas, notifica cordialmente que los pedidos a distancia están en pausa.
+         * Genera la orden autoritativa en `customer_orders` (`delivery_type: 'delivery' | 'pickup_counter'`) y devuelve el enlace de rastreo en vivo `/pedido/:token`.
        - `consultar_estado_o_escalar`: consulta el estado de un pedido activo o pausa el bot por 2 horas (`handoff`) para que el tendero atienda personalmente.
     3. Conectar el endpoint de webhook `/api/webhooks/whatsapp` (con validación HMAC y soporte multi-tenant) y renovar [`WhatsAppChat.tsx`](../web/src/components/WhatsAppChat.tsx) con bandeja en vivo, interruptor de Bot Activo / Pausa Manual por conversación y **Simulador Interactivo de Sarin** para probar pedidos desde el panel.
 
