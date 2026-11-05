@@ -228,6 +228,22 @@ function Sidebar({ user, page, items, onNavigate, onLogout }: NavProps) {
                           </li>
                         );
                       })}
+                      {group.id === 'channels' && (
+                        <li key="kiosk-mode-launcher">
+                          <a
+                            href={`#/kiosco/${getActiveNegocioId() || 'surtifacil'}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-left text-sm font-medium text-white/80 hover:bg-white/10 hover:text-white transition"
+                          >
+                            <span className="flex items-center gap-2.5 truncate">
+                              <Icon name="store" size={18} />
+                              <span className="truncate">Modo Kiosco iPad</span>
+                            </span>
+                            <Icon name="external-link" size={14} className="text-white/40" />
+                          </a>
+                        </li>
+                      )}
                     </ul>
                   )}
                 </div>
@@ -518,6 +534,19 @@ function MobileTabBar({ user, page, items, onNavigate, onLogout }: NavProps) {
               </button>
             </li>
           ))}
+          <li key="kiosk-mobile-launcher">
+            <a
+              href={`#/kiosco/${getActiveNegocioId() || 'surtifacil'}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={() => setMoreOpen(false)}
+              className="flex min-h-[52px] w-full items-center gap-3 px-4 text-left text-sm font-medium hover:bg-gray-50 transition text-sf-text"
+            >
+              <Icon name="store" className="text-sf-primary" />
+              <span className="flex-1">Modo Kiosco iPad</span>
+              <Icon name="external-link" className="text-gray-400" size={18} />
+            </a>
+          </li>
         </ul>
         <div className="border-t border-gray-200 p-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
           <button

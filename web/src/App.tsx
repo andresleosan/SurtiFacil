@@ -27,6 +27,7 @@ const PAGE_COMPONENTS: Record<Page, ComponentType> = {
 
 const LandingPage = lazy(() => import('./components/LandingPage'));
 const RegisterStore = lazy(() => import('./components/RegisterStore'));
+const KioskMode = lazy(() => import('./components/KioskMode'));
 
 function PageFallback() {
   return (
@@ -61,7 +62,8 @@ function App() {
         rawHash.includes('registro-negocio') ||
         rawHash.includes('registro') ||
         rawHash.includes('landing') ||
-        rawHash.includes('inicio')
+        rawHash.includes('inicio') ||
+        rawHash.includes('kiosco')
       ) {
         return;
       }
@@ -123,6 +125,26 @@ function App() {
 
   if (authLoading) {
     return <div className="min-h-screen bg-sf-light p-8 text-center text-gray-600">Cargando sesión...</div>;
+  }
+
+  // Ruta pública y de autoservicio: Modo Kiosco iPad (#/kiosco/:slug)
+  const kioskMatch = currentHash.match(/kiosco(?:\/([^/?#]+))?/);
+  if (kioskMatch) {
+    const kioskSlug = kioskMatch[1] || 'surtifacil';
+    return (
+      <Suspense fallback={<PageFallback />}>
+        <KioskMode
+          slug={kioskSlug}
+          onExit={
+            currentUser
+              ? () => {
+                  window.location.hash = '#/dashboard';
+                }
+              : undefined
+          }
+        />
+      </Suspense>
+    );
   }
 
   if (!currentUser) {

@@ -19,3 +19,4 @@ describe('currency utilities (formatCOP)', () => {
     expect(parseCOP('')).toBe(0);
   });
 });
+

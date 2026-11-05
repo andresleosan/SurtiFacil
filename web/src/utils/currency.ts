@@ -44,3 +44,4 @@ export function parseCOP(value: string): number {
   const parsed = parseInt(clean, 10);
   return isNaN(parsed) ? 0 : parsed;
 }
+

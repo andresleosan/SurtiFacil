@@ -16,6 +16,7 @@ class MockD1Database implements D1Database {
     purchase_orders: any[];
     purchase_order_items: any[];
     combos: any[];
+    customer_orders: any[];
   };
 
   constructor() {
@@ -105,6 +106,7 @@ class MockD1Database implements D1Database {
       purchase_orders: [],
       purchase_order_items: [],
       combos: [],
+      customer_orders: [],
     };
   }
 
@@ -170,9 +172,41 @@ class MockD1Database implements D1Database {
           return { results: prods as T[], success: true };
         }
 
-        if (q.startsWith('SELECT * FROM products WHERE negocio_id = ?')) {
+        if (q.includes('FROM products') && q.includes('WHERE id = ? AND negocio_id = ?')) {
+          const p = db.tables.products.find(
+            (prod) => prod.id === boundValues[0] && (!boundValues[1] || prod.negocio_id === boundValues[1])
+          );
+          return { results: p ? [p as T] : [], success: true };
+        }
+
+        if (q.includes('FROM products') && q.includes('negocio_id = ?')) {
           const prods = db.tables.products.filter((p) => p.negocio_id === boundValues[0]);
           return { results: prods as T[], success: true };
+        }
+
+        if (q.includes('FROM customer_orders WHERE id = ?')) {
+          const o = db.tables.customer_orders.find((ord) => ord.id === boundValues[0]);
+          return { results: o ? [o as T] : [], success: true };
+        }
+
+        if (q.includes('FROM customer_orders WHERE tracking_token = ?')) {
+          const o = db.tables.customer_orders.find((ord) => ord.tracking_token === boundValues[0]);
+          return { results: o ? [o as T] : [], success: true };
+        }
+
+        if (q.includes('SELECT COUNT(*) as count FROM customer_orders')) {
+          const count = db.tables.customer_orders.filter(
+            (o) => o.negocio_id === boundValues[0] && (!boundValues[1] || o.source === boundValues[1])
+          ).length;
+          return { results: [{ count } as unknown as T], success: true };
+        }
+
+        if (q.includes('FROM customer_orders WHERE negocio_id = ?')) {
+          let list = db.tables.customer_orders.filter((o) => o.negocio_id === boundValues[0]);
+          if (boundValues[1]) {
+            list = list.filter((o) => o.status === boundValues[1]);
+          }
+          return { results: list as T[], success: true };
         }
 
         if (q.includes('FROM products WHERE id = ? AND negocio_id = ?')) {
@@ -463,6 +497,42 @@ class MockD1Database implements D1Database {
         if (q.startsWith('DELETE FROM combos WHERE id = ? AND negocio_id = ?')) {
           const [comboId, negId] = boundValues;
           db.tables.combos = db.tables.combos.filter((c: any) => !(c.id === comboId && c.negocio_id === negId));
+        }
+
+        if (q.startsWith('INSERT INTO customer_orders')) {
+          const [
+            id, negocio_id, order_code, source, customer_name, customer_phone,
+            delivery_type, delivery_address, delivery_neighborhood, payment_method,
+            items_json, total_cents, tracking_token
+          ] = boundValues;
+          db.tables.customer_orders.push({
+            id,
+            negocio_id,
+            order_code,
+            source,
+            customer_name,
+            customer_phone,
+            delivery_type,
+            delivery_address,
+            delivery_neighborhood,
+            payment_method,
+            items_json,
+            total_cents,
+            status: 'pending',
+            tracking_token,
+            created_at: new Date().toISOString(),
+          });
+        }
+
+        if (q.startsWith('UPDATE customer_orders')) {
+          const orderId = boundValues[boundValues.length - 2];
+          const ord = db.tables.customer_orders.find((o) => o.id === orderId);
+          if (ord) {
+            ord.status = boundValues[0];
+            if (boundValues.length >= 4) {
+              ord.sale_id = boundValues[1];
+            }
+          }
         }
 
         return { success: true };
@@ -893,5 +963,85 @@ describe('Cloudflare Pages Functions API (/api/*)', () => {
     expect(renewRes.status).toBe(200);
     const renewed = await renewRes.json();
     expect(renewed.estado).toBe('activo');
+  });
+
+  it('GET /api/public/store/:slug devuelve la tienda y catálogo activo para Kiosco', async () => {
+    const pubCtx = createMockContext(
+      'GET',
+      'http://localhost/api/public/store/surtifacil',
+      {},
+      null,
+      db
+    );
+    const pubRes = await onRequest(pubCtx as any);
+    expect(pubRes.status).toBe(200);
+    const pubData = await pubRes.json();
+    expect(pubData.store.slug).toBe('surtifacil');
+    expect(pubData.store.nombre).toBe('SurtiFácil Abastos Central');
+    expect(Array.isArray(pubData.products)).toBe(true);
+    expect(pubData.products.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('POST y GET /api/customer-orders gestiona el flujo de Kiosco y conversión a venta', async () => {
+    // 1. Crear pedido público desde Kiosco
+    const orderPayload = {
+      slug: 'surtifacil',
+      source: 'kiosk',
+      customer_name: 'Don Carlos Vecino',
+      customer_phone: '3001234567',
+      delivery_type: 'pickup_counter',
+      payment_method: 'cash',
+      items: [
+        {
+          product_id: 'p-1',
+          quantity: 2,
+        },
+      ],
+    };
+
+    const createCtx = createMockContext(
+      'POST',
+      'http://localhost/api/customer-orders',
+      {},
+      orderPayload,
+      db
+    );
+    const createRes = await onRequest(createCtx as any);
+    expect(createRes.status).toBe(201);
+    const createData = await createRes.json();
+    expect(createData.success).toBe(true);
+    expect(createData.order.order_code).toMatch(/^#K-\d+/);
+    expect(createData.order.customer_name).toBe('Don Carlos Vecino');
+    expect(createData.order.status).toBe('pending');
+    expect(createData.order.tracking_token).toBeDefined();
+
+    const orderId = createData.order.id;
+
+    // 2. El tendero consulta la lista de pedidos en el POS
+    const listCtx = createMockContext(
+      'GET',
+      'http://localhost/api/customer-orders?status=pending',
+      { Authorization: 'Bearer mock:cashier-1:cajero@surtifacil.com:cashier' },
+      null,
+      db
+    );
+    const listRes = await onRequest(listCtx as any);
+    expect(listRes.status).toBe(200);
+    const orders = await listRes.json();
+    expect(orders.some((o: any) => o.id === orderId)).toBe(true);
+
+    // 3. El tendero factura el pedido en 1 clic desde el POS
+    const convertCtx = createMockContext(
+      'POST',
+      `http://localhost/api/customer-orders/${orderId}/convert-to-sale`,
+      { Authorization: 'Bearer mock:cashier-1:cajero@surtifacil.com:cashier' },
+      { payment_method: 'cash' },
+      db
+    );
+    const convertRes = await onRequest(convertCtx as any);
+    expect(convertRes.status).toBe(200);
+    const convertData = await convertRes.json();
+    expect(convertData.success).toBe(true);
+    expect(convertData.sale_id).toBeDefined();
   });
 });

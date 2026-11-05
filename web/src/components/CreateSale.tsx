@@ -9,6 +9,9 @@ import BarcodeScanner from './BarcodeScanner';
 import { Icon } from './ui/Icon';
 import { Modal } from './ui/Modal';
 import { PageHeader } from './ui/PageHeader';
+import { formatCentsCOP } from '../utils/currency';
+import { LiveOrdersTray } from './LiveOrdersTray';
+import type { CustomerOrder } from '../types/customerOrder';
 
 const PAYMENT_OPTIONS: Array<{ value: PaymentMethod; label: string; emoji: string }> = [
   { value: 'cash', label: 'Efectivo', emoji: '💵' },
@@ -39,6 +42,32 @@ const CreateSale = () => {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState(false);
+  const [activeTab, setActiveTab] = useState<'pos' | 'orders'>('pos');
+
+  const handleLoadOrderToCart = (order: CustomerOrder) => {
+    const items = order.items || [];
+    const newCartItems: SaleItem[] = items.map((i) => ({
+      product_id: i.product_id,
+      product_name: i.product_name,
+      quantity: i.quantity,
+      price_cents: i.unit_price_cents,
+      subtotal: i.subtotal_cents || i.unit_price_cents * i.quantity,
+    }));
+    setCartItems(newCartItems);
+    if (order.payment_method === 'credit') {
+      setPaymentMethod('credit');
+    } else if (order.payment_method === 'transfer') {
+      setPaymentMethod('other');
+    } else {
+      setPaymentMethod('cash');
+    }
+    setActiveTab('pos');
+    if (isMobile) {
+      setCartOpen(true);
+    }
+    setSuccess(false);
+    setError('');
+  };
 
   const availableProducts = useMemo(() => {
     const term = normalize(search.trim());
@@ -190,106 +219,149 @@ const CreateSale = () => {
     <section className="space-y-4">
       <PageHeader
         title="Nueva venta"
-        description={isMobile ? undefined : 'Toca un producto para agregarlo al carrito.'}
+        description={isMobile ? undefined : 'Toca un producto para agregarlo al carrito o atiende pedidos en vivo.'}
       />
 
-      {error && (
-        <div role="alert" className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-          {error}
-        </div>
-      )}
-      {success && (
-        <div role="status" className="rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-700">
-          ✅ Venta registrada exitosamente
-        </div>
-      )}
-      {productsError && !error && (
-        <div role="alert" className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-          {productsError}
-        </div>
-      )}
+      {/* Selector de Modo Mostrador / Bandeja de Pedidos */}
+      <div className="flex gap-2 border-b border-slate-200 pb-2">
+        <button
+          type="button"
+          onClick={() => setActiveTab('pos')}
+          className={`flex min-h-[44px] items-center gap-2 rounded-xl px-4 text-sm font-bold transition ${
+            activeTab === 'pos'
+              ? 'bg-sf-primary text-white shadow-sm'
+              : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
+          }`}
+        >
+          <Icon name="cart" size={18} />
+          <span>Venta Directa en Mostrador</span>
+        </button>
 
-      <div className="grid gap-4 lg:grid-cols-5">
-        <div className="space-y-3 lg:col-span-3">
-          <form onSubmit={handleSearchSubmit} className="flex gap-2" role="search">
-            <label htmlFor="pos-search" className="sr-only">
-              Buscar producto o código
-            </label>
-            <div className="relative flex-1">
-              <Icon name="search" className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={20} />
-              <input
-                id="pos-search"
-                type="search"
-                inputMode="search"
-                autoComplete="off"
-                enterKeyHint="done"
-                value={search}
-                onChange={(event) => setSearch(event.target.value)}
-                placeholder="Buscar producto o código"
-                className="input pl-10"
-              />
-            </div>
-            <button type="button" onClick={openScanner} className="btn-primary shrink-0" aria-label="Escanear código de barras">
-              <Icon name="scan" />
-              <span className="hidden sm:inline">Escanear</span>
-            </button>
-          </form>
-
-          {productsLoading ? (
-            <p className="py-8 text-center text-gray-500">Cargando productos...</p>
-          ) : availableProducts.length === 0 ? (
-            <p className="card px-4 py-8 text-center text-gray-500">
-              {products.length === 0 ? 'No hay productos con stock disponible' : 'Sin resultados para tu búsqueda'}
-            </p>
-          ) : isMobile ? (
-            <ul className="card divide-y divide-gray-100" aria-label="Productos disponibles">
-              {availableProducts.map((product) => (
-                <li key={product.id} className="flex items-center gap-3 px-3 py-2">
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate font-medium text-sf-text">{product.name}</p>
-                    <p className="text-xs text-gray-500">
-                      {formatPrice(product.price_cents)} · {product.stock} disp.
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => addToCart(product, 1)}
-                    aria-label={`Agregar ${product.name}`}
-                    className="icon-btn bg-sf-primary text-white hover:bg-sf-dark"
-                  >
-                    <Icon name="plus" />
-                  </button>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <ul className="grid grid-cols-2 gap-3 xl:grid-cols-3" aria-label="Productos disponibles">
-              {availableProducts.map((product) => (
-                <li key={product.id}>
-                  <button
-                    type="button"
-                    onClick={() => addToCart(product, 1)}
-                    aria-label={`Agregar ${product.name}`}
-                    className="card flex min-h-[96px] w-full flex-col justify-between p-3 text-left transition hover:border-sf-primary hover:shadow-md active:scale-[0.99]"
-                  >
-                    <span className="line-clamp-2 font-medium text-sf-text">{product.name}</span>
-                    <span className="mt-2 flex items-center justify-between text-sm">
-                      <span className="font-semibold text-sf-primary">{formatPrice(product.price_cents)}</span>
-                      <span className="text-xs text-gray-500">{product.stock} disp.</span>
-                    </span>
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-
-        {!isMobile && (
-          <aside className="lg:col-span-2">
-            <div className="card sticky top-4 p-4">{cartPanel}</div>
-          </aside>
-        )}
+        <button
+          type="button"
+          onClick={() => setActiveTab('orders')}
+          className={`flex min-h-[44px] items-center gap-2 rounded-xl px-4 text-sm font-bold transition ${
+            activeTab === 'orders'
+              ? 'bg-sf-primary text-white shadow-sm'
+              : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
+          }`}
+        >
+          <Icon name="clipboard" size={18} />
+          <span>Bandeja Pedidos Kiosco / Web</span>
+        </button>
       </div>
+
+      {activeTab === 'orders' ? (
+        <div className="card p-4 md:p-6">
+          <LiveOrdersTray
+            onLoadOrderToCart={handleLoadOrderToCart}
+            onSaleCreated={() => {
+              setSuccess(true);
+              setTimeout(() => setSuccess(false), 4000);
+            }}
+          />
+        </div>
+      ) : (
+        <>
+          {error && (
+            <div role="alert" className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+              {error}
+            </div>
+          )}
+          {success && (
+            <div role="status" className="rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-700">
+              ✅ Venta registrada exitosamente
+            </div>
+          )}
+          {productsError && !error && (
+            <div role="alert" className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+              {productsError}
+            </div>
+          )}
+
+          <div className="grid gap-4 lg:grid-cols-5">
+            <div className="space-y-3 lg:col-span-3">
+              <form onSubmit={handleSearchSubmit} className="flex gap-2" role="search">
+                <label htmlFor="pos-search" className="sr-only">
+                  Buscar producto o código
+                </label>
+                <div className="relative flex-1">
+                  <Icon name="search" className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={20} />
+                  <input
+                    id="pos-search"
+                    type="search"
+                    inputMode="search"
+                    autoComplete="off"
+                    enterKeyHint="done"
+                    value={search}
+                    onChange={(event) => setSearch(event.target.value)}
+                    placeholder="Buscar producto o código"
+                    className="input pl-10"
+                  />
+                </div>
+                <button type="button" onClick={openScanner} className="btn-primary shrink-0" aria-label="Escanear código de barras">
+                  <Icon name="scan" />
+                  <span className="hidden sm:inline">Escanear</span>
+                </button>
+              </form>
+
+              {productsLoading ? (
+                <p className="py-8 text-center text-gray-500">Cargando productos...</p>
+              ) : availableProducts.length === 0 ? (
+                <p className="card px-4 py-8 text-center text-gray-500">
+                  {products.length === 0 ? 'No hay productos con stock disponible' : 'Sin resultados para tu búsqueda'}
+                </p>
+              ) : isMobile ? (
+                <ul className="card divide-y divide-gray-100" aria-label="Productos disponibles">
+                  {availableProducts.map((product) => (
+                    <li key={product.id} className="flex items-center gap-3 px-3 py-2">
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate font-medium text-sf-text">{product.name}</p>
+                        <p className="text-xs text-gray-500">
+                          {formatPrice(product.price_cents)} · {product.stock} disp.
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => addToCart(product, 1)}
+                        aria-label={`Agregar ${product.name}`}
+                        className="icon-btn bg-sf-primary text-white hover:bg-sf-dark"
+                      >
+                        <Icon name="plus" />
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <ul className="grid grid-cols-2 gap-3 xl:grid-cols-3" aria-label="Productos disponibles">
+                  {availableProducts.map((product) => (
+                    <li key={product.id}>
+                      <button
+                        type="button"
+                        onClick={() => addToCart(product, 1)}
+                        aria-label={`Agregar ${product.name}`}
+                        className="card flex min-h-[96px] w-full flex-col justify-between p-3 text-left transition hover:border-sf-primary hover:shadow-md active:scale-[0.99]"
+                      >
+                        <span className="line-clamp-2 font-medium text-sf-text">{product.name}</span>
+                        <span className="mt-2 flex items-center justify-between text-sm">
+                          <span className="font-semibold text-sf-primary">{formatPrice(product.price_cents)}</span>
+                          <span className="text-xs text-gray-500">{product.stock} disp.</span>
+                        </span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+
+            {!isMobile && (
+              <aside className="lg:col-span-2">
+                <div className="card sticky top-4 p-4">{cartPanel}</div>
+              </aside>
+            )}
+          </div>
+        </>
+      )}
 
       {isMobile && (
         <>

@@ -207,3 +207,4 @@ export function operateStore(negocioId: string | null) {
 export function getOperatingStoreId(): string | null {
   return getActiveNegocioId();
 }
+

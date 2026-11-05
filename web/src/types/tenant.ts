@@ -175,3 +175,4 @@ export const MEDELLIN_NEIGHBORHOODS: readonly string[] = [
   'Bello (Área Metropolitana)',
   'Sabaneta (Área Metropolitana)',
 ];
+

@@ -233,6 +233,69 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       }, 201);
     }
 
+    // 2.2 Consulta Pública de Tienda y Catálogo para Kiosco iPad y Storefront (/public/store/:slug)
+    if (path.startsWith('/public/store/') && method === 'GET') {
+      const slug = path.replace(/^\/public\/store\/?/, '').trim().toLowerCase();
+      if (!slug) {
+        return errorResponse('Slug de tienda no proporcionado.', 400);
+      }
+
+      const negocio = await env.DB.prepare(
+        'SELECT id, slug, nombre, barrio, ciudad, telefono_whatsapp, direccion, horario, logo_url, estado, costo_domicilio_cents, datos_pago_offline, config_json FROM negocios WHERE slug = ?'
+      )
+        .bind(slug)
+        .first<any>();
+
+      if (!negocio) {
+        return errorResponse('Tienda no encontrada o no disponible.', 404);
+      }
+
+      let parsedConfig = {};
+      try {
+        parsedConfig = negocio.config_json ? JSON.parse(negocio.config_json) : {};
+      } catch {
+        parsedConfig = {};
+      }
+
+      const productsResult = await env.DB.prepare(
+        `SELECT id, name, price_cents, stock, min_stock, unit, category, image_url, barcode, visible_kiosco, visible_tienda, en_oferta, precio_oferta_cents
+         FROM products
+         WHERE negocio_id = ? AND stock > 0 AND (visible_kiosco = 1 OR visible_tienda = 1)
+         ORDER BY category ASC, name ASC`
+      )
+        .bind(negocio.id)
+        .all();
+
+      const combosResult = await env.DB.prepare(
+        `SELECT id, name, description, price_cents, items_json, image_url, active, visible_kiosco, visible_tienda
+         FROM combos
+         WHERE negocio_id = ? AND active = 1 AND (visible_kiosco = 1 OR visible_tienda = 1)
+         ORDER BY name ASC`
+      )
+        .bind(negocio.id)
+        .all();
+
+      return jsonResponse({
+        store: {
+          id: negocio.id,
+          slug: negocio.slug,
+          nombre: negocio.nombre,
+          barrio: negocio.barrio,
+          ciudad: negocio.ciudad,
+          telefono_whatsapp: negocio.telefono_whatsapp,
+          direccion: negocio.direccion,
+          horario: negocio.horario,
+          logo_url: negocio.logo_url,
+          estado: negocio.estado,
+          costo_domicilio_cents: negocio.costo_domicilio_cents || 0,
+          datos_pago_offline: negocio.datos_pago_offline,
+          config: parsedConfig,
+        },
+        products: productsResult.results || [],
+        combos: combosResult.results || [],
+      });
+    }
+
     // 3. Provisión de usuario y endpoints compatibles de autenticación
     if (path === '/auth/sync-claims' && method === 'POST') {
       return jsonResponse({ success: true, message: 'Custom claims sincronizados correctamente.' });
@@ -1521,6 +1584,386 @@ export const onRequest: PagesFunction<Env> = async (context) => {
           .run();
 
         return jsonResponse({ success: true, id: targetUserId });
+      }
+    }
+
+    // 10. Pedidos de Clientes (Modo Kiosco iPad / Tienda Web / Bot Sarin WhatsApp)
+    if (path === '/customer-orders' || path.startsWith('/customer-orders/')) {
+      const subPath = path.replace(/^\/customer-orders\/?/, '');
+
+      // 10.1 Rastreo público de pedido (/customer-orders/track/:token)
+      if (subPath.startsWith('track/') && method === 'GET') {
+        const token = subPath.replace(/^track\/?/, '').trim();
+        if (!token) return errorResponse('Token de rastreo no proporcionado.', 400);
+
+        const order = await env.DB.prepare(
+          'SELECT * FROM customer_orders WHERE tracking_token = ?'
+        )
+          .bind(token)
+          .first<any>();
+
+        if (!order) return errorResponse('Pedido no encontrado.', 404);
+
+        const store = await env.DB.prepare(
+          'SELECT id, slug, nombre, barrio, telefono_whatsapp, direccion, datos_pago_offline FROM negocios WHERE id = ?'
+        )
+          .bind(order.negocio_id)
+          .first<any>();
+
+        let items = [];
+        try {
+          items = JSON.parse(order.items_json);
+        } catch {}
+
+        return jsonResponse({
+          order: {
+            ...order,
+            items,
+          },
+          store,
+        });
+      }
+
+      // 10.2 Creación PÚBLICA de Pedido (Desde Kiosco o Tienda Web)
+      if (method === 'POST' && (!subPath || subPath === 'create')) {
+        const body = (await request.json()) as any;
+        const customerName = (body.customer_name || '').trim();
+        const source = (['kiosk', 'web', 'whatsapp'].includes(body.source) ? body.source : 'kiosk') as 'kiosk' | 'web' | 'whatsapp';
+        const deliveryType = (['pickup_counter', 'delivery'].includes(body.delivery_type) ? body.delivery_type : 'pickup_counter') as 'pickup_counter' | 'delivery';
+        const paymentMethod = (['cash', 'transfer', 'credit'].includes(body.payment_method) ? body.payment_method : 'cash') as 'cash' | 'transfer' | 'credit';
+        const rawItems = Array.isArray(body.items) ? body.items : [];
+
+        if (!customerName) {
+          return errorResponse('El nombre del cliente es obligatorio.', 400);
+        }
+        if (rawItems.length === 0) {
+          return errorResponse('El pedido debe tener al menos un producto.', 400);
+        }
+
+        // Determinar tienda por slug o negocio_id
+        let negocio = null;
+        if (body.slug) {
+          negocio = await env.DB.prepare('SELECT * FROM negocios WHERE slug = ?').bind(body.slug).first<any>();
+        } else if (body.negocio_id) {
+          negocio = await env.DB.prepare('SELECT * FROM negocios WHERE id = ?').bind(body.negocio_id).first<any>();
+        }
+
+        if (!negocio) {
+          return errorResponse('Negocio no válido o no encontrado.', 404);
+        }
+
+        // Cálculo autoritativo de precios en el servidor contra la base de datos D1
+        let totalCents = 0;
+        const verifiedItems = [];
+
+        for (const item of rawItems) {
+          const qty = Math.max(1, Math.round(Number(item.quantity) || 1));
+          const prodId = String(item.product_id || '');
+
+          // Consultar producto
+          const dbProd = await env.DB.prepare(
+            'SELECT id, name, price_cents, en_oferta, precio_oferta_cents, unit, image_url, stock FROM products WHERE id = ? AND negocio_id = ?'
+          )
+            .bind(prodId, negocio.id)
+            .first<any>();
+
+          if (dbProd) {
+            const unitPrice = (dbProd.en_oferta && dbProd.precio_oferta_cents && dbProd.precio_oferta_cents > 0)
+              ? dbProd.precio_oferta_cents
+              : dbProd.price_cents;
+            const subtotal = unitPrice * qty;
+            totalCents += subtotal;
+            verifiedItems.push({
+              product_id: dbProd.id,
+              product_name: dbProd.name,
+              quantity: qty,
+              unit_price_cents: unitPrice,
+              subtotal_cents: subtotal,
+              unit: dbProd.unit,
+              image_url: dbProd.image_url,
+            });
+          } else {
+            // Verificar si es combo
+            const dbCombo = await env.DB.prepare(
+              'SELECT id, name, price_cents, image_url FROM combos WHERE id = ? AND negocio_id = ?'
+            )
+              .bind(prodId, negocio.id)
+              .first<any>();
+
+            if (dbCombo) {
+              const subtotal = dbCombo.price_cents * qty;
+              totalCents += subtotal;
+              verifiedItems.push({
+                product_id: dbCombo.id,
+                product_name: dbCombo.name,
+                quantity: qty,
+                unit_price_cents: dbCombo.price_cents,
+                subtotal_cents: subtotal,
+                unit: 'combo',
+                image_url: dbCombo.image_url,
+              });
+            } else if (item.product_name && typeof item.unit_price_cents === 'number') {
+              const unitPrice = Math.round(item.unit_price_cents);
+              const subtotal = unitPrice * qty;
+              totalCents += subtotal;
+              verifiedItems.push({
+                product_id: prodId || `custom-${Date.now()}`,
+                product_name: item.product_name,
+                quantity: qty,
+                unit_price_cents: unitPrice,
+                subtotal_cents: subtotal,
+                unit: item.unit || 'unidad',
+              });
+            }
+          }
+        }
+
+        if (verifiedItems.length === 0) {
+          return errorResponse('Ningún producto seleccionado es válido en el catálogo.', 400);
+        }
+
+        // Sumar costo de domicilio si aplica
+        if (deliveryType === 'delivery' && (negocio.costo_domicilio_cents || 0) > 0) {
+          totalCents += negocio.costo_domicilio_cents;
+        }
+
+        // Generar código de turno correlativo por negocio
+        const countRes = await env.DB.prepare(
+          'SELECT COUNT(*) as count FROM customer_orders WHERE negocio_id = ? AND source = ?'
+        )
+          .bind(negocio.id, source)
+          .first<{ count: number }>();
+
+        const seq = (countRes?.count ?? 0) + 1;
+        const prefix = source === 'kiosk' ? 'K' : source === 'whatsapp' ? 'WA' : 'W';
+        const orderCode = `#${prefix}-${String(seq).padStart(2, '0')}`;
+
+        const orderId = `ord-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+        const trackingToken = `tk_${Date.now()}_${Math.random().toString(36).substring(2, 10)}`;
+
+        await env.DB.prepare(
+          `INSERT INTO customer_orders (
+            id, negocio_id, order_code, source, customer_name, customer_phone,
+            delivery_type, delivery_address, delivery_neighborhood, payment_method,
+            items_json, total_cents, status, tracking_token, created_at, updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, datetime('now'), datetime('now'))`
+        )
+          .bind(
+            orderId,
+            negocio.id,
+            orderCode,
+            source,
+            customerName,
+            body.customer_phone?.trim() || null,
+            deliveryType,
+            body.delivery_address?.trim() || null,
+            body.delivery_neighborhood?.trim() || null,
+            paymentMethod,
+            JSON.stringify(verifiedItems),
+            totalCents,
+            trackingToken
+          )
+          .run();
+
+        const createdOrder = await env.DB.prepare('SELECT * FROM customer_orders WHERE id = ?')
+          .bind(orderId)
+          .first<any>();
+
+        return jsonResponse({
+          success: true,
+          order: {
+            ...createdOrder,
+            items: verifiedItems,
+          },
+        }, 201);
+      }
+
+      // 10.3 Endpoints PRIVADOS para el Mostrador del Tendero (Requieren Auth)
+      const auth = await authenticateRequest(request, env);
+
+      // GET /api/customer-orders (Listado para la bandeja del POS)
+      if (method === 'GET' && !subPath) {
+        const status = url.searchParams.get('status');
+        let query = 'SELECT * FROM customer_orders WHERE negocio_id = ?';
+        const params: unknown[] = [auth.negocioId];
+
+        if (status) {
+          query += ' AND status = ?';
+          params.push(status);
+        }
+
+        query += ' ORDER BY created_at DESC LIMIT 50';
+
+        const result = await env.DB.prepare(query).bind(...params).all();
+        const orders = (result.results || []).map((row: any) => {
+          let items = [];
+          try {
+            items = JSON.parse(row.items_json);
+          } catch {}
+          return { ...row, items };
+        });
+
+        return jsonResponse(orders);
+      }
+
+      // PUT /api/customer-orders/:id/status (Actualizar estado de orden)
+      if (method === 'PUT' && subPath.endsWith('/status')) {
+        const orderId = subPath.replace(/\/status$/, '').trim();
+        const body = (await request.json()) as { status: string };
+        const nextStatus = body.status;
+
+        const validStatuses = ['pending', 'preparing', 'ready_or_on_way', 'completed', 'cancelled'];
+        if (!validStatuses.includes(nextStatus)) {
+          return errorResponse('Estado no válido.', 400);
+        }
+
+        await env.DB.prepare(
+          "UPDATE customer_orders SET status = ?, updated_at = datetime('now') WHERE id = ? AND negocio_id = ?"
+        )
+          .bind(nextStatus, orderId, auth.negocioId)
+          .run();
+
+        const updated = await env.DB.prepare('SELECT * FROM customer_orders WHERE id = ? AND negocio_id = ?')
+          .bind(orderId, auth.negocioId)
+          .first<any>();
+
+        let items = [];
+        try {
+          items = JSON.parse(updated.items_json);
+        } catch {}
+
+        return jsonResponse({ ...updated, items });
+      }
+
+      // POST /api/customer-orders/:id/convert-to-sale (Facturar y Despachar en 1 Clic desde el POS)
+      if (method === 'POST' && subPath.endsWith('/convert-to-sale')) {
+        const orderId = subPath.replace(/\/convert-to-sale$/, '').trim();
+        const body = (await request.json().catch(() => ({}))) as any;
+
+        const order = await env.DB.prepare(
+          'SELECT * FROM customer_orders WHERE id = ? AND negocio_id = ?'
+        )
+          .bind(orderId, auth.negocioId)
+          .first<any>();
+
+        if (!order) {
+          return errorResponse('Pedido no encontrado en este local.', 404);
+        }
+
+        if (order.status === 'completed' && order.sale_id) {
+          return jsonResponse({
+            success: true,
+            message: 'Este pedido ya fue facturado previamente.',
+            sale_id: order.sale_id,
+          });
+        }
+
+        let items: Array<any> = [];
+        try {
+          items = JSON.parse(order.items_json);
+        } catch {}
+
+        const saleId = `sale-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+        const paymentMethod = body.payment_method || (order.payment_method === 'transfer' ? 'other' : order.payment_method === 'credit' ? 'credit' : 'cash');
+        const creditCustomerId = body.credit_customer_id || null;
+        const creditCustomerName = body.credit_customer_name || (paymentMethod === 'credit' ? order.customer_name : null);
+
+        // Operación atómica en D1 batch
+        const batchStatements: any[] = [];
+
+        // 1. Insertar venta
+        batchStatements.push(
+          env.DB.prepare(
+            `INSERT INTO sales (
+              id, negocio_id, total_cents, payment_method, credit_customer_id, credit_customer_name,
+              created_by_uid, created_by_role, schema_version, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 2, datetime('now'))`
+          ).bind(
+            saleId,
+            auth.negocioId,
+            order.total_cents,
+            paymentMethod,
+            creditCustomerId,
+            creditCustomerName,
+            auth.user.id,
+            auth.user.role
+          )
+        );
+
+        // 2. Insertar items y descontar stock
+        for (const item of items) {
+          const itemId = `si-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+          const subtotal = item.subtotal_cents || (item.quantity * item.unit_price_cents);
+          batchStatements.push(
+            env.DB.prepare(
+              `INSERT INTO sale_items (
+                id, sale_id, product_id, product_name, quantity, price_cents, subtotal_cents, category
+              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+            ).bind(
+              itemId,
+              saleId,
+              item.product_id,
+              item.product_name,
+              item.quantity,
+              item.unit_price_cents,
+              subtotal,
+              item.category || null
+            )
+          );
+
+          batchStatements.push(
+            env.DB.prepare(
+              `UPDATE products SET stock = MAX(0, stock - ?), updated_at = datetime('now')
+               WHERE id = ? AND negocio_id = ?`
+            ).bind(item.quantity, item.product_id, auth.negocioId)
+          );
+        }
+
+        // 3. Si fue fiado, crear cargo en credit_entries si se especificó el cliente
+        if (paymentMethod === 'credit' && creditCustomerId) {
+          const entryId = `entry-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+          batchStatements.push(
+            env.DB.prepare(
+              `INSERT INTO credit_entries (
+                id, negocio_id, customer_id, type, amount_cents, description, sale_id,
+                created_by_uid, created_by_role, created_at
+              ) VALUES (?, ?, ?, 'debt', ?, ?, ?, ?, ?, datetime('now'))`
+            ).bind(
+              entryId,
+              auth.negocioId,
+              creditCustomerId,
+              order.total_cents,
+              `Pedido Kiosco ${order.order_code}`,
+              saleId,
+              auth.user.id,
+              auth.user.role
+            )
+          );
+
+          batchStatements.push(
+            env.DB.prepare(
+              `UPDATE credit_customers
+               SET balance_cents = balance_cents + ?, last_entry_at = datetime('now'), updated_at = datetime('now')
+               WHERE id = ? AND negocio_id = ?`
+            ).bind(order.total_cents, creditCustomerId, auth.negocioId)
+          );
+        }
+
+        // 4. Actualizar estado de customer_orders
+        batchStatements.push(
+          env.DB.prepare(
+            "UPDATE customer_orders SET status = 'completed', sale_id = ?, updated_at = datetime('now') WHERE id = ? AND negocio_id = ?"
+          ).bind(saleId, orderId, auth.negocioId)
+        );
+
+        await env.DB.batch(batchStatements);
+
+        return jsonResponse({
+          success: true,
+          message: `Pedido ${order.order_code} facturado y descontado exitosamente.`,
+          sale_id: saleId,
+          order_id: orderId,
+        });
       }
     }
 

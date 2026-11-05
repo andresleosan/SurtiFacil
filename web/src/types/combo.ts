@@ -30,3 +30,4 @@ export interface NewComboInput {
   visible_kiosco?: boolean;
   visible_tienda?: boolean;
 }
+

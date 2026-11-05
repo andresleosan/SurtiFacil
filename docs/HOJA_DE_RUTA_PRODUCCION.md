@@ -92,17 +92,16 @@ Para maximizar la eficiencia de tokens y la precisión de razonamiento en cada s
     7. **API Serverless en Cloudflare Pages Functions (`web/functions/api/[[route]].ts`):** Endpoints públicos `POST /api/registro-negocio` y privados `GET /api/super-admin/negocios`, `PUT /api/super-admin/negocios/:id`, `POST /api/super-admin/negocios/:id/renovar` con transacciones seguras y aislamiento multi-tenant.
     8. **100% de Pruebas en Verde:** 36 suites de Vitest (299 tests aprobados), build de producción impecable (`tsc && vite build`) y 10/10 pruebas E2E en Playwright aprobadas en navegadores desktop, mobile y tablet.
 
-- [ ] **Tarea 5 — Modo Kiosco Táctil / iPad Afuera del Local (`#/kiosco/:slug`) y Bandeja de Pedidos en Vivo en POS con Alerta Sonora:**
+- [x] **Tarea 5 — Modo Kiosco Táctil / iPad Afuera del Local (`#/kiosco/:slug`) y Bandeja de Pedidos en Vivo en POS con Alerta Sonora:**
   - **Nivel Recomendado:** `Argon (Low)`
-  - **Objetivo:** Habilitar una interfaz táctil de autoatención tipo Kiosco para tablets/iPads ubicados afuera o en la entrada del local de abastos, conectada en tiempo real con la caja del tendero.
-  - **Alcance Técnico:**
-    1. Crear tabla `customer_orders` en D1 (`id`, `negocio_id`, `order_code`, `source` ['kiosk' | 'web' | 'whatsapp'], `customer_name`, `customer_phone`, `delivery_type` ['pickup_counter' | 'delivery'], `delivery_address`, `delivery_neighborhood`, `payment_method` ['cash' | 'transfer' | 'credit'], `items_json`, `total_cents`, `status` ['pending' | 'preparing' | 'ready_or_on_way' | 'completed' | 'cancelled'], `tracking_token`, `created_at`) y endpoints públicos/privados en `/api/customer-orders`.
-    2. Construir la vista **Kiosco de Autoatención** (`web/src/components/KioskMode.tsx` en `#/kiosco/:slug`):
-       - Botones gigantes de alta visibilidad (`min-h-[56px]`), modo Pantalla Completa (`Fullscreen API`), categorías ilustradas con íconos grandes, buscador rápido y tarjetas de producto con botón `+ Agregar` de 1 toque.
-       - Carrito lateral/inferior persistente con ajuste rápido de cantidades (`+` / `-`) y cálculo en vivo en `formatCOP`.
-       - Checkout sin fricción en 2 pasos: Nombre del cliente, modalidad (**"Llevar ya en mostrador"** vs **"Envíenmelo a mi casa"**) y medio de pago (**Efectivo**, **Transferencia Nequi** o **Anotar a mi Fiado**).
-       - Pantalla final de **Turno Gigante** (ej. `TURNO #A-12`) con instrucciones claras y cuenta regresiva de 15 segundos para limpiar y reiniciar automáticamente la pantalla para el siguiente vecino.
-    3. Integrar en el POS (`CreateSale.tsx`) y en la navegación una **Bandeja de Pedidos de Clientes (Kiosco / Web / WhatsApp)** con timbre acústico Web Audio API (`playNewOrderChime`), permitiendo al tendero ver lo que pidió el cliente en el iPad y **Facturarlo / Descontar Stock en 1 clic**.
+  - **Estado:** ✅ Completada y Desplegada
+  - **Evidencia Técnica:**
+    1. **Tabla y Endpoints Serverless en Cloudflare D1 y Pages Functions:** Endpoints públicos `GET /api/public/store/:slug`, `POST /api/customer-orders` y `GET /api/customer-orders/track/:token`, junto a los endpoints privados de mostrador `GET /api/customer-orders`, `PUT /api/customer-orders/:id/status` y `POST /api/customer-orders/:id/convert-to-sale` con cálculo autoritativo de precios en D1 y emisión de turnos correlativos (`#K-01`).
+    2. **Vista Kiosco Táctil de Autoatención (`KioskMode.tsx` en `#/kiosco/:slug`):** Diseñada para iPad/tablets en la entrada del local con objetivos táctiles de `56×56 px`, soporte para `Fullscreen API`, sinergia Rappi Aisles (pasillos ilustrados) + Blinkit (productos táctiles de alto contraste con badges de unidad y precio en `formatCOP`), canasta persistente con controles `+`/`-`, checkout de 2 pasos sin fricción (Nombre del cliente + Efectivo / Transferencia / Fiado) y pantalla de **Turno Gigante** con cuenta regresiva de 15 segundos y reinicio automático.
+    3. **Timbre Acústico de Mostrador (`audioAlerts.ts`):** Chime armónico de 2 notas sintetizado mediante la Web Audio API nativa (`playNewOrderChime`) sin dependencias externas, alertando al cajero cuando un cliente genera un turno en el iPad.
+    4. **Bandeja de Pedidos en Vivo en POS (`LiveOrdersTray.tsx` y `CreateSale.tsx`):** Pestaña integrada en mostrador con sondeo continuo, visualización de pedidos entrantes de Kiosco/Web y botón de **1 clic: "Facturar y Despachar"** que ejecuta una transacción atómica en D1 descontando stock y emitiendo la venta oficial.
+    5. **Integración en Navegación (`AppShell.tsx` y `App.tsx`):** Enlace directo al Modo Kiosco iPad en "Canales y Vecinos" y en el menú móvil, y enrutador hash dedicado para cargar el Kiosco en pantalla completa tanto para clientes sin sesión como para el staff.
+    6. **100% de Pruebas en Verde:** 37 suites de Vitest (306 tests aprobados), build de producción impecable (`tsc && vite build`) y 11/11 pruebas E2E en Playwright aprobadas en navegadores desktop, mobile y tablet.
 
 - [ ] **Tarea 6 — Catálogo Web Vecinal por Negocio (`#/tienda/:slug`), Rastreo de Pedido en Vivo (`#/pedido/:token`) y Generador de Afiche QR Imprimible:**
   - **Nivel Recomendado:** `3.8 Flash (Medium)`

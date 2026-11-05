@@ -40,7 +40,9 @@ export type IconName =
   | 'package'
   | 'external-link'
   | 'shield'
-  | 'crown';
+  | 'crown'
+  | 'maximize'
+  | 'minimize';
 
 const PATHS: Record<IconName, string> = {
   home: 'M3 11.5 12 4l9 7.5M5 10v10h5v-6h4v6h5V10',
@@ -83,6 +85,8 @@ const PATHS: Record<IconName, string> = {
   'external-link': 'M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6m4-3h6v6m-11 5L21 3',
   shield: 'M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z',
   crown: 'm2 4 3 12h14l3-12-6 7-4-7-4 7-6-7zm3 16h14v2H5v-2z',
+  maximize: 'M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3',
+  minimize: 'M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3',
 };
 
 interface IconProps extends Omit<SVGProps<SVGSVGElement>, 'name'> {

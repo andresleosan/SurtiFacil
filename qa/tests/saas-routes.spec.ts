@@ -26,3 +26,4 @@ test.describe('SaaS Public Routes', () => {
     await expect(page.getByRole('button', { name: /Comenzar mi Tienda en SurtiFácil/i })).toBeVisible();
   });
 });
+

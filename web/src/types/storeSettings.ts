@@ -18,3 +18,4 @@ export interface StoreSettings {
   cuota_ia_total: number;
   cuota_ia_usada: number;
 }
+
