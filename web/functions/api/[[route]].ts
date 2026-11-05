@@ -103,6 +103,136 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       });
     }
 
+    // 2.1 Registro Público de Nuevas Tiendas (/registro-negocio)
+    if (path === '/registro-negocio' && method === 'POST') {
+      const body = (await request.json()) as any;
+      const nombre = (body.nombre || '').trim();
+      let slug = (body.slug || '')
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9-]/g, '-')
+        .replace(/-+/g, '-')
+        .replace(/^-|-$/g, '');
+
+      if (!slug && nombre) {
+        slug = nombre
+          .toLowerCase()
+          .normalize('NFD')
+          .replace(/[\u0300-\u036f]/g, '')
+          .replace(/[^a-z0-9-]/g, '-')
+          .replace(/-+/g, '-')
+          .replace(/^-|-$/g, '');
+      }
+
+      const email = (body.email || '').trim().toLowerCase();
+      const ownerName = (body.owner_name || '').trim();
+      const phone = (body.telefono_whatsapp || '').trim();
+      const barrio = (body.barrio || 'Medellín').trim();
+      const direccion = (body.direccion || '').trim();
+      const planId = body.plan_id || 'prueba_3d';
+
+      if (!nombre || !slug || !email || !phone) {
+        return errorResponse('Nombre de tienda, identificador (slug), correo y WhatsApp son obligatorios.', 400);
+      }
+
+      // Asegurar tabla negocios en D1
+      await env.DB.prepare(
+        `CREATE TABLE IF NOT EXISTS negocios (
+          id TEXT PRIMARY KEY,
+          slug TEXT NOT NULL UNIQUE,
+          nombre TEXT NOT NULL,
+          barrio TEXT DEFAULT 'Medellín',
+          ciudad TEXT DEFAULT 'Medellín',
+          telefono_whatsapp TEXT,
+          direccion TEXT,
+          horario TEXT DEFAULT 'Lunes a Domingo 7:00 AM - 9:00 PM',
+          logo_url TEXT,
+          estado TEXT NOT NULL CHECK(estado IN ('activo', 'pendiente', 'suspendido')) DEFAULT 'activo',
+          plan_id TEXT NOT NULL CHECK(plan_id IN ('prueba_3d', 'semanal_7d', 'quincenal_15d', 'mensual_30d', 'enterprise')) DEFAULT 'prueba_3d',
+          suscripcion_vence_en TEXT,
+          cuota_ia_total INTEGER NOT NULL DEFAULT 300,
+          cuota_ia_usada INTEGER NOT NULL DEFAULT 0,
+          costo_domicilio_cents INTEGER NOT NULL DEFAULT 0,
+          datos_pago_offline TEXT,
+          config_json TEXT DEFAULT '{}',
+          created_at TEXT DEFAULT (datetime('now')),
+          updated_at TEXT DEFAULT (datetime('now'))
+        )`
+      ).run().catch(() => {});
+
+      // Verificar si el slug ya existe
+      const existing = await env.DB.prepare('SELECT id FROM negocios WHERE slug = ?').bind(slug).first();
+      if (existing) {
+        return errorResponse('El identificador de tienda (slug) ya está registrado. Por favor elige otro.', 409);
+      }
+
+      const negocioId = slug;
+      let durationDays = 3;
+      let cuotaIA = 300;
+      if (planId === 'semanal_7d') {
+        durationDays = 7;
+        cuotaIA = 700;
+      } else if (planId === 'quincenal_15d') {
+        durationDays = 15;
+        cuotaIA = 1500;
+      } else if (planId === 'mensual_30d') {
+        durationDays = 30;
+        cuotaIA = 3000;
+      } else if (planId === 'enterprise') {
+        durationDays = 365;
+        cuotaIA = 999999;
+      }
+
+      const expiresAt = new Date(Date.now() + durationDays * 86400000).toISOString();
+
+      await env.DB.prepare(
+        `INSERT INTO negocios (
+          id, slug, nombre, barrio, ciudad, telefono_whatsapp, direccion, estado, plan_id, suscripcion_vence_en, cuota_ia_total, cuota_ia_usada, costo_domicilio_cents, config_json, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, 'Medellín', ?, ?, 'activo', ?, ?, ?, 0, 0, ?, datetime('now'), datetime('now'))`
+      )
+        .bind(
+          negocioId,
+          slug,
+          nombre,
+          barrio,
+          phone,
+          direccion || null,
+          planId,
+          expiresAt,
+          cuotaIA,
+          JSON.stringify({ owner_name: ownerName, permite_domicilio: true, permite_retiro: true })
+        )
+        .run();
+
+      // Crear usuario administrador en users
+      const userId = `user-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+      await env.DB.prepare(
+        `INSERT INTO users (id, negocio_id, email, display_name, role, is_super_admin, active, created_at)
+         VALUES (?, ?, ?, ?, 'admin', 0, 1, datetime('now'))`
+      )
+        .bind(userId, negocioId, email, ownerName || nombre)
+        .run()
+        .catch(() => {});
+
+      return jsonResponse({
+        success: true,
+        message: '¡Tienda registrada con éxito!',
+        negocio: {
+          id: negocioId,
+          slug,
+          nombre,
+          plan_id: planId,
+          suscripcion_vence_en: expiresAt,
+          cuota_ia_total: cuotaIA,
+        },
+        user: {
+          id: userId,
+          email,
+          role: 'admin',
+        },
+      }, 201);
+    }
+
     // 3. Provisión de usuario y endpoints compatibles de autenticación
     if (path === '/auth/sync-claims' && method === 'POST') {
       return jsonResponse({ success: true, message: 'Custom claims sincronizados correctamente.' });
@@ -351,6 +481,148 @@ export const onRequest: PagesFunction<Env> = async (context) => {
           .run();
 
         return jsonResponse({ success: true, id: comboId });
+      }
+    }
+
+    // 3.3 Centro de Control SuperAdmin (/super-admin/negocios)
+    if (path === '/super-admin/negocios' || path.startsWith('/super-admin/negocios/')) {
+      const auth = await authenticateRequest(request, env);
+      if (!auth.user.isSuperAdmin && auth.user.email.toLowerCase() !== 'andres.san1404@gmail.com') {
+        return errorResponse('Acceso denegado: solo el SuperAdmin de SurtiFácil puede acceder.', 403);
+      }
+
+      const subPath = path.replace(/^\/super-admin\/negocios\/?/, '');
+
+      // GET /api/super-admin/negocios
+      if (method === 'GET' && !subPath) {
+        const rows = await env.DB.prepare(
+          `SELECT n.*,
+            (SELECT COUNT(*) FROM products p WHERE p.negocio_id = n.id) as total_products,
+            (SELECT COUNT(*) FROM users u WHERE u.negocio_id = n.id) as total_users,
+            (SELECT COUNT(*) FROM sales s WHERE s.negocio_id = n.id) as total_sales
+           FROM negocios n
+           ORDER BY n.created_at DESC`
+        ).all<any>();
+
+        const negocios = rows.results || [];
+
+        // Calcular KPIs de plataforma
+        const totalTiendas = negocios.length;
+        let tiendasActivas = 0;
+        let recaudoEstimadoCOP = 0;
+        let cuotaIATotal = 0;
+        let cuotaIAUsada = 0;
+
+        for (const n of negocios) {
+          if (n.estado === 'activo') tiendasActivas++;
+          cuotaIATotal += Number(n.cuota_ia_total || 0);
+          cuotaIAUsada += Number(n.cuota_ia_usada || 0);
+
+          if (n.estado === 'activo') {
+            if (n.plan_id === 'prueba_3d') recaudoEstimadoCOP += 5000;
+            else if (n.plan_id === 'semanal_7d') recaudoEstimadoCOP += 19900;
+            else if (n.plan_id === 'quincenal_15d') recaudoEstimadoCOP += 34900;
+            else if (n.plan_id === 'mensual_30d') recaudoEstimadoCOP += 59900;
+          }
+        }
+
+        return jsonResponse({
+          kpis: {
+            totalTiendas,
+            tiendasActivas,
+            recaudoEstimadoCOP,
+            cuotaIATotal,
+            cuotaIAUsada,
+          },
+          negocios,
+        });
+      }
+
+      // POST /api/super-admin/negocios/:id/renovar
+      if (method === 'POST' && subPath.endsWith('/renovar')) {
+        const targetId = subPath.replace(/\/renovar$/, '');
+        const body = (await request.json()) as { days?: number; add_cuota_ia?: number };
+        const days = Math.max(1, Number(body.days || 3));
+        const addCuota = Number(body.add_cuota_ia || 0);
+
+        const current = await env.DB.prepare(
+          'SELECT id, suscripcion_vence_en, cuota_ia_total, estado FROM negocios WHERE id = ?'
+        ).bind(targetId).first<any>();
+
+        if (!current) {
+          return errorResponse('Negocio no encontrado.', 404);
+        }
+
+        let baseDate = new Date();
+        if (current.suscripcion_vence_en) {
+          const currentExpiry = new Date(current.suscripcion_vence_en);
+          if (currentExpiry > baseDate) {
+            baseDate = currentExpiry;
+          }
+        }
+
+        const newExpiry = new Date(baseDate.getTime() + days * 86400000).toISOString();
+        const newCuota = (current.cuota_ia_total || 0) + addCuota;
+
+        await env.DB.prepare(
+          `UPDATE negocios
+           SET suscripcion_vence_en = ?,
+               cuota_ia_total = ?,
+               estado = 'activo',
+               updated_at = datetime('now')
+           WHERE id = ?`
+        )
+          .bind(newExpiry, newCuota, targetId)
+          .run();
+
+        const updated = await env.DB.prepare('SELECT * FROM negocios WHERE id = ?').bind(targetId).first();
+        return jsonResponse(updated);
+      }
+
+      // PUT /api/super-admin/negocios/:id
+      if (method === 'PUT' && subPath) {
+        const targetId = subPath;
+        const body = (await request.json()) as any;
+
+        const current = await env.DB.prepare('SELECT id FROM negocios WHERE id = ?').bind(targetId).first();
+        if (!current) {
+          return errorResponse('Negocio no encontrado.', 404);
+        }
+
+        const updates: string[] = [];
+        const bindings: any[] = [];
+
+        if (body.estado !== undefined) {
+          updates.push('estado = ?');
+          bindings.push(body.estado);
+        }
+        if (body.plan_id !== undefined) {
+          updates.push('plan_id = ?');
+          bindings.push(body.plan_id);
+        }
+        if (body.suscripcion_vence_en !== undefined) {
+          updates.push('suscripcion_vence_en = ?');
+          bindings.push(body.suscripcion_vence_en);
+        }
+        if (body.cuota_ia_total !== undefined) {
+          updates.push('cuota_ia_total = ?');
+          bindings.push(Number(body.cuota_ia_total));
+        }
+        if (body.cuota_ia_usada !== undefined) {
+          updates.push('cuota_ia_usada = ?');
+          bindings.push(Number(body.cuota_ia_usada));
+        }
+
+        if (updates.length > 0) {
+          updates.push("updated_at = datetime('now')");
+          bindings.push(targetId);
+          await env.DB.prepare(`UPDATE negocios SET ${updates.join(', ')} WHERE id = ?`)
+            .bind(...bindings)
+            .run();
+        }
+
+        const updated = await env.DB.prepare('SELECT * FROM negocios WHERE id = ?').bind(targetId).first();
+        return jsonResponse(updated);
       }
     }
 

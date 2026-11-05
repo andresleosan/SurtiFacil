@@ -145,6 +145,21 @@ class MockD1Database implements D1Database {
           return { results: n ? [n as T] : [], success: true };
         }
 
+        if (q.includes('FROM negocios WHERE slug = ?')) {
+          const n = db.tables.negocios.find((neg) => neg.slug === boundValues[0]);
+          return { results: n ? [n as T] : [], success: true };
+        }
+
+        if (q.includes('FROM negocios n') || q.includes('FROM negocios ORDER BY')) {
+          const res = db.tables.negocios.map((n) => ({
+            ...n,
+            total_products: db.tables.products.filter((p) => p.negocio_id === n.id).length,
+            total_users: db.tables.users.filter((u) => u.negocio_id === n.id).length,
+            total_sales: db.tables.sales.filter((s) => s.negocio_id === n.id).length,
+          }));
+          return { results: res as T[], success: true };
+        }
+
         if (q.includes('FROM products WHERE negocio_id = ?') && q.includes('id IN')) {
           // Extract product IDs
           const storeId = boundValues[0];
@@ -367,8 +382,51 @@ class MockD1Database implements D1Database {
           );
         }
 
-        if (q.startsWith('CREATE TABLE IF NOT EXISTS combos')) {
+        if (q.startsWith('CREATE TABLE IF NOT EXISTS combos') || q.startsWith('CREATE TABLE IF NOT EXISTS negocios')) {
           return { success: true };
+        }
+
+        if (q.startsWith('INSERT INTO negocios')) {
+          const [id, slug, nombre, barrio, phone, direccion, planId, expiresAt, cuotaIA, configJson] = boundValues;
+          db.tables.negocios.push({
+            id,
+            slug,
+            nombre,
+            barrio,
+            ciudad: 'Medellín',
+            telefono_whatsapp: phone,
+            direccion,
+            estado: 'activo',
+            plan_id: planId,
+            suscripcion_vence_en: expiresAt,
+            cuota_ia_total: cuotaIA,
+            cuota_ia_usada: 0,
+            costo_domicilio_cents: 0,
+            config_json: configJson,
+          });
+        }
+
+        if (q.startsWith('INSERT INTO users')) {
+          const [id, negocio_id, email, display_name] = boundValues;
+          db.tables.users.push({
+            id,
+            negocio_id,
+            email,
+            display_name,
+            role: 'admin',
+            is_super_admin: 0,
+            active: 1,
+          });
+        }
+
+        if (q.includes('suscripcion_vence_en = ?') && q.includes('UPDATE negocios')) {
+          const [expiresAt, cuotaIA, targetId] = boundValues;
+          const neg = db.tables.negocios.find((n: any) => n.id === targetId);
+          if (neg) {
+            neg.suscripcion_vence_en = expiresAt;
+            neg.cuota_ia_total = cuotaIA;
+            neg.estado = 'activo';
+          }
         }
 
         if (q.startsWith('UPDATE negocios SET')) {
@@ -752,5 +810,88 @@ describe('Cloudflare Pages Functions API (/api/*)', () => {
     const combos = await listRes.json();
     expect(combos.length).toBe(1);
     expect(combos[0].name).toBe('Combo Desayuno Paisa');
+  });
+
+  it('POST /api/registro-negocio registra una nueva tienda con plan y crea su admin', async () => {
+    const regCtx = createMockContext(
+      'POST',
+      'http://localhost/api/registro-negocio',
+      {},
+      {
+        nombre: 'Minimercado Don Paisa',
+        slug: 'minimercado-don-paisa',
+        owner_name: 'Don Paisa',
+        email: 'donpaisa@abastos.co',
+        telefono_whatsapp: '3009998877',
+        barrio: 'San Javier (Comuna 13)',
+        plan_id: 'quincenal_15d',
+      },
+      db
+    );
+    const regRes = await onRequest(regCtx as any);
+    expect(regRes.status).toBe(201);
+    const resBody = await regRes.json();
+    expect(resBody.success).toBe(true);
+    expect(resBody.negocio.slug).toBe('minimercado-don-paisa');
+    expect(resBody.negocio.plan_id).toBe('quincenal_15d');
+    expect(resBody.negocio.cuota_ia_total).toBe(1500);
+
+    // Intentar registrar el mismo slug debe retornar 409
+    const dupCtx = createMockContext(
+      'POST',
+      'http://localhost/api/registro-negocio',
+      {},
+      {
+        nombre: 'Otro Minimercado',
+        slug: 'minimercado-don-paisa',
+        email: 'otro@abastos.co',
+        telefono_whatsapp: '3001112233',
+        plan_id: 'prueba_3d',
+      },
+      db
+    );
+    const dupRes = await onRequest(dupCtx as any);
+    expect(dupRes.status).toBe(409);
+  });
+
+  it('GET /api/super-admin/negocios y /renovar gestionan la plataforma y suscripciones', async () => {
+    // 1. Usuario normal (cajero) intentando acceder a SuperAdmin -> 403
+    const cashierCtx = createMockContext(
+      'GET',
+      'http://localhost/api/super-admin/negocios',
+      { Authorization: 'Bearer mock:cashier-1:cajero@surtifacil.com:cashier' },
+      null,
+      db
+    );
+    const forbiddenRes = await onRequest(cashierCtx as any);
+    expect(forbiddenRes.status).toBe(403);
+
+    // 2. SuperAdmin accediendo -> 200 con KPIs y lista
+    const superAdminCtx = createMockContext(
+      'GET',
+      'http://localhost/api/super-admin/negocios',
+      { Authorization: 'Bearer mock:admin-1:andres.san1404@gmail.com:admin' },
+      null,
+      db
+    );
+    const saRes = await onRequest(superAdminCtx as any);
+    expect(saRes.status).toBe(200);
+    const saData = await saRes.json();
+    expect(saData.kpis).toBeDefined();
+    expect(saData.kpis.totalTiendas).toBeGreaterThanOrEqual(1);
+    expect(saData.negocios.length).toBeGreaterThanOrEqual(1);
+
+    // 3. Renovar negocio
+    const renewCtx = createMockContext(
+      'POST',
+      'http://localhost/api/super-admin/negocios/surtifacil/renovar',
+      { Authorization: 'Bearer mock:admin-1:andres.san1404@gmail.com:admin' },
+      { days: 7, add_cuota_ia: 700 },
+      db
+    );
+    const renewRes = await onRequest(renewCtx as any);
+    expect(renewRes.status).toBe(200);
+    const renewed = await renewRes.json();
+    expect(renewed.estado).toBe('activo');
   });
 });

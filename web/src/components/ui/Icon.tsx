@@ -38,7 +38,9 @@ export type IconName =
   | 'grid'
   | 'list'
   | 'package'
-  | 'external-link';
+  | 'external-link'
+  | 'shield'
+  | 'crown';
 
 const PATHS: Record<IconName, string> = {
   home: 'M3 11.5 12 4l9 7.5M5 10v10h5v-6h4v6h5V10',
@@ -79,6 +81,8 @@ const PATHS: Record<IconName, string> = {
   list: 'M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01',
   package: 'M16.5 9.4 7.55 4.24M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16ZM3.27 6.96 12 12.01l8.73-5.05M12 22.08V12',
   'external-link': 'M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6m4-3h6v6m-11 5L21 3',
+  shield: 'M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z',
+  crown: 'm2 4 3 12h14l3-12-6 7-4-7-4 7-6-7zm3 16h14v2H5v-2z',
 };
 
 interface IconProps extends Omit<SVGProps<SVGSVGElement>, 'name'> {

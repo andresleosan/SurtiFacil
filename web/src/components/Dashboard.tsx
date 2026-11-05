@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { getSalesSince, getSalesTotals } from '../services/saleService';
 import StockAlerts from './StockAlerts';
+import SubscriptionBanner from './SubscriptionBanner';
 import { Icon } from './ui/Icon';
 import { PageHeader } from './ui/PageHeader';
 
@@ -117,6 +118,7 @@ const Dashboard = () => {
   return (
     <section className="space-y-4">
       {header}
+      <SubscriptionBanner />
       {loading && (
         <p className="text-sm text-gray-500" role="status">Cargando datos...</p>
       )}

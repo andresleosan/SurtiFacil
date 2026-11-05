@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { canAccessPage, type Page } from '../../auth/accessControl';
 import type { User } from '../../firebase/db';
 import { useIsMobile, useIsWideScreen } from '../../hooks/useMediaQuery';
+import { getActiveNegocioId, setActiveNegocioId } from '../../services/apiClient';
 import { Icon } from '../ui/Icon';
 import { Modal } from '../ui/Modal';
 import { findNavItem, MOBILE_TAB_LABELS, MOBILE_TAB_PAGES, NAV_GROUPS, NAV_ITEMS } from './navItems';
@@ -276,18 +277,52 @@ interface DesktopTopBarProps {
 function DesktopTopBar({ user, page, onNavigate, onLogout }: DesktopTopBarProps) {
   const current = findNavItem(page);
   const [profileOpen, setProfileOpen] = useState(false);
+  const isSuperAdmin = user.email.toLowerCase() === 'andres.san1404@gmail.com' || (user as any).isSuperAdmin;
+  const operatedId = getActiveNegocioId();
 
   return (
     <header className="sticky top-0 z-20 flex h-16 items-center justify-between border-b border-slate-200 bg-white px-6 shadow-sm">
       <div className="flex items-center gap-3">
         <h1 className="text-lg font-bold text-sf-text">{current?.label ?? 'SurtiFácil'}</h1>
-        <span className="hidden rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-600 lg:inline-flex items-center gap-1.5">
-          <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-          Sede Central Medellín
-        </span>
+        {operatedId ? (
+          <span className="rounded-full bg-amber-100 border border-amber-300 px-2.5 py-0.5 text-xs font-semibold text-amber-900 inline-flex items-center gap-1.5">
+            <span className="h-1.5 w-1.5 rounded-full bg-amber-500 animate-pulse" />
+            Operando: {operatedId}
+            <button
+              type="button"
+              onClick={() => {
+                setActiveNegocioId(null);
+                window.location.reload();
+              }}
+              className="text-[10px] text-amber-700 underline hover:text-amber-900 ml-1"
+            >
+              Salir
+            </button>
+          </span>
+        ) : (
+          <span className="hidden rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-600 lg:inline-flex items-center gap-1.5">
+            <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+            Sede Central Medellín
+          </span>
+        )}
       </div>
 
       <div className="flex items-center gap-3">
+        {isSuperAdmin && (
+          <button
+            type="button"
+            onClick={() => onNavigate('super-admin')}
+            className={`flex min-h-[38px] items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-bold transition border ${
+              page === 'super-admin'
+                ? 'bg-purple-600 text-white border-purple-600 shadow-2xs'
+                : 'bg-purple-50 text-purple-700 border-purple-200 hover:bg-purple-100'
+            }`}
+          >
+            <Icon name="crown" size={16} />
+            <span>SuperAdmin</span>
+          </button>
+        )}
+
         {/* Botón Hero + Nueva Venta (Patrón HoneyBook) */}
         <button
           type="button"
@@ -333,6 +368,19 @@ function DesktopTopBar({ user, page, onNavigate, onLogout }: DesktopTopBarProps)
                   </span>
                 </div>
                 <div className="py-1">
+                  {isSuperAdmin && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setProfileOpen(false);
+                        onNavigate('super-admin');
+                      }}
+                      className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-xs font-semibold text-purple-700 hover:bg-purple-50"
+                    >
+                      <Icon name="crown" size={16} className="text-purple-600" />
+                      Centro SuperAdmin
+                    </button>
+                  )}
                   {canAccessPage(user.role, 'settings') && (
                     <button
                       type="button"

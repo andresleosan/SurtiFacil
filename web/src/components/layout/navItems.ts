@@ -29,6 +29,7 @@ export const NAV_ITEMS: readonly NavItem[] = [
   { page: 'whatsapp', label: 'WhatsApp', icon: 'chat' },
   { page: 'employees', label: 'Empleados', icon: 'users' },
   { page: 'settings', label: 'Configuración', icon: 'settings' },
+  { page: 'super-admin', label: 'SuperAdmin', icon: 'crown' },
 ];
 
 /** Grupos jerárquicos estilo HoneyBook para navegación estructurada */
@@ -67,7 +68,7 @@ export const NAV_GROUPS: readonly NavGroup[] = [
     id: 'settings',
     label: 'Configuración y Equipo',
     icon: '⚙️',
-    pages: ['employees', 'settings'],
+    pages: ['employees', 'settings', 'super-admin'],
   },
 ];
 

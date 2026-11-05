@@ -22,7 +22,11 @@ const PAGE_COMPONENTS: Record<Page, ComponentType> = {
   restock: lazy(() => import('./components/Restock')),
   whatsapp: lazy(() => import('./components/WhatsAppChat')),
   settings: lazy(() => import('./components/StoreSettings')),
+  'super-admin': lazy(() => import('./components/SuperAdminStores')),
 };
+
+const LandingPage = lazy(() => import('./components/LandingPage'));
+const RegisterStore = lazy(() => import('./components/RegisterStore'));
 
 function PageFallback() {
   return (
@@ -36,6 +40,7 @@ function App() {
   const [authLoading, setAuthLoading] = useState(true);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [page, setPage] = useState<Page>(() => pageFromHash(window.location.hash));
+  const [currentHash, setCurrentHash] = useState(() => (typeof window !== 'undefined' ? window.location.hash : ''));
   const [authError, setAuthError] = useState<string | null>(null);
 
   useEffect(() => subscribeToAuthState((user, error) => {
@@ -50,7 +55,17 @@ function App() {
 
   useEffect(() => {
     const syncHashRoute = () => {
-      const nextPage = pageFromHash(window.location.hash);
+      const rawHash = window.location.hash;
+      setCurrentHash(rawHash);
+      if (
+        rawHash.includes('registro-negocio') ||
+        rawHash.includes('registro') ||
+        rawHash.includes('landing') ||
+        rawHash.includes('inicio')
+      ) {
+        return;
+      }
+      const nextPage = pageFromHash(rawHash);
       setPage(nextPage);
       const canonicalHash = hashForPage(nextPage);
       if (window.location.hash !== canonicalHash) {
@@ -120,6 +135,23 @@ function App() {
         </main>
       );
     }
+
+    if (currentHash.includes('registro-negocio') || currentHash.includes('registro')) {
+      return (
+        <Suspense fallback={<PageFallback />}>
+          <RegisterStore />
+        </Suspense>
+      );
+    }
+
+    if (currentHash.includes('landing') || currentHash.includes('inicio')) {
+      return (
+        <Suspense fallback={<PageFallback />}>
+          <LandingPage />
+        </Suspense>
+      );
+    }
+
     return <Login />;
   }
 

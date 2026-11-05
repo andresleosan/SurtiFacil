@@ -14,6 +14,7 @@ export const PAGES = [
   'margins',
   'restock',
   'settings',
+  'super-admin',
 ] as const;
 
 export type Page = typeof PAGES[number];
@@ -35,6 +36,7 @@ export const PAGE_ROLES: Readonly<Record<Page, readonly UserRole[]>> = {
   restock: MANAGER_ROLES,
   whatsapp: MANAGER_ROLES,
   settings: MANAGER_ROLES,
+  'super-admin': ['admin'],
 };
 
 export function isPage(value: unknown): value is Page {
