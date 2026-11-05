@@ -24,10 +24,21 @@ export type IconName =
   | 'chevron-right'
   | 'chevron-down'
   | 'chevron-left'
+  | 'chevron-up'
   | 'menu'
   | 'alert'
   | 'check'
-  | 'wallet';
+  | 'wallet'
+  | 'settings'
+  | 'store'
+  | 'sparkles'
+  | 'tag'
+  | 'eye'
+  | 'eye-off'
+  | 'grid'
+  | 'list'
+  | 'package'
+  | 'external-link';
 
 const PATHS: Record<IconName, string> = {
   home: 'M3 11.5 12 4l9 7.5M5 10v10h5v-6h4v6h5V10',
@@ -53,10 +64,21 @@ const PATHS: Record<IconName, string> = {
   'chevron-right': 'M9 6l6 6-6 6',
   'chevron-down': 'M6 9l6 6 6-6',
   'chevron-left': 'M15 6l-6 6 6 6',
+  'chevron-up': 'M18 15l-6-6-6 6',
   menu: 'M4 7h16M4 12h16M4 17h16',
   alert: 'M12 9v4m0 4h.01M10.3 3.9 2.5 18a2 2 0 0 0 1.7 3h15.6a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z',
   check: 'M5 13l4 4L19 7',
   wallet: 'M3 7a2 2 0 0 1 2-2h12v3M3 7v10a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7a1 1 0 0 0-1-1H5a2 2 0 0 1-2-2Zm13 6h2',
+  settings: 'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Zm7.4-2.1a1 1 0 0 0 .2-1.1l-1.3-2.3a1 1 0 0 1 .2-1.2l1.9-1.5a1 1 0 0 0 .3-1.2l-2-3.5a1 1 0 0 0-1.1-.5l-2.3.8a1 1 0 0 1-1.2-.5L13.3 1a1 1 0 0 0-1.2-.7h-4a1 1 0 0 0-1 .7L6.3 3.4a1 1 0 0 1-1.2.5l-2.3-.8a1 1 0 0 0-1.1.5l-2 3.5a1 1 0 0 0 .3 1.2l1.9 1.5a1 1 0 0 1 .2 1.2L.8 13.8a1 1 0 0 0 .2 1.1l2 3.5a1 1 0 0 0 1.1.5l2.3-.8a1 1 0 0 1 1.2.5l.8 2.4a1 1 0 0 0 1 .7h4a1 1 0 0 0 1-.7l.8-2.4a1 1 0 0 1 1.2-.5l2.3.8a1 1 0 0 0 1.1-.5l2-3.5Z',
+  store: 'M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V9Zm6 13V12h6v10',
+  sparkles: 'M12 2v4m0 12v4M2 12h4m12 0h4m-3.5-6.5-2.8 2.8m-9.4 9.4-2.8 2.8m0-15 2.8 2.8m9.4 9.4 2.8 2.8',
+  tag: 'M20.6 13 11 3.4A2 2 0 0 0 9.6 3H4a1 1 0 0 0-1 1v5.6a2 2 0 0 0 .6 1.4L13 20.6a2 2 0 0 0 2.8 0l4.8-4.8a2 2 0 0 0 0-2.8ZM7 7h.01',
+  eye: 'M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7-10-7-10-7Zm10 3a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z',
+  'eye-off': 'M9.9 4.2A10.6 10.6 0 0 1 12 4c6.4 0 10 7 10 7a18.3 18.3 0 0 1-4 5.3M1 1l22 22M14.1 14.1a3 3 0 0 1-4.2-4.2',
+  grid: 'M3 3h7v7H3V3Zm11 0h7v7h-7V3Zm0 11h7v7h-7v-7ZM3 14h7v7H3v-7Z',
+  list: 'M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01',
+  package: 'M16.5 9.4 7.55 4.24M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16ZM3.27 6.96 12 12.01l8.73-5.05M12 22.08V12',
+  'external-link': 'M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6m4-3h6v6m-11 5L21 3',
 };
 
 interface IconProps extends Omit<SVGProps<SVGSVGElement>, 'name'> {

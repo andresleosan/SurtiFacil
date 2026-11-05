@@ -192,3 +192,60 @@ export function getLocalCreditEntries(): CreditEntry[] {
 export function addLocalCreditEntry(entry: CreditEntry): void {
   localCreditEntries = [entry, ...localCreditEntries];
 }
+
+// ---- Combos y Kits de Mercado ----
+export const mockCombos = [
+  {
+    id: 'combo-1',
+    negocio_id: 'surtifacil',
+    name: 'Combo Desayuno Paisa',
+    description: 'Chocolate Corona, quesito antioqueño y arepas tela x5',
+    price_cents: 950000,
+    items: [
+      { product_id: 'p3', product_name: 'Leche Entera 1L', quantity: 2, unit_price_cents: 350000 },
+      { product_id: 'p4', product_name: 'Queso Cheddar', quantity: 1, unit_price_cents: 650000 },
+      { product_id: 'p2', product_name: 'Pan Integral', quantity: 1, unit_price_cents: 150000 },
+    ],
+    active: true,
+    visible_kiosco: true,
+    visible_tienda: true,
+    created_at: new Date().toISOString(),
+  },
+  {
+    id: 'combo-2',
+    negocio_id: 'surtifacil',
+    name: 'Kit Aseo Mes',
+    description: 'Detergente en polvo, jabón rey x3 y límpido desinfectante',
+    price_cents: 1850000,
+    items: [
+      { product_id: 'p7', product_name: 'Arroz 1kg', quantity: 3, unit_price_cents: 420000 },
+      { product_id: 'p8', product_name: 'Azúcar 1kg', quantity: 2, unit_price_cents: 380000 },
+    ],
+    active: true,
+    visible_kiosco: true,
+    visible_tienda: true,
+    created_at: new Date().toISOString(),
+  },
+];
+
+// ---- Configuración de Tienda Mock ----
+export const mockStoreSettings = {
+  id: 'surtifacil',
+  slug: 'surtifacil',
+  nombre: 'SurtiFácil Abastos Central - Medellín',
+  barrio: 'La Candelaria / Centro',
+  ciudad: 'Medellín',
+  direccion: 'Calle 50 # 50-20, Centro, Medellín',
+  telefono_whatsapp: '+573001234567',
+  horario: 'Lunes a Domingo 7:00 AM - 9:00 PM',
+  costo_domicilio_cents: 350000, // $ 3.500 COP
+  permite_domicilio: true,
+  permite_retiro: true,
+  slogan: 'El motor digital del tendero paisa',
+  datos_pago_offline: 'Nequi / Bancolombia A la Mano: 300 123 4567',
+  plan_id: 'enterprise',
+  estado: 'activo',
+  suscripcion_vence_en: '2027-12-31T23:59:59Z',
+  cuota_ia_total: 999999,
+  cuota_ia_usada: 142,
+};

@@ -154,6 +154,206 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       });
     }
 
+    // 3.1 Configuración de Tienda (/settings)
+    if (path === '/settings') {
+      const auth = await authenticateRequest(request, env);
+
+      if (method === 'GET') {
+        const row = await env.DB.prepare(
+          'SELECT id, slug, nombre, barrio, ciudad, telefono_whatsapp, direccion, horario, estado, plan_id, suscripcion_vence_en, cuota_ia_total, cuota_ia_usada, costo_domicilio_cents, datos_pago_offline, config_json FROM negocios WHERE id = ?'
+        )
+          .bind(auth.negocioId)
+          .first();
+
+        if (!row) {
+          return errorResponse('Negocio no encontrado.', 404);
+        }
+
+        return jsonResponse(row);
+      }
+
+      if (method === 'PUT') {
+        if (auth.user.role === 'cashier') {
+          return errorResponse('Solo administradores y gerentes pueden modificar la configuración.', 403);
+        }
+
+        const body = (await request.json()) as any;
+        const current = await env.DB.prepare(
+          'SELECT config_json FROM negocios WHERE id = ?'
+        )
+          .bind(auth.negocioId)
+          .first<{ config_json: string }>();
+
+        let currentConfig: Record<string, any> = {};
+        try {
+          currentConfig = JSON.parse(current?.config_json || '{}');
+        } catch {
+          currentConfig = {};
+        }
+
+        if (body.permite_domicilio !== undefined) currentConfig.permite_domicilio = Boolean(body.permite_domicilio);
+        if (body.permite_retiro !== undefined) currentConfig.permite_retiro = Boolean(body.permite_retiro);
+        if (body.slogan !== undefined) currentConfig.slogan = String(body.slogan);
+
+        await env.DB.prepare(
+          `UPDATE negocios SET
+            nombre = COALESCE(?, nombre),
+            barrio = COALESCE(?, barrio),
+            direccion = COALESCE(?, direccion),
+            telefono_whatsapp = COALESCE(?, telefono_whatsapp),
+            horario = COALESCE(?, horario),
+            costo_domicilio_cents = COALESCE(?, costo_domicilio_cents),
+            datos_pago_offline = COALESCE(?, datos_pago_offline),
+            config_json = ?,
+            updated_at = datetime('now')
+          WHERE id = ?`
+        )
+          .bind(
+            body.nombre?.trim() ?? null,
+            body.barrio?.trim() ?? null,
+            body.direccion?.trim() ?? null,
+            body.telefono_whatsapp?.trim() ?? null,
+            body.horario?.trim() ?? null,
+            body.costo_domicilio_cents !== undefined ? Math.round(body.costo_domicilio_cents) : null,
+            body.datos_pago_offline?.trim() ?? null,
+            JSON.stringify(currentConfig),
+            auth.negocioId
+          )
+          .run();
+
+        const updated = await env.DB.prepare(
+          'SELECT id, slug, nombre, barrio, ciudad, telefono_whatsapp, direccion, horario, estado, plan_id, suscripcion_vence_en, cuota_ia_total, cuota_ia_usada, costo_domicilio_cents, datos_pago_offline, config_json FROM negocios WHERE id = ?'
+        )
+          .bind(auth.negocioId)
+          .first();
+
+        return jsonResponse(updated);
+      }
+    }
+
+    // 3.2 Combos y Kits de Mercado (/combos)
+    if (path === '/combos' || path.startsWith('/combos/')) {
+      const auth = await authenticateRequest(request, env);
+      const comboId = path.replace(/^\/combos\/?/, '');
+
+      // Asegurar que la tabla existe en D1
+      await env.DB.prepare(
+        `CREATE TABLE IF NOT EXISTS combos (
+          id TEXT PRIMARY KEY,
+          negocio_id TEXT NOT NULL DEFAULT 'surtifacil' REFERENCES negocios(id) ON DELETE CASCADE,
+          name TEXT NOT NULL,
+          description TEXT,
+          price_cents INTEGER NOT NULL,
+          items_json TEXT NOT NULL DEFAULT '[]',
+          image_url TEXT,
+          active INTEGER NOT NULL DEFAULT 1,
+          visible_kiosco INTEGER NOT NULL DEFAULT 1,
+          visible_tienda INTEGER NOT NULL DEFAULT 1,
+          created_at TEXT DEFAULT (datetime('now')),
+          updated_at TEXT DEFAULT (datetime('now'))
+        )`
+      ).run().catch(() => {});
+
+      if (method === 'GET' && !comboId) {
+        const result = await env.DB.prepare(
+          'SELECT * FROM combos WHERE negocio_id = ? ORDER BY name ASC'
+        )
+          .bind(auth.negocioId)
+          .all();
+        return jsonResponse(result.results || []);
+      }
+
+      if (method === 'POST') {
+        if (auth.user.role === 'cashier') {
+          return errorResponse('Solo administradores y gerentes pueden crear combos.', 403);
+        }
+
+        const body = (await request.json()) as any;
+        if (!body.name || typeof body.price_cents !== 'number') {
+          return errorResponse('Nombre y precio del combo son obligatorios.', 400);
+        }
+
+        const id = `combo-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+        await env.DB.prepare(
+          `INSERT INTO combos (
+            id, negocio_id, name, description, price_cents, items_json, image_url,
+            active, visible_kiosco, visible_tienda, created_at, updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`
+        )
+          .bind(
+            id,
+            auth.negocioId,
+            body.name.trim(),
+            body.description || null,
+            Math.round(body.price_cents),
+            JSON.stringify(body.items || []),
+            body.image_url || null,
+            body.active !== undefined ? (body.active ? 1 : 0) : 1,
+            body.visible_kiosco !== undefined ? (body.visible_kiosco ? 1 : 0) : 1,
+            body.visible_tienda !== undefined ? (body.visible_tienda ? 1 : 0) : 1
+          )
+          .run();
+
+        const created = await env.DB.prepare('SELECT * FROM combos WHERE id = ? AND negocio_id = ?')
+          .bind(id, auth.negocioId)
+          .first();
+
+        return jsonResponse(created, 201);
+      }
+
+      if (method === 'PUT' && comboId) {
+        if (auth.user.role === 'cashier') {
+          return errorResponse('Solo administradores y gerentes pueden editar combos.', 403);
+        }
+
+        const body = (await request.json()) as any;
+        await env.DB.prepare(
+          `UPDATE combos SET
+            name = COALESCE(?, name),
+            description = COALESCE(?, description),
+            price_cents = COALESCE(?, price_cents),
+            items_json = COALESCE(?, items_json),
+            image_url = COALESCE(?, image_url),
+            active = COALESCE(?, active),
+            visible_kiosco = COALESCE(?, visible_kiosco),
+            visible_tienda = COALESCE(?, visible_tienda),
+            updated_at = datetime('now')
+          WHERE id = ? AND negocio_id = ?`
+        )
+          .bind(
+            body.name?.trim() ?? null,
+            body.description?.trim() ?? null,
+            body.price_cents !== undefined ? Math.round(body.price_cents) : null,
+            body.items ? JSON.stringify(body.items) : null,
+            body.image_url ?? null,
+            body.active !== undefined ? (body.active ? 1 : 0) : null,
+            body.visible_kiosco !== undefined ? (body.visible_kiosco ? 1 : 0) : null,
+            body.visible_tienda !== undefined ? (body.visible_tienda ? 1 : 0) : null,
+            comboId,
+            auth.negocioId
+          )
+          .run();
+
+        const updated = await env.DB.prepare('SELECT * FROM combos WHERE id = ? AND negocio_id = ?')
+          .bind(comboId, auth.negocioId)
+          .first();
+
+        return jsonResponse(updated);
+      }
+
+      if (method === 'DELETE' && comboId) {
+        if (auth.user.role === 'cashier') {
+          return errorResponse('Solo administradores y gerentes pueden eliminar combos.', 403);
+        }
+
+        await env.DB.prepare('DELETE FROM combos WHERE id = ? AND negocio_id = ?')
+          .bind(comboId, auth.negocioId)
+          .run();
+
+        return jsonResponse({ success: true, id: comboId });
+      }
+    }
+
     // 4. Catálogo de Productos (/products)
     if (path === '/products' || path.startsWith('/products/')) {
       const auth = await authenticateRequest(request, env);

@@ -96,6 +96,24 @@ CREATE INDEX IF NOT EXISTS idx_products_negocio ON products(negocio_id);
 CREATE INDEX IF NOT EXISTS idx_products_barcode ON products(negocio_id, barcode);
 CREATE INDEX IF NOT EXISTS idx_products_category ON products(negocio_id, category);
 
+-- 3.1 Tabla de Combos y Kits de Mercado por Negocio
+CREATE TABLE IF NOT EXISTS combos (
+  id TEXT PRIMARY KEY,
+  negocio_id TEXT NOT NULL DEFAULT 'surtifacil' REFERENCES negocios(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  description TEXT,
+  price_cents INTEGER NOT NULL,
+  items_json TEXT NOT NULL DEFAULT '[]', -- Array de { product_id, product_name, quantity, unit_price_cents }
+  image_url TEXT,
+  active INTEGER NOT NULL DEFAULT 1,
+  visible_kiosco INTEGER NOT NULL DEFAULT 1,
+  visible_tienda INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT DEFAULT (datetime('now')),
+  updated_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_combos_negocio ON combos(negocio_id);
+
 -- 4. Tabla de Clientes de Crédito (Fiados) por Negocio
 CREATE TABLE IF NOT EXISTS credit_customers (
   id TEXT PRIMARY KEY,
@@ -259,4 +277,19 @@ INSERT OR IGNORE INTO users (
   1,
   1
 );
+
+INSERT OR IGNORE INTO combos (
+  id, negocio_id, name, description, price_cents, items_json, active, visible_kiosco, visible_tienda
+) VALUES (
+  'combo-desayuno-paisa',
+  'surtifacil',
+  'Combo Desayuno Paisa',
+  'Chocolate Corona, quesito antioqueño y arepas tela x5',
+  950000,
+  '[{"product_id":"p3","product_name":"Leche Entera 1L","quantity":2,"unit_price_cents":350000},{"product_id":"p4","product_name":"Queso Cheddar","quantity":1,"unit_price_cents":650000},{"product_id":"p2","product_name":"Pan Integral","quantity":1,"unit_price_cents":150000}]',
+  1,
+  1,
+  1
+);
+
 

@@ -68,25 +68,16 @@ Para maximizar la eficiencia de tokens y la precisión de razonamiento en cada s
     3. Eliminada completamente la dependencia de `firebase/firestore` en el cliente (`firebase/config.ts`), logrando una reducción de **323.37 kB** en el bundle de producción (`firebase-vendor` pasó de 493.69 kB a 170.32 kB; 35.86 kB gzip).
     4. 100% de las pruebas unitarias en verde (33 suites, 282 tests aprobados en Vitest), build de producción (`npm run build:web`) sin advertencias ni errores y suite Playwright ejecutada.
 
-- [ ] **Tarea 3 — Rediseño de Navegación Administrativa (Patrón HoneyBook), Pasillos y Catálogo Táctil (Sinergia Rappi Aisles + Blinkit) y Configuración del Local (`/inventario` y `/configuracion`):**
+- [x] **Tarea 3 — Rediseño de Navegación Administrativa (Patrón HoneyBook), Pasillos y Catálogo Táctil (Sinergia Rappi Aisles + Blinkit) y Configuración del Local (`/inventario` y `/configuracion`):**
   - **Nivel Recomendado:** `3.8 Flash (High)`
-  - **Objetivo:** Renovar la experiencia visual y operativa del staff implementando la navegación jerárquica inspirada en HoneyBook en el AppShell, la matriz de exploración visual de pasillos inspirada en Rappi Aisles y el catálogo de productos con riel vertical táctil inspirado en Blinkit, permitiendo administrar productos, unidades de medida, combos y configuración comercial.
-  - **Alcance Técnico:**
-    1. **Navegación Administrativa ([Patrón HoneyBook en Mobbin](https://mobbin.com/screens/bcce288e-c338-41f8-a1d1-fb6b6d6dc709)):**
-       - Refactorizar [`AppShell.tsx`](../web/src/components/layout/AppShell.tsx) y [`navItems.ts`](../web/src/components/layout/navItems.ts) con barra lateral oscura (`bg-sf-dark`), cabecera con estado de tienda y suscripción, subgrupos desplegables con chevrons (*Mostrador y Ventas*, *Cartera y Fiados*, *Catálogo y Bodega*, *Proveedores*, *Canales Vecinales*, *Configuración*), barra superior con botón hero `+ Nueva Venta` y menú emergente de perfil de cajero.
-    2. **Explorador de Pasillos de Abastos ([Patrón Rappi Aisles en Mobbin](https://mobbin.com/screens/41848e74-4e6c-4dec-9da4-cdf042973fa5)):**
-       - Matriz táctil en 2 columnas de pasillos ilustrados (*Frutas y Verduras*, *Panadería y Arepas*, *Lácteos y Huevos*, *Granos y Despensa*, *Carnes y Salsamentaria*, *Snacks*, *Bebidas*, *Aseo y Hogar*) con contador de productos y acceso instantáneo.
-    3. **Catálogo Táctil de Productos en Mostrador ([Patrón Blinkit en Mobbin](https://mobbin.com/screens/39e1dc5f-a55e-4bb1-b93f-1b60ea4d7375)):**
-       - Riel vertical izquierdo de categorías con iconos ilustrados para cambiar de pasillo a un toque.
-       - Cuadrícula de tarjetas de producto de 2-3 columnas con fotografía, nombre, badge de peso/unidad (`libra`, `kilo`, `litro`, `cubeta`, `paquete`), precio `formatCOP`, botón verde táctil `+ AGREGAR` y switches de visibilidad (*Kiosco iPad*, *Tienda Web* y *En Oferta*).
-       - Edición rápida en línea de precio y stock para cuando llega mercancía nueva al mostrador.
-    4. Crear gestor de **Combos y Kits de Mercado** (ej. *"Combo Desayuno Paisa"*, *"Kit Aseo Mes"*) donde el staff agrupa productos existentes con precio especial.
-    5. Crear la vista **Configuración del Negocio** (`web/src/components/StoreSettings.tsx`) para editar:
-       - Nombre comercial, barrio en Medellín, dirección, teléfono WhatsApp de pedidos, horario de atención, datos informativos de pago (Nequi / Bancolombia) y mensaje de bienvenida.
-       - **Interruptores de Modalidades de Entrega por WhatsApp y Web:**
-         * Switch táctil **"Habilitar Domicilios" (`permite_domicilio`)** con campo para valor del envío en COP (`costo_domicilio_cents`).
-         * Switch táctil **"Habilitar Retiro en Tienda / Mostrador" (`permite_retiro`)**.
-         * Guardados en `negocios.config_json` en D1 para gobernar en tiempo real las opciones que ofrece el bot Sarin en WhatsApp y el catálogo web.
+  - **Estado:** ✅ Completada y Desplegada
+  - **Evidencia Técnica:**
+    1. **Navegación HoneyBook:** Barra lateral oscura (`bg-sf-dark`) en [`AppShell.tsx`](../web/src/components/layout/AppShell.tsx) y [`navItems.ts`](../web/src/components/layout/navItems.ts) con cabecera de tienda ("SurtiFácil", estado "Tienda Abierta"), 6 subgrupos desplegables con chevrons (*Mostrador y Ventas*, *Cartera y Fiados*, *Catálogo y Bodega*, *Proveedores*, *Canales Vecinales*, *Configuración*), barra superior Desktop con botón hero `+ Nueva Venta` y menú emergente de perfil de cajero.
+    2. **Explorador de Pasillos (Rappi Aisles):** Cuadrícula de 2 columnas en [`Inventory.tsx`](../web/src/components/Inventory.tsx) con pasillos oficiales de abastos (*Fruver*, *Panadería*, *Lácteos*, *Granos*, *Carnes*, *Snacks*, *Bebidas*, *Aseo*, *Cuidado Personal*) con conteo en vivo de productos y acceso instantáneo.
+    3. **Catálogo Táctil en Mostrador (Blinkit):** Riel vertical izquierdo para navegación a un toque entre pasillos, cuadrícula táctil con badges de unidad (`libra`, `kilo`, `litro`, `cubeta`, `paquete`, `unidad`), precios en moneda colombiana con [`formatCOP`](../web/src/utils/currency.ts), badges de stock, switches de visibilidad (*Kiosco iPad*, *Tienda Web*, *En Oferta*) y **Edición Rápida en Línea (Quick Inline Edit)** de precio y stock.
+    4. **Gestor de Combos y Kits de Mercado:** Módulo de combos y kits con cálculo de ahorro estimado, gestión de ítems y endpoints serverless `/api/combos` en Cloudflare Pages Functions y D1 (`combos` table).
+    5. **Configuración del Negocio:** Nueva vista [`StoreSettings.tsx`](../web/src/components/StoreSettings.tsx) (ruta `#/settings`) con selector de barrios paisas, datos informativos de pago (Nequi / Bancolombia), estado de suscripción y cuota IA Sarin, e **Interruptores de Modalidades de Entrega** (*Habilitar Domicilios* con valor del envío en COP y *Habilitar Retiro en Tienda*), persistidos en `negocios.config_json` en D1.
+    6. **100% de Pruebas en Verde:** 35 suites de prueba en Vitest (290 tests aprobados), build de producción sin errores y 8/8 pruebas E2E en Playwright aprobadas.
 
 - [ ] **Tarea 4 — Plataforma SaaS Multi-Tenant para Abastos en Medellín: Landing Comercial (Patrón Mobbin Food & Drink), Rediseño de Login, Planes, Registro de Locales (`/registro-negocio`) y Panel SuperAdmin (`/super-admin`):**
   - **Nivel Recomendado:** `3.8 Flash (High)`

@@ -9,6 +9,7 @@ import {
   User as FirebaseUser,
 } from 'firebase/auth';
 import { User, UserRole } from '../firebase/db';
+import '../firebase/config';
 import { apiClient, emitDataChange } from './apiClient';
 
 const auth = getAuth();

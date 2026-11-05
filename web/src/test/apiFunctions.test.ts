@@ -15,6 +15,7 @@ class MockD1Database implements D1Database {
     suppliers: any[];
     purchase_orders: any[];
     purchase_order_items: any[];
+    combos: any[];
   };
 
   constructor() {
@@ -103,6 +104,7 @@ class MockD1Database implements D1Database {
       ],
       purchase_orders: [],
       purchase_order_items: [],
+      combos: [],
     };
   }
 
@@ -209,6 +211,18 @@ class MockD1Database implements D1Database {
             (user) => user.negocio_id === boundValues[0] && !user.deleted_at
           );
           return { results: u as T[], success: true };
+        }
+
+        if (q.includes('FROM combos WHERE id = ? AND negocio_id = ?')) {
+          const c = db.tables.combos.find(
+            (cb: any) => cb.id === boundValues[0] && cb.negocio_id === boundValues[1]
+          );
+          return { results: c ? [c as T] : [], success: true };
+        }
+
+        if (q.includes('FROM combos WHERE negocio_id = ?')) {
+          const c = db.tables.combos.filter((cb: any) => cb.negocio_id === boundValues[0]);
+          return { results: c as T[], success: true };
         }
 
         return { results: [], success: true };
@@ -351,6 +365,46 @@ class MockD1Database implements D1Database {
           db.tables.products = db.tables.products.filter(
             (p) => !(p.id === prodId && p.negocio_id === negId)
           );
+        }
+
+        if (q.startsWith('CREATE TABLE IF NOT EXISTS combos')) {
+          return { success: true };
+        }
+
+        if (q.startsWith('UPDATE negocios SET')) {
+          const [nombre, barrio, direccion, telefono, horario, costoDom, datosPago, configJson, negId] = boundValues;
+          const neg = db.tables.negocios.find((n: any) => n.id === negId);
+          if (neg) {
+            if (nombre !== null) neg.nombre = nombre;
+            if (barrio !== null) neg.barrio = barrio;
+            if (direccion !== null) neg.direccion = direccion;
+            if (telefono !== null) neg.telefono_whatsapp = telefono;
+            if (horario !== null) neg.horario = horario;
+            if (costoDom !== null) neg.costo_domicilio_cents = costoDom;
+            if (datosPago !== null) neg.datos_pago_offline = datosPago;
+            neg.config_json = configJson;
+          }
+        }
+
+        if (q.startsWith('INSERT INTO combos')) {
+          const [id, negocio_id, name, description, price_cents, items_json, image_url, active, visible_kiosco, visible_tienda] = boundValues;
+          db.tables.combos.push({
+            id,
+            negocio_id,
+            name,
+            description,
+            price_cents,
+            items_json,
+            image_url,
+            active,
+            visible_kiosco,
+            visible_tienda,
+          });
+        }
+
+        if (q.startsWith('DELETE FROM combos WHERE id = ? AND negocio_id = ?')) {
+          const [comboId, negId] = boundValues;
+          db.tables.combos = db.tables.combos.filter((c: any) => !(c.id === comboId && c.negocio_id === negId));
         }
 
         return { success: true };
@@ -623,5 +677,80 @@ describe('Cloudflare Pages Functions API (/api/*)', () => {
     expect(adminRes.status).toBe(200);
     const users = await adminRes.json();
     expect(users.length).toBe(2);
+  });
+
+  it('GET y PUT /api/settings actualiza y retorna la configuración del local y modalidades de entrega', async () => {
+    // 1. Obtener configuración inicial
+    const getCtx = createMockContext(
+      'GET',
+      'http://localhost/api/settings',
+      { Authorization: 'Bearer mock:admin-1:admin@surtifacil.com:admin' },
+      null,
+      db
+    );
+    const getRes = await onRequest(getCtx as any);
+    expect(getRes.status).toBe(200);
+    const settings = await getRes.json();
+    expect(settings.slug).toBe('surtifacil');
+
+    // 2. Modificar con PUT
+    const putCtx = createMockContext(
+      'PUT',
+      'http://localhost/api/settings',
+      { Authorization: 'Bearer mock:admin-1:admin@surtifacil.com:admin' },
+      {
+        nombre: 'SurtiFácil Abastos El Poblado',
+        barrio: 'El Poblado',
+        costo_domicilio_cents: 450000,
+        permite_domicilio: true,
+        permite_retiro: false,
+        slogan: 'Calidad vecinal en Medellín',
+      },
+      db
+    );
+    const putRes = await onRequest(putCtx as any);
+    expect(putRes.status).toBe(200);
+    const updated = await putRes.json();
+    expect(updated.nombre).toBe('SurtiFácil Abastos El Poblado');
+    expect(updated.barrio).toBe('El Poblado');
+    expect(updated.costo_domicilio_cents).toBe(450000);
+    expect(JSON.parse(updated.config_json).permite_retiro).toBe(false);
+  });
+
+  it('GET y POST /api/combos gestiona combos y kits de mercado con aislamiento multi-tenant', async () => {
+    // 1. Crear combo
+    const createCtx = createMockContext(
+      'POST',
+      'http://localhost/api/combos',
+      { Authorization: 'Bearer mock:admin-1:admin@surtifacil.com:admin' },
+      {
+        name: 'Combo Desayuno Paisa',
+        description: 'Arepas tela, quesito y chocolate',
+        price_cents: 950000,
+        items: [
+          { product_id: 'p-1', product_name: 'Arroz Diana 1kg', quantity: 2, unit_price_cents: 450000 },
+        ],
+      },
+      db
+    );
+    const createRes = await onRequest(createCtx as any);
+    expect(createRes.status).toBe(201);
+    const combo = await createRes.json();
+    expect(combo.name).toBe('Combo Desayuno Paisa');
+    expect(combo.price_cents).toBe(950000);
+
+    // 2. Listar combos
+    const listCtx = createMockContext(
+      'GET',
+      'http://localhost/api/combos',
+      { Authorization: 'Bearer mock:admin-1:admin@surtifacil.com:admin' },
+      null,
+      db
+    );
+    const listRes = await onRequest(listCtx as any);
+    expect(listRes.status).toBe(200);
+    const combos = await listRes.json();
+    expect(combos.length).toBe(1);
+    expect(combos[0].name).toBe('Combo Desayuno Paisa');
   });
 });

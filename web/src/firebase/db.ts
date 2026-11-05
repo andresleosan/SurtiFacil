@@ -6,13 +6,20 @@ export interface Product {
   name: string;
   price_cents: number; // Precio en centavos (ej: 250 = $2.50)
   stock: number;
+  min_stock?: number;
+  unit?: string; // unidad, libra, kilo, litro, paquete, cubeta
   category?: string; // Categoría del producto (opcional)
+  image_url?: string;
   supplier_id?: string;
   createdAt?: any;
   last_cost_cents?: number;
   last_cost_source?: 'purchase' | 'fallback_price';
   last_cost_updated_at?: any;
   barcode?: string; // EAN-13, UPC-A, or QR code
+  visible_kiosco?: boolean | number;
+  visible_tienda?: boolean | number;
+  en_oferta?: boolean | number;
+  precio_oferta_cents?: number | null;
 }
 
 /**

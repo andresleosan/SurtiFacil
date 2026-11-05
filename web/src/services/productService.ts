@@ -10,8 +10,15 @@ export interface NewProductInput {
   name: string;
   price_cents: number;
   stock: number;
+  min_stock?: number;
+  unit?: string;
   category: string;
+  image_url?: string;
   barcode?: string;
+  visible_kiosco?: boolean | number;
+  visible_tienda?: boolean | number;
+  en_oferta?: boolean | number;
+  precio_oferta_cents?: number;
 }
 
 export type ProductsListener = (products: Product[]) => void;
@@ -29,8 +36,15 @@ function mapProduct(row: any): Product {
     name: row.name,
     price_cents: row.price_cents,
     stock: row.stock ?? 0,
+    min_stock: row.min_stock ?? 5,
+    unit: row.unit || 'unidad',
     category: row.category || undefined,
+    image_url: row.image_url || undefined,
     barcode: row.barcode || undefined,
+    visible_kiosco: row.visible_kiosco !== undefined ? Boolean(row.visible_kiosco) : true,
+    visible_tienda: row.visible_tienda !== undefined ? Boolean(row.visible_tienda) : true,
+    en_oferta: row.en_oferta !== undefined ? Boolean(row.en_oferta) : false,
+    precio_oferta_cents: row.precio_oferta_cents ?? undefined,
     supplier_id: row.supplier_id || undefined,
     createdAt: row.created_at || row.createdAt,
     last_cost_cents: row.last_cost_cents ?? undefined,
@@ -104,12 +118,19 @@ export async function addProduct(input: NewProductInput): Promise<Product> {
     name: input.name,
     price_cents: input.price_cents,
     stock: input.stock,
+    min_stock: input.min_stock ?? 5,
+    unit: input.unit || 'unidad',
     category: input.category,
+    image_url: input.image_url ?? null,
+    visible_kiosco: input.visible_kiosco !== undefined ? (input.visible_kiosco ? 1 : 0) : 1,
+    visible_tienda: input.visible_tienda !== undefined ? (input.visible_tienda ? 1 : 0) : 1,
+    en_oferta: input.en_oferta ? 1 : 0,
+    precio_oferta_cents: input.precio_oferta_cents ?? null,
     ...(input.barcode ? { barcode: input.barcode } : {}),
   };
 
   if (isMockMode()) {
-    const product: Product = { id: `prod-${Date.now()}`, ...payload };
+    const product: Product = { id: `prod-${Date.now()}`, ...payload, barcode: payload.barcode ?? undefined, image_url: payload.image_url ?? undefined };
     mockProducts.push(product);
     emitMock();
     return product;
@@ -130,14 +151,21 @@ export async function updateProduct(product: Product): Promise<void> {
     name: product.name,
     price_cents: product.price_cents,
     stock: product.stock,
+    min_stock: product.min_stock ?? 5,
+    unit: product.unit || 'unidad',
     category: product.category ?? '',
     barcode: product.barcode?.trim() || null,
+    image_url: product.image_url ?? null,
+    visible_kiosco: product.visible_kiosco !== undefined ? (product.visible_kiosco ? 1 : 0) : 1,
+    visible_tienda: product.visible_tienda !== undefined ? (product.visible_tienda ? 1 : 0) : 1,
+    en_oferta: product.en_oferta !== undefined ? (product.en_oferta ? 1 : 0) : 0,
+    precio_oferta_cents: product.precio_oferta_cents ?? null,
   };
 
   if (isMockMode()) {
     const index = mockProducts.findIndex((candidate) => candidate.id === product.id);
     if (index >= 0) {
-      mockProducts[index] = { ...mockProducts[index], ...changes, barcode: changes.barcode ?? undefined };
+      mockProducts[index] = { ...mockProducts[index], ...changes, barcode: changes.barcode ?? undefined, image_url: changes.image_url ?? undefined };
     }
     emitMock();
     return;

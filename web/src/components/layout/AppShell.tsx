@@ -4,7 +4,7 @@ import type { User } from '../../firebase/db';
 import { useIsMobile, useIsWideScreen } from '../../hooks/useMediaQuery';
 import { Icon } from '../ui/Icon';
 import { Modal } from '../ui/Modal';
-import { findNavItem, MOBILE_TAB_LABELS, MOBILE_TAB_PAGES, NAV_ITEMS } from './navItems';
+import { findNavItem, MOBILE_TAB_LABELS, MOBILE_TAB_PAGES, NAV_GROUPS, NAV_ITEMS } from './navItems';
 
 const SIDEBAR_STORAGE_KEY = 'surtifacil.sidebar.collapsed';
 
@@ -45,10 +45,10 @@ function initials(user: User): string {
 }
 
 /**
- * Estructura responsiva de la aplicación autenticada:
- * - teléfonos: barra superior compacta + barra de pestañas inferior + hoja "Más";
- * - tablets y escritorio: barra lateral colapsable con el menú completo.
- * Solo una de las dos navegaciones existe en el DOM a la vez.
+ * Estructura responsiva de la aplicación autenticada inspirada en HoneyBook:
+ * - Teléfonos: barra superior compacta + barra de pestañas inferior + hoja "Más";
+ * - Tablets y escritorio: barra lateral jerárquica oscura (bg-sf-dark) con subgrupos desplegables
+ *   y barra superior con acción hero "+ Nueva Venta" y menú de perfil.
  */
 export function AppShell({ user, page, onNavigate, onLogout, children }: AppShellProps) {
   const isMobile = useIsMobile();
@@ -63,7 +63,11 @@ export function AppShell({ user, page, onNavigate, onLogout, children }: AppShel
         <Sidebar user={user} page={page} items={visibleItems} onNavigate={onNavigate} onLogout={onLogout} />
       )}
       <div className="flex min-w-0 flex-1 flex-col">
-        {isMobile && <MobileTopBar user={user} page={page} />}
+        {isMobile ? (
+          <MobileTopBar user={user} page={page} />
+        ) : (
+          <DesktopTopBar user={user} page={page} onNavigate={onNavigate} onLogout={onLogout} />
+        )}
         <main className={`container mx-auto w-full flex-1 px-4 py-4 md:px-6 md:py-8 ${isMobile ? 'pb-tabbar' : ''}`}>
           {children}
         </main>
@@ -88,6 +92,20 @@ function Sidebar({ user, page, items, onNavigate, onLogout }: NavProps) {
   const [storedCollapsed, setStoredCollapsed] = useState<boolean | null>(() => readStoredCollapsed());
   const collapsed = storedCollapsed ?? !isWide;
 
+  // Estado de subgrupos desplegables abiertos (por defecto todos abiertos para alta accesibilidad)
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(() => ({
+    sales: true,
+    credits: true,
+    catalog: true,
+    purchases: true,
+    channels: true,
+    settings: true,
+  }));
+
+  const toggleGroup = (groupId: string) => {
+    setOpenGroups((prev) => ({ ...prev, [groupId]: !prev[groupId] }));
+  };
+
   const toggleCollapsed = () => {
     const next = !collapsed;
     setStoredCollapsed(next);
@@ -96,14 +114,30 @@ function Sidebar({ user, page, items, onNavigate, onLogout }: NavProps) {
 
   return (
     <aside
-      className={`sticky top-0 hidden h-screen shrink-0 flex-col bg-sf-dark text-white transition-[width] duration-200 md:flex ${collapsed ? 'w-[76px]' : 'w-64'}`}
+      className={`sticky top-0 hidden h-screen shrink-0 flex-col bg-sf-dark text-white transition-[width] duration-200 md:flex ${
+        collapsed ? 'w-[76px]' : 'w-64'
+      }`}
       aria-label="Menú principal"
     >
-      <div className={`flex h-16 items-center border-b border-white/10 px-3 ${collapsed ? 'justify-center' : 'justify-between'}`}>
+      {/* Cabecera Sidebar con Estado de Tienda y Botón Colapsar */}
+      <div
+        className={`flex h-16 items-center border-b border-white/10 px-3 ${
+          collapsed ? 'justify-center' : 'justify-between'
+        }`}
+      >
         {!collapsed && (
-          <span className="truncate text-lg font-bold">
-            <span aria-hidden="true">🛒</span> Surti Fácil
-          </span>
+          <div className="flex min-w-0 items-center gap-2">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-sf-primary text-base shadow-sm">
+              🛒
+            </span>
+            <div className="min-w-0">
+              <span className="block truncate text-sm font-bold text-white">SurtiFácil</span>
+              <span className="flex items-center gap-1.5 text-[11px] font-medium text-emerald-400">
+                <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" aria-hidden="true" />
+                Tienda Abierta
+              </span>
+            </div>
+          </div>
         )}
         <button
           type="button"
@@ -116,40 +150,102 @@ function Sidebar({ user, page, items, onNavigate, onLogout }: NavProps) {
         </button>
       </div>
 
-      <nav className="flex-1 overflow-y-auto py-2">
-        <ul className="space-y-0.5 px-2">
-          {items.map((item) => {
-            const active = item.page === page;
-            return (
-              <li key={item.page}>
-                <button
-                  type="button"
-                  onClick={() => onNavigate(item.page)}
-                  aria-current={active ? 'page' : undefined}
-                  aria-label={collapsed ? item.label : undefined}
-                  title={collapsed ? item.label : undefined}
-                  className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm font-medium transition ${
-                    collapsed ? 'justify-center' : ''
-                  } ${active ? 'bg-sf-primary text-white' : 'text-white/80 hover:bg-white/10 hover:text-white'}`}
-                >
-                  <Icon name={item.icon} />
-                  {!collapsed && <span className="truncate">{item.label}</span>}
-                </button>
-              </li>
-            );
-          })}
-        </ul>
+      {/* Navegación Jerárquica HoneyBook */}
+      <nav className="flex-1 overflow-y-auto px-2 py-3" aria-label="Secciones del sistema">
+        {collapsed ? (
+          // Modo Colapsado: Iconos individuales con accesibilidad
+          <ul className="space-y-1">
+            {items.map((item) => {
+              const active = item.page === page;
+              return (
+                <li key={item.page}>
+                  <button
+                    type="button"
+                    onClick={() => onNavigate(item.page)}
+                    aria-current={active ? 'page' : undefined}
+                    aria-label={item.label}
+                    title={item.label}
+                    className={`flex h-11 w-full items-center justify-center rounded-lg transition ${
+                      active ? 'bg-sf-primary text-white shadow-sm' : 'text-white/80 hover:bg-white/10 hover:text-white'
+                    }`}
+                  >
+                    <Icon name={item.icon} size={20} />
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        ) : (
+          // Modo Expandido: Subgrupos desplegables con chevrons (HoneyBook)
+          <div className="space-y-4">
+            {NAV_GROUPS.map((group) => {
+              // Filtrar solo las páginas permitidas en este grupo para el rol actual
+              const groupItems = items.filter((item) => group.pages.includes(item.page));
+              if (groupItems.length === 0) return null;
+
+              const isOpen = openGroups[group.id] ?? true;
+              const hasActiveChild = groupItems.some((item) => item.page === page);
+
+              return (
+                <div key={group.id} className="space-y-1">
+                  <button
+                    type="button"
+                    onClick={() => toggleGroup(group.id)}
+                    aria-expanded={isOpen}
+                    className="flex w-full items-center justify-between px-2 py-1 text-left text-xs font-semibold uppercase tracking-wider text-white/50 transition hover:text-white/90"
+                  >
+                    <span className="flex items-center gap-1.5">
+                      <span aria-hidden="true">{group.icon}</span>
+                      <span>{group.label}</span>
+                    </span>
+                    <Icon
+                      name={isOpen ? 'chevron-down' : 'chevron-right'}
+                      size={14}
+                      className={hasActiveChild ? 'text-sf-cyan' : 'text-white/40'}
+                    />
+                  </button>
+
+                  {isOpen && (
+                    <ul className="space-y-0.5">
+                      {groupItems.map((item) => {
+                        const active = item.page === page;
+                        return (
+                          <li key={item.page}>
+                            <button
+                              type="button"
+                              onClick={() => onNavigate(item.page)}
+                              aria-current={active ? 'page' : undefined}
+                              className={`flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm font-medium transition ${
+                                active
+                                  ? 'bg-sf-primary text-white shadow-sm'
+                                  : 'text-white/80 hover:bg-white/10 hover:text-white'
+                              }`}
+                            >
+                              <Icon name={item.icon} size={18} />
+                              <span className="truncate">{item.label}</span>
+                            </button>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
       </nav>
 
+      {/* Pie del Menú Lateral: Perfil y Cerrar Sesión */}
       <div className="border-t border-white/10 p-2">
         {!collapsed && (
-          <div className="mb-1 flex items-center gap-3 px-3 py-2">
-            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-sf-cyan text-sm font-bold text-sf-dark">
+          <div className="mb-2 flex items-center gap-3 rounded-lg bg-white/5 px-2.5 py-2">
+            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-sf-cyan text-xs font-bold text-sf-dark">
               {initials(user)}
             </span>
-            <div className="min-w-0">
-              <p className="truncate text-sm font-semibold">{user.displayName || user.email}</p>
-              <p className="truncate text-xs text-white/60">{ROLE_LABELS[user.role]}</p>
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-xs font-semibold text-white">{user.displayName || user.email}</p>
+              <p className="truncate text-[11px] text-white/60">{ROLE_LABELS[user.role]}</p>
             </div>
           </div>
         )}
@@ -158,15 +254,116 @@ function Sidebar({ user, page, items, onNavigate, onLogout }: NavProps) {
           onClick={onLogout}
           aria-label={collapsed ? 'Cerrar sesión' : undefined}
           title={collapsed ? 'Cerrar sesión' : undefined}
-          className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-white/80 transition hover:bg-white/10 hover:text-white ${
+          className={`flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm font-medium text-red-300 transition hover:bg-red-500/10 hover:text-red-200 ${
             collapsed ? 'justify-center' : ''
           }`}
         >
-          <Icon name="logout" />
+          <Icon name="logout" size={18} />
           {!collapsed && <span>Cerrar sesión</span>}
         </button>
       </div>
     </aside>
+  );
+}
+
+interface DesktopTopBarProps {
+  user: User;
+  page: Page;
+  onNavigate: (page: Page) => void;
+  onLogout: () => void;
+}
+
+function DesktopTopBar({ user, page, onNavigate, onLogout }: DesktopTopBarProps) {
+  const current = findNavItem(page);
+  const [profileOpen, setProfileOpen] = useState(false);
+
+  return (
+    <header className="sticky top-0 z-20 flex h-16 items-center justify-between border-b border-slate-200 bg-white px-6 shadow-sm">
+      <div className="flex items-center gap-3">
+        <h1 className="text-lg font-bold text-sf-text">{current?.label ?? 'SurtiFácil'}</h1>
+        <span className="hidden rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-600 lg:inline-flex items-center gap-1.5">
+          <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+          Sede Central Medellín
+        </span>
+      </div>
+
+      <div className="flex items-center gap-3">
+        {/* Botón Hero + Nueva Venta (Patrón HoneyBook) */}
+        <button
+          type="button"
+          onClick={() => onNavigate('create-sale')}
+          className="flex min-h-[40px] items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-700 active:scale-95"
+        >
+          <Icon name="cart" size={18} />
+          <span>+ Nueva Venta</span>
+        </button>
+
+        {/* Menú de Perfil de Cajero / Administrador */}
+        <div className="relative">
+          <button
+            type="button"
+            onClick={() => setProfileOpen(!profileOpen)}
+            aria-expanded={profileOpen}
+            aria-label="Menú de usuario"
+            className="flex items-center gap-2.5 rounded-lg border border-slate-200 p-1.5 pl-2 text-left transition hover:bg-slate-50"
+          >
+            <span className="flex h-8 w-8 items-center justify-center rounded-full bg-sf-primary text-xs font-bold text-white">
+              {initials(user)}
+            </span>
+            <div className="hidden min-w-0 sm:block">
+              <p className="truncate text-xs font-bold text-slate-800">{user.displayName || user.email}</p>
+              <p className="truncate text-[10px] text-slate-500">{ROLE_LABELS[user.role]}</p>
+            </div>
+            <Icon name="chevron-down" size={14} className="text-slate-400" />
+          </button>
+
+          {profileOpen && (
+            <>
+              <div
+                className="fixed inset-0 z-30"
+                onClick={() => setProfileOpen(false)}
+                aria-hidden="true"
+              />
+              <div className="absolute right-0 z-40 mt-2 w-56 rounded-xl border border-slate-200 bg-white p-2 shadow-lg">
+                <div className="border-b border-slate-100 px-3 py-2">
+                  <p className="truncate text-xs font-bold text-slate-900">{user.displayName || 'Tendero'}</p>
+                  <p className="truncate text-[11px] text-slate-500">{user.email}</p>
+                  <span className="mt-1 inline-block chip bg-sf-primary/10 text-[10px] text-sf-primary font-semibold">
+                    {ROLE_LABELS[user.role]}
+                  </span>
+                </div>
+                <div className="py-1">
+                  {canAccessPage(user.role, 'settings') && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setProfileOpen(false);
+                        onNavigate('settings');
+                      }}
+                      className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                    >
+                      <Icon name="settings" size={16} className="text-slate-500" />
+                      Configuración del Negocio
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setProfileOpen(false);
+                      onLogout();
+                    }}
+                    className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-xs font-medium text-red-600 hover:bg-red-50"
+                  >
+                    <Icon name="logout" size={16} />
+                    Cerrar sesión
+                  </button>
+                </div>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    </header>
   );
 }
 
