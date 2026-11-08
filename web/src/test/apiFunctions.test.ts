@@ -1497,4 +1497,36 @@ describe('Cloudflare Pages Functions API (/api/*)', () => {
     expect(data.items.length).toBe(1);
     expect(data.items[0].product_name).toBe('Arroz Diana 1kg');
   });
+
+  it('GET /api/integrations/status reporta el estado de DeepSeek, WhatsApp y D1', async () => {
+    const ctx = createMockContext(
+      'GET',
+      'http://localhost/api/integrations/status',
+      { Authorization: 'Bearer mock:admin-1:admin@surtifacil.com:admin' },
+      null,
+      db
+    );
+    const res = await onRequest(ctx as any);
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.database.status).toBe('connected');
+    expect(data.database.engine).toContain('D1');
+    expect(data.deepseek.model).toBe('deepseek-chat');
+    expect(data.whatsapp.webhook_url).toContain('/api/webhooks/whatsapp');
+  });
+
+  it('POST /api/integrations/test-deepseek responde con modo simulado cuando no hay API key', async () => {
+    const ctx = createMockContext(
+      'POST',
+      'http://localhost/api/integrations/test-deepseek',
+      { Authorization: 'Bearer mock:admin-1:admin@surtifacil.com:admin' },
+      {},
+      db
+    );
+    const res = await onRequest(ctx as any);
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.success).toBe(true);
+    expect(data.mode).toBe('simulated_heuristic');
+  });
 });

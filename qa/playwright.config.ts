@@ -48,7 +48,7 @@ export default defineConfig({
     command: `npm --prefix web run preview -- --host 127.0.0.1 --port ${qaPort}`,
     cwd: rootDir,
     url: qaBaseUrl,
-    reuseExistingServer: false,
+    reuseExistingServer: !process.env.CI,
     timeout: 120_000,
   },
 });

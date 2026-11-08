@@ -8,6 +8,7 @@ import { onDataChange } from '../services/apiClient';
 import type { CustomerOrder } from '../types/customerOrder';
 import { formatCentsCOP } from '../utils/currency';
 import { playNewOrderChime } from '../utils/audioAlerts';
+import { notifyNewCustomerOrder } from '../services/notificationService';
 import { Icon } from './ui/Icon';
 
 interface LiveOrdersTrayProps {
@@ -31,20 +32,25 @@ export function LiveOrdersTray({ onLoadOrderToCart, onSaleCreated }: LiveOrdersT
       setOrders(fetched);
       setError(null);
 
-      // Detectar si hay pedidos nuevos con status 'pending' para tocar el timbre
+      // Detectar si hay pedidos nuevos con status 'pending' para tocar el timbre y emitir notificación
       const currentPending = fetched.filter((o) => o.status === 'pending');
       const currentPendingIds = new Set(currentPending.map((o) => o.id));
 
       if (prevPendingIdsRef.current.size > 0) {
-        let hasNew = false;
-        for (const id of currentPendingIds) {
-          if (!prevPendingIdsRef.current.has(id)) {
-            hasNew = true;
+        let newestOrder: CustomerOrder | null = null;
+        for (const o of currentPending) {
+          if (!prevPendingIdsRef.current.has(o.id)) {
+            newestOrder = o;
             break;
           }
         }
-        if (hasNew) {
-          playNewOrderChime();
+        if (newestOrder) {
+          void notifyNewCustomerOrder({
+            order_code: newestOrder.order_code,
+            customer_name: newestOrder.customer_name,
+            total_cents: newestOrder.total_cents,
+            source: newestOrder.source as any,
+          });
         }
       }
 

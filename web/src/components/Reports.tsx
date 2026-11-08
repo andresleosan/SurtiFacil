@@ -25,6 +25,9 @@ import {
 import { useIsMobile } from '../hooks/useMediaQuery';
 import { PageHeader } from './ui/PageHeader';
 import { downloadCSV } from '../utils/csvExporter';
+import { getSales } from '../services/saleService';
+import type { Sale } from '../firebase/db';
+import FiscalLedgerModal from './FiscalLedgerModal';
 
 const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884D8', '#82CA9D'];
 
@@ -44,6 +47,8 @@ const Reports = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [dateRange, setDateRange] = useState<7 | 14 | 30>(7);
+  const [fiscalModalOpen, setFiscalModalOpen] = useState(false);
+  const [salesList, setSalesList] = useState<Sale[]>([]);
 
   useEffect(() => {
     loadReportData();
@@ -53,14 +58,16 @@ const Reports = () => {
     try {
       setLoading(true);
       setError(null);
-      const [summaryData, dailyData, topData] = await Promise.all([
+      const [summaryData, dailyData, topData, salesData] = await Promise.all([
         getSalesSummary(),
         getDailySales(dateRange),
         getTopProducts(5),
+        getSales().catch(() => []),
       ]);
       setSummary(summaryData);
       setDailySales(dailyData);
       setTopProducts(topData);
+      setSalesList(salesData);
     } catch {
       console.error('Error loading reports.');
       setError('No se pudieron cargar los reportes.');
@@ -119,7 +126,14 @@ const Reports = () => {
               <option value={14}>Últimos 14 días</option>
               <option value={30}>Últimos 30 días</option>
             </select>
-            <button type="button" onClick={exportToCSV} className="btn-success">
+            <button
+              type="button"
+              onClick={() => setFiscalModalOpen(true)}
+              className="btn-primary flex items-center gap-1.5 min-h-[38px] text-xs font-bold shadow-2xs"
+            >
+              <span>📜 Libro Fiscal DIAN</span>
+            </button>
+            <button type="button" onClick={exportToCSV} className="btn-success min-h-[38px] text-xs font-bold">
               Exportar CSV
             </button>
           </>
@@ -264,6 +278,11 @@ const Reports = () => {
           </div>
         )}
       </div>
+      <FiscalLedgerModal
+        isOpen={fiscalModalOpen}
+        onClose={() => setFiscalModalOpen(false)}
+        sales={salesList}
+      />
     </section>
   );
 };

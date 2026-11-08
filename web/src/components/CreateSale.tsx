@@ -16,6 +16,11 @@ import { SarinVoicePOS } from './SarinVoicePOS';
 import type { VoiceSaleCommandResult } from '../utils/sarinVoiceParser';
 import ThermalReceiptModal from './ThermalReceiptModal';
 import CashClosingModal from './CashClosingModal';
+import {
+  isNotificationSupported,
+  getNotificationPermission,
+  requestNotificationPermission,
+} from '../services/notificationService';
 
 const PAYMENT_OPTIONS: Array<{ value: PaymentMethod; label: string; emoji: string }> = [
   { value: 'cash', label: 'Efectivo', emoji: '💵' },
@@ -50,6 +55,7 @@ const CreateSale = () => {
   const [lastCreatedSale, setLastCreatedSale] = useState<Sale | null>(null);
   const [receiptModalOpen, setReceiptModalOpen] = useState(false);
   const [closingModalOpen, setClosingModalOpen] = useState(false);
+  const [notifPermission, setNotifPermission] = useState<NotificationPermission>(() => getNotificationPermission());
 
   const handleLoadOrderToCart = (order: CustomerOrder) => {
     const items = order.items || [];
@@ -293,13 +299,41 @@ const CreateSale = () => {
         title="Nueva venta"
         description={isMobile ? undefined : 'Toca un producto para agregarlo al carrito o atiende pedidos en vivo.'}
         actions={
-          <button
-            type="button"
-            onClick={() => setClosingModalOpen(true)}
-            className="btn-secondary min-h-[44px] px-3 text-xs font-bold text-slate-700 hover:text-slate-900 flex items-center gap-2"
-          >
-            <span>🔒 Arqueo / Cierre COP</span>
-          </button>
+          <div className="flex items-center gap-2">
+            {isNotificationSupported() && (
+              <button
+                type="button"
+                onClick={async () => {
+                  const granted = await requestNotificationPermission();
+                  setNotifPermission(granted ? 'granted' : 'denied');
+                }}
+                title={
+                  notifPermission === 'granted'
+                    ? 'Notificaciones de mostrador activas'
+                    : 'Activar alertas de pedidos en segundo plano'
+                }
+                className={`flex min-h-[44px] items-center gap-1.5 rounded-xl px-3 text-xs font-bold transition border ${
+                  notifPermission === 'granted'
+                    ? 'bg-emerald-50 text-emerald-800 border-emerald-300'
+                    : 'bg-white text-slate-600 hover:bg-slate-50 border-slate-200'
+                }`}
+                aria-label={
+                  notifPermission === 'granted'
+                    ? 'Alertas de mostrador activas'
+                    : 'Activar alertas de mostrador'
+                }
+              >
+                <span>{notifPermission === 'granted' ? '🔔 Alertas ON' : '🔕 Activar Alertas'}</span>
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => setClosingModalOpen(true)}
+              className="btn-secondary min-h-[44px] px-3 text-xs font-bold text-slate-700 hover:text-slate-900 flex items-center gap-2"
+            >
+              <span>🔒 Arqueo / Cierre COP</span>
+            </button>
+          </div>
         }
       />
 

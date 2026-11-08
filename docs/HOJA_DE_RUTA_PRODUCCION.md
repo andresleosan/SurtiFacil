@@ -232,6 +232,59 @@ Para maximizar la eficiencia de tokens y la precisión de razonamiento en cada s
     3. **Escenario 3:** Registro de nueva tienda en `#/registro-negocio`, entrada directa en 1 clic (`🚀 Entrar directo a mi tienda ahora`), cierre de sesión y re-ingreso mediante correo y contraseña en `#/login`.
     4. **Escenario 4:** Acceso directo desde `#/login` como **Cliente** hacia **Tienda Vecinal** (`#/tienda/surtifacil`) y **Kiosco Táctil iPad** (`#/kiosco/surtifacil`) verificando catálogo en vivo.
 
+---
+
+## Fase 3 — Expansión Comercial, Auditoría DIAN y Certificación Total
+
+- [x] **Tarea 14 — Notificaciones Push Web / PWA en Segundo Plano para Pedidos en Mostrador (`notificationService.ts`):**
+  - **Nivel Recomendado:** `3.8 Flash (Medium)`
+  - **Estado:** ✅ Completada y Desplegada
+  - **Evidencia Técnica de Implementación:**
+    1. **Servicio Web Push & Audio Chime (`web/src/services/notificationService.ts`):**
+       - Soporte nativo para Web Notification API con vibración `[200, 100, 200]`, icono oficial PWA y fallback acústico Web Audio API dual-tone (`playNewOrderChime`) a 880 Hz / 1174.6 Hz.
+       - Disparo proactivo en la bandeja de pedidos en vivo (`LiveOrdersTray.tsx`) al recibir nuevos turnos de Kiosco o pedidos web vecinales.
+       - Botón accesible en la cabecera del POS (`CreateSale.tsx`) para activar/desactivar alertas sonoras de mostrador (`aria-label="Alertas de mostrador activas"` / `"Activar alertas de mostrador"`).
+
+- [x] **Tarea 15 — Centro de Integraciones y Auditoría de Secretos en Vivo (DeepSeek IA y WhatsApp Cloud API en `StoreSettings.tsx`):**
+  - **Nivel Recomendado:** `3.8 Flash (High)`
+  - **Estado:** ✅ Completada y Desplegada
+  - **Evidencia Técnica de Implementación:**
+    1. **Endpoints de Auditoría Segura (`/api/integrations/status` y `/api/integrations/test-deepseek` en `web/functions/api/[[route]].ts`):**
+       - Inspección en el Edge de variables de entorno (`DEEPSEEK_API_KEY`, `WHATSAPP_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_VERIFY_TOKEN`) sin filtrar valores sensibles.
+       - Test en vivo con medición de latencia en milisegundos (`latency_ms`) y respuesta inmediata al frontend.
+    2. **Panel de Gestión de Integraciones (`StoreSettings.tsx` Bloques 5 y 6):**
+       - Diagnóstico de notificaciones push del navegador con botón de prueba en 1 clic ("🔔 Probar Alerta Ahora").
+       - Tarjeta interactiva de DeepSeek IA con botón de prueba de conexión y tarjeta de WhatsApp Cloud API con URL de Webhook y botón de copiado rápido al portapapeles.
+
+- [x] **Tarea 16 — Libro Fiscal de Registro Diario de Ventas (DIAN Colombia) y Exportación Contable en Excel CSV / PDF Imprimible:**
+  - **Nivel Recomendado:** `3.8 Flash (Medium)`
+  - **Estado:** ✅ Completada y Desplegada
+  - **Evidencia Técnica de Implementación:**
+    1. **Agregador Fiscal Diario (`web/src/services/fiscalLedgerGenerator.ts`):**
+       - Cumplimiento estricto del Artículo 616-1 del Estatuto Tributario para contribuyentes no responsables de IVA en Colombia.
+       - Desglose día por día de ingresos brutos por medio de pago (**Efectivo**, **Transferencia Nequi/Bancolombia**, **Fiado**), conteo de transacciones, rango de comprobantes emitidos y total consolidado en COP.
+       - Exportador a archivo CSV contable codificado con UTF-8 BOM para apertura perfecta en Microsoft Excel en español (`downloadFiscalLedgerCSV`).
+    2. **Modal Interactivo de Consulta e Impresión (`FiscalLedgerModal.tsx` y `Reports.tsx`):**
+       - Filtro dinámico de períodos (últimos 7 días, 15 días, 30 días, 60 días o año completo).
+       - Tabla con pie de totales consolidados y botones táctiles de exportación a Excel e impresión limpia optimizada (`window.print()`).
+
+- [x] **Tarea 17 — Suite E2E de Certificación de Fase 3 y Despliegue en Vivo:**
+  - **Nivel Recomendado:** `Argon (High)`
+  - **Estado:** ✅ Completada y Desplegada
+  - **Evidencia Técnica de Implementación:**
+    1. **Pruebas Unitarias Vitest:** 49 archivos de prueba y 375 tests pasando al 100% (`notificationService.test.ts`, `fiscalLedgerGenerator.test.ts`, `integrationService.test.ts`, `apiFunctions.test.ts`).
+    2. **Suite E2E Playwright:** 27 pruebas de producción pasando sin fallos (`saas-production.spec.ts` Escenario 7 certificando Libro Fiscal DIAN, alertas sonoras del POS y test de DeepSeek en vivo).
+    3. **Compilación de Producción:** `npm run build:web` generado con éxito (4.98s) con PWA Service Worker activo.
+
+---
+
+## Fase 4 — Catálogo Fotográfico Real de Productos Colombianos (En Planificación)
+
+- [ ] **Tarea 18 — Banco de Fotografías Reales de Productos de Abastos Colombianos y Subida a CDN / WebP:**
+  - **Nivel Recomendado:** `3.8 Flash (High)`
+  - **Objetivo:** Reemplazar los emojis/placeholders en Kiosco (`#/kiosco/:slug`), Tienda Vecinal (`#/tienda/:slug`) y POS (`#/create-sale`) por fotografías optimizadas en WebP de marcas y productos emblemáticos de la canasta familiar colombiana (Arroz Diana, Leche Colanta, Huevos Santa Reyes, Café Sello Rojo, Panela, Arepas de Chócolo, Aguacate Hass, Quesito Antioqueño, Galletas Saltín Noel, Aceite Premier, etc.) con fallback elegante y soporte para que el tendero suba sus propias fotos por cámara o archivo.
+
+
 
 
 

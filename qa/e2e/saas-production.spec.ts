@@ -621,6 +621,39 @@ async function setupProductionE2EHarness(page: Page) {
       return jsonResponse(target || { ok: true });
     }
 
+    // Diagnóstico de Integraciones
+    if (pathname === '/integrations/status' && method === 'GET') {
+      return jsonResponse({
+        deepseek: {
+          configured: true,
+          mode: 'live',
+          model: 'deepseek-chat',
+          provider: 'DeepSeek API v3 (Edge)',
+        },
+        whatsapp: {
+          configured: true,
+          mode: 'live',
+          phone_id: '***1234',
+          webhook_url: 'https://surtifacil.pages.dev/api/webhooks/whatsapp',
+          verify_token_configured: true,
+        },
+        database: {
+          status: 'connected',
+          engine: 'Cloudflare D1 (SQLite Edge)',
+          multi_tenant: true,
+        },
+      });
+    }
+
+    if (pathname === '/integrations/test-deepseek' && method === 'POST') {
+      return jsonResponse({
+        success: true,
+        mode: 'live',
+        latency_ms: 45,
+        message: 'Conexión exitosa con DeepSeek API oficial en la nube.',
+      });
+    }
+
     // Fallback amigable para otros endpoints (proveedores, órdenes, empleados)
     return jsonResponse([]);
   });
@@ -844,5 +877,42 @@ test.describe('Suite E2E de Certificación de Producción — SurtiFácil SaaS',
     // 6.5 Reconectar y sincronizar desde el banner interactivo
     await banner.getByRole('button', { name: /Reconectar y Sincronizar/i }).click();
     await expect(banner).not.toBeVisible();
+  });
+
+  test('7. Suite Fase 3: Libro Fiscal DIAN, Notificaciones Push y Centro de Integraciones en Vivo', async ({
+    page,
+  }) => {
+    await setupProductionE2EHarness(page);
+    await loginAsStaffAdmin(page);
+
+    // 7.1 Reportes: Apertura del Libro Fiscal de Registro de Operaciones Diarias (DIAN Art. 616-1)
+    await page.goto('/#/reports');
+    const fiscalBtn = page.getByRole('button', { name: /Libro Fiscal DIAN/i });
+    await expect(fiscalBtn).toBeVisible();
+    await fiscalBtn.click();
+
+    await expect(page.getByText(/Registro DIAN \(Art\. 616-1 E\.T\.\)/i)).toBeVisible();
+    await expect(page.getByText(/No Responsable de IVA/i)).toBeVisible();
+    await expect(page.getByRole('button', { name: /Exportar Excel CSV/i })).toBeVisible();
+    await expect(page.getByRole('button', { name: /Imprimir/i })).toBeVisible();
+    await page.getByRole('button', { name: 'Listo' }).click();
+
+    // 7.2 POS Mostrador: Botón accesible de alertas de pedidos
+    await page.goto('/#/create-sale');
+    await expect(page.getByRole('button', { name: /Alertas/i })).toBeVisible();
+
+    // 7.3 Configuración: Notificaciones push y Centro de Integraciones en Vivo
+    await page.goto('/#/settings');
+    await expect(page.getByText(/Notificaciones Push y Alertas de Mostrador/i)).toBeVisible();
+    await expect(page.getByRole('button', { name: /Probar Alerta Ahora/i })).toBeVisible();
+    await expect(page.getByText(/Centro de Integraciones y Auditoría de Secretos/i)).toBeVisible();
+    await expect(page.getByText(/DeepSeek IA \(Copiloto\)/i)).toBeVisible();
+    await expect(page.getByText(/WhatsApp Cloud API/i)).toBeVisible();
+
+    // Probar conexión de DeepSeek en vivo
+    const testDeepSeekBtn = page.getByRole('button', { name: /Probar Conexión DeepSeek/i });
+    await expect(testDeepSeekBtn).toBeVisible();
+    await testDeepSeekBtn.click();
+    await expect(page.getByText(/Conexión exitosa/i).first()).toBeVisible();
   });
 });

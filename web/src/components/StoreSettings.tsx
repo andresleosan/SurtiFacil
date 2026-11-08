@@ -6,6 +6,17 @@ import { getStoreSettings, updateStoreSettings } from '../services/settingsServi
 import { StoreSettings as IStoreSettings } from '../types/storeSettings';
 import { formatCOP } from '../utils/currency';
 import { StoreQRCard } from './StoreQRCard';
+import {
+  isNotificationSupported,
+  getNotificationPermission,
+  requestNotificationPermission,
+  sendTestNotification,
+} from '../services/notificationService';
+import {
+  getIntegrationStatus,
+  testDeepSeekConnection,
+  type IntegrationStatus,
+} from '../services/integrationService';
 
 const BARRIOS_MEDELLIN = [
   'La Candelaria / Centro',
@@ -51,6 +62,14 @@ const StoreSettings = () => {
   const [costoDomicilioPesos, setCostoDomicilioPesos] = useState('3500');
   const [permiteRetiro, setPermiteRetiro] = useState(true);
 
+  // Notificaciones y Diagnóstico
+  const [notifPerm, setNotifPerm] = useState<NotificationPermission>(() => getNotificationPermission());
+  const [notifTestSuccess, setNotifTestSuccess] = useState<string | null>(null);
+  const [integrations, setIntegrations] = useState<IntegrationStatus | null>(null);
+  const [testingDeepSeek, setTestingDeepSeek] = useState(false);
+  const [deepSeekResult, setDeepSeekResult] = useState<{ success: boolean; message: string } | null>(null);
+  const [copiedWebhook, setCopiedWebhook] = useState(false);
+
   useEffect(() => {
     let mounted = true;
     void getStoreSettings()
@@ -74,6 +93,10 @@ const StoreSettings = () => {
         setError(err instanceof Error ? err.message : 'Error al cargar la configuración');
         setLoading(false);
       });
+
+    void getIntegrationStatus().then((status) => {
+      if (mounted) setIntegrations(status);
+    });
 
     return () => {
       mounted = false;
@@ -110,6 +133,56 @@ const StoreSettings = () => {
     } finally {
       setSaving(false);
     }
+  };
+
+  const handleRequestNotif = async () => {
+    const ok = await requestNotificationPermission();
+    setNotifPerm(ok ? 'granted' : 'denied');
+  };
+
+  const handleTestNotif = async () => {
+    try {
+      setNotifTestSuccess(null);
+      await sendTestNotification();
+      setNotifTestSuccess('¡Notificación de prueba enviada con éxito!');
+      setTimeout(() => setNotifTestSuccess(null), 4000);
+    } catch (err: any) {
+      setError(err.message || 'No se pudo enviar la notificación');
+    }
+  };
+
+  const handleTestDeepSeek = async () => {
+    setTestingDeepSeek(true);
+    setDeepSeekResult(null);
+    try {
+      const res = await testDeepSeekConnection();
+      if (res.success) {
+        setDeepSeekResult({
+          success: true,
+          message: `${res.message || 'Conexión exitosa'} (${res.latency_ms || 40} ms)`,
+        });
+      } else {
+        setDeepSeekResult({
+          success: false,
+          message: res.error || 'Error al conectar con DeepSeek API',
+        });
+      }
+    } catch (err: any) {
+      setDeepSeekResult({
+        success: false,
+        message: err.message || 'Error de conexión',
+      });
+    } finally {
+      setTestingDeepSeek(false);
+    }
+  };
+
+  const handleCopyWebhook = () => {
+    const url = integrations?.whatsapp?.webhook_url || 'https://surtifacil.pages.dev/api/webhooks/whatsapp';
+    navigator.clipboard.writeText(url).then(() => {
+      setCopiedWebhook(true);
+      setTimeout(() => setCopiedWebhook(false), 3000);
+    });
   };
 
   if (loading) {
@@ -465,7 +538,147 @@ const StoreSettings = () => {
           </div>
         </div>
 
-        {/* Bloque 5: Afiches y Códigos QR Imprimibles */}
+        {/* Bloque 5: Notificaciones Web y Alertas de Mostrador */}
+        <div className="card space-y-4 p-5 md:p-6">
+          <div className="flex items-center gap-2 border-b border-gray-100 pb-3">
+            <span className="text-xl">🔔</span>
+            <h2 className="text-base font-bold text-sf-text">Notificaciones Push y Alertas de Mostrador</h2>
+          </div>
+
+          <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div className="space-y-1">
+              <div className="flex items-center gap-2">
+                <span className="font-semibold text-slate-800 text-sm">Alertas en Segundo Plano:</span>
+                {notifPerm === 'granted' ? (
+                  <span className="chip bg-emerald-100 text-emerald-800 text-xs font-bold">🔔 Permitidas</span>
+                ) : notifPerm === 'denied' ? (
+                  <span className="chip bg-red-100 text-red-800 text-xs font-bold">🚫 Bloqueadas</span>
+                ) : (
+                  <span className="chip bg-amber-100 text-amber-800 text-xs font-bold">⏳ Pendiente</span>
+                )}
+              </div>
+              <p className="text-xs text-slate-500">
+                Emite sonido y ventana flotante en tu celular o tablet cuando entra un nuevo pedido de Kiosco o Web.
+              </p>
+            </div>
+
+            <div className="flex items-center gap-2 shrink-0">
+              {notifPerm !== 'granted' && isNotificationSupported() && (
+                <button
+                  type="button"
+                  onClick={handleRequestNotif}
+                  className="btn-primary min-h-[44px] px-4 text-xs font-bold"
+                >
+                  Activar Notificaciones
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={handleTestNotif}
+                className="btn-secondary min-h-[44px] px-4 text-xs font-bold text-slate-700"
+              >
+                Probar Alerta Ahora
+              </button>
+            </div>
+          </div>
+
+          {notifTestSuccess && (
+            <div className="rounded-lg bg-emerald-50 border border-emerald-200 p-3 text-xs text-emerald-800 font-medium">
+              ✅ {notifTestSuccess}
+            </div>
+          )}
+        </div>
+
+        {/* Bloque 6: Centro de Integraciones en Vivo (DeepSeek IA y WhatsApp Cloud API) */}
+        <div className="card space-y-4 p-5 md:p-6">
+          <div className="flex items-center gap-2 border-b border-gray-100 pb-3">
+            <Icon name="external-link" className="text-sf-cyan" size={20} />
+            <h2 className="text-base font-bold text-sf-text">Centro de Integraciones y Auditoría de Secretos</h2>
+          </div>
+
+          <div className="grid gap-4 sm:grid-cols-2">
+            {/* Tarjeta DeepSeek IA */}
+            <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-4 flex flex-col justify-between space-y-3">
+              <div>
+                <div className="flex items-center justify-between">
+                  <span className="font-bold text-slate-800 text-sm flex items-center gap-1.5">
+                    <span>🧠 DeepSeek IA (Copiloto)</span>
+                  </span>
+                  {integrations?.deepseek?.configured ? (
+                    <span className="chip bg-emerald-100 text-emerald-800 text-xs font-bold">Conectado en la Nube</span>
+                  ) : (
+                    <span className="chip bg-blue-100 text-blue-800 text-xs font-bold">Modo Heurístico Paisa</span>
+                  )}
+                </div>
+                <p className="mt-1.5 text-xs text-slate-500">
+                  {integrations?.deepseek?.configured
+                    ? 'Motor deepseek-chat activo con function calling y cuota autoritativa sobre Cloudflare D1.'
+                    : 'Opera con el motor local heurístico optimizado para abastos paisas. Agrega DEEPSEEK_API_KEY en Cloudflare Pages para IA generativa pura.'}
+                </p>
+              </div>
+
+              <div>
+                <button
+                  type="button"
+                  disabled={testingDeepSeek}
+                  onClick={handleTestDeepSeek}
+                  className="btn-secondary w-full min-h-[40px] text-xs font-bold text-slate-700 flex items-center justify-center gap-2"
+                >
+                  <Icon name="refresh" className={testingDeepSeek ? 'animate-spin' : ''} size={14} />
+                  <span>{testingDeepSeek ? 'Probando latencia...' : 'Probar Conexión DeepSeek'}</span>
+                </button>
+                {deepSeekResult && (
+                  <p
+                    className={`mt-2 text-xs font-medium ${
+                      deepSeekResult.success ? 'text-emerald-700' : 'text-red-600'
+                    }`}
+                  >
+                    {deepSeekResult.message}
+                  </p>
+                )}
+              </div>
+            </div>
+
+            {/* Tarjeta WhatsApp Cloud API */}
+            <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-4 flex flex-col justify-between space-y-3">
+              <div>
+                <div className="flex items-center justify-between">
+                  <span className="font-bold text-slate-800 text-sm flex items-center gap-1.5">
+                    <span>💬 WhatsApp Cloud API</span>
+                  </span>
+                  {integrations?.whatsapp?.configured ? (
+                    <span className="chip bg-emerald-100 text-emerald-800 text-xs font-bold">Conectado</span>
+                  ) : (
+                    <span className="chip bg-amber-100 text-amber-800 text-xs font-bold">Simulado / Manual</span>
+                  )}
+                </div>
+                <p className="mt-1.5 text-xs text-slate-500">
+                  Webhook oficial para Meta Developers. Permite recibir pedidos automáticos al WhatsApp de la tienda.
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    readOnly
+                    value={integrations?.whatsapp?.webhook_url || 'https://surtifacil.pages.dev/api/webhooks/whatsapp'}
+                    className="input text-xs py-1.5 bg-white text-slate-600 font-mono select-all flex-1"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleCopyWebhook}
+                    className="btn-secondary min-h-[38px] px-3 text-xs font-bold text-slate-700"
+                  >
+                    {copiedWebhook ? '¡Copiado!' : 'Copiar URL'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Bloque 7: Afiches y Códigos QR Imprimibles */}
         <StoreQRCard
           storeSlug={settings?.slug || 'surtifacil'}
           storeName={nombre || settings?.nombre || 'SurtiFácil Abastos Central'}
