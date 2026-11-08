@@ -32,8 +32,21 @@ Para maximizar la eficiencia de tokens y la precisión de razonamiento en cada s
 
 ---
 
-## Fase 1: Lectura de Contexto y Selección de la Siguiente Tarea Pendiente
-1. Lee obligatoriamente estos tres archivos del repositorio antes de proponer o tocar código:
+## Fase 1: Verificación Automática de Sincronización Git y Lectura de Contexto
+1. **Verificación Automática de Git con el Repositorio Remoto (Paso 0 Obligatorio y Silencioso):**
+   Antes de tocar cualquier archivo o analizar tareas, ejecuta automáticamente la verificación de Git contra `https://github.com/andresleosan/SurtiFacil`:
+   ```powershell
+   git -c safe.directory=E:/Proyectos/SurtiFacil fetch origin main
+   git -c safe.directory=E:/Proyectos/SurtiFacil rev-parse HEAD
+   git -c safe.directory=E:/Proyectos/SurtiFacil rev-parse origin/main
+   git -c safe.directory=E:/Proyectos/SurtiFacil status --porcelain
+   ```
+   - Compara los hashes del commit local (`HEAD`) y remoto (`origin/main`).
+   - Si el commit local está por detrás del remoto (`behind`), ejecuta inmediatamente `git pull origin main` para quedar sincronizado con la última versión de GitHub.
+   - Si el working tree tiene cambios no confirmados o divergencia, informa inmediatamente al usuario.
+   - Informa en el primer mensaje de la sesión el estado de sincronización exacto, por ejemplo:
+     `"🔗 Git Sync: Commit local [3341348] sincronizado al 100% con origin/main en https://github.com/andresleosan/SurtiFacil ✅"`
+2. Lee obligatoriamente estos tres archivos del repositorio antes de proponer o tocar código:
    - [`docs/HOJA_DE_RUTA_PRODUCCION.md`](../../../docs/HOJA_DE_RUTA_PRODUCCION.md): Identifica la **primera tarea marcada con `[ ]`** en la lista de tareas pendientes.
    - [`AGENTS.md`](../../../AGENTS.md): Verifica las reglas críticas de arquitectura y negocio (aislamiento multi-tenant por `negocio_id`, autoridad financiera en servidor, moneda `formatCOP` y TypeScript estricto).
    - [`DESIGN.md`](../../../DESIGN.md): Verifica los tokens visuales (`#1565C0`, `#0D1B2A`, `#F4F6F8`, `Poppins`, `formatCOP`), aislamiento multi-tenant por `negocio_id`, accesibilidad (`aria-label`, `aria-pressed`, objetivos táctiles de `44×44 px` en POS/Admin y `56×56 px` en Kiosco iPad) y ergonomía del Copiloto Sarin.

@@ -96,7 +96,8 @@ npm run test:e2e
 
 ## 6. Flujo de Trabajo con `/avanzar` y Matriz de Modelos
 
-1. La fuente de verdad del progreso entre sesiones es [`docs/HOJA_DE_RUTA_PRODUCCION.md`](docs/HOJA_DE_RUTA_PRODUCCION.md).
+1. **Sincronización Automática con GitHub:** Al iniciar `/avanzar`, el asistente realiza obligatoriamente una verificación automática de Git contra `https://github.com/andresleosan/SurtiFacil` (`git fetch origin main`, comparando `git rev-parse HEAD` vs `git rev-parse origin/main`). Si el entorno local está por detrás del remoto, ejecuta `git pull origin main` automáticamente y confirma al inicio de la sesión el commit sincronizado, eliminando la necesidad de verificación manual.
+2. La fuente de verdad del progreso entre sesiones es [`docs/HOJA_DE_RUTA_PRODUCCION.md`](docs/HOJA_DE_RUTA_PRODUCCION.md).
 2. Todo diseño de interfaz e interacción debe cumplir estrictamente [`DESIGN.md`](DESIGN.md).
 3. Cada tarea se ejecuta en una **sesión limpia e independiente** para preservar la frescura y capacidad de contexto.
 4. **Matriz de 6 Niveles de Modelo y Esfuerzo (3.8 Flash + Argon):**
