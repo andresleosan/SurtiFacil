@@ -5,10 +5,89 @@ import KioskMode from '../components/KioskMode';
 import { LiveOrdersTray } from '../components/LiveOrdersTray';
 import { playNewOrderChime } from '../utils/audioAlerts';
 import * as customerOrderService from '../services/customerOrderService';
+import type { PublicStoreData, CustomerOrder } from '../types/customerOrder';
+
+const mockKioskStoreData: PublicStoreData = {
+  id: 'surtifacil',
+  slug: 'surtifacil',
+  nombre: 'SurtiFácil Abastos Central - Medellín',
+  barrio: 'La Candelaria / Centro',
+  ciudad: 'Medellín',
+  telefono_whatsapp: '+573001234567',
+  direccion: 'Calle 50 # 50-20, Centro, Medellín',
+  horario: 'Lunes a Domingo 7:00 AM - 9:00 PM',
+  logo_url: '/icon-192.png',
+  estado: 'activo',
+  costo_domicilio_cents: 350000,
+  datos_pago_offline: 'Nequi / Bancolombia: 300 123 4567',
+  config: {
+    slogan: 'El motor digital del tendero paisa',
+    allow_kiosk: true,
+    allow_whatsapp: true,
+    permite_domicilio: true,
+    permite_retiro: true,
+  },
+  products: [
+    {
+      id: 'p1',
+      name: 'Manzana Roja',
+      price_cents: 250,
+      stock: 45,
+      unit: 'unidad',
+      category: 'General',
+      visible_kiosco: 1,
+      visible_tienda: 1,
+      en_oferta: 0,
+      precio_oferta_cents: null,
+    },
+    {
+      id: 'p3',
+      name: 'Leche Entera 1L',
+      price_cents: 350,
+      stock: 32,
+      unit: 'litro',
+      category: 'General',
+      visible_kiosco: 1,
+      visible_tienda: 1,
+      en_oferta: 0,
+      precio_oferta_cents: null,
+    },
+  ],
+  combos: [
+    {
+      id: 'combo-desayuno-paisa',
+      name: 'Combo Desayuno Paisa',
+      description: 'Chocolate Corona, quesito antioqueño y arepas tela x5',
+      price_cents: 950000,
+      items_json: JSON.stringify([
+        { product_id: 'p3', product_name: 'Leche Entera 1L', quantity: 2, unit_price_cents: 350000 },
+      ]),
+      image_url: '/images/products/combo-desayuno-paisa.svg',
+      visible_kiosco: 1,
+      visible_tienda: 1,
+    },
+  ],
+};
 
 describe('Modo Kiosco iPad (#/kiosco/:slug)', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    vi.spyOn(customerOrderService, 'getPublicStore').mockResolvedValue(mockKioskStoreData);
+    vi.spyOn(customerOrderService, 'createCustomerOrder').mockResolvedValue({
+      success: true,
+      order: {
+        id: 'ord-test-01',
+        negocio_id: 'surtifacil',
+        order_code: '#K-01',
+        source: 'kiosk',
+        customer_name: 'Don Roberto Gómez',
+        delivery_type: 'pickup_counter',
+        payment_method: 'cash',
+        items_json: '[]',
+        total_cents: 250,
+        status: 'pending',
+      },
+    });
   });
 
   it('renderiza la cabecera del kiosco con el nombre de la tienda y pasillos de abastos', async () => {
@@ -96,6 +175,48 @@ describe('Bandeja de Pedidos en Vivo en POS (LiveOrdersTray)', () => {
   it('muestra los pedidos pendientes del kiosco y permite facturar en 1 clic', async () => {
     const user = userEvent.setup();
     const handleSaleCreated = vi.fn();
+
+    const mockPendingOrders: CustomerOrder[] = [
+      {
+        id: 'ord-mock-01',
+        negocio_id: 'surtifacil',
+        order_code: '#K-01',
+        source: 'kiosk',
+        customer_name: 'Doña Gloria Hernández',
+        customer_phone: '3001112233',
+        delivery_type: 'pickup_counter',
+        payment_method: 'cash',
+        items_json: JSON.stringify([
+          {
+            product_id: 'p1',
+            product_name: 'Manzana Roja',
+            quantity: 3,
+            unit_price_cents: 250,
+            subtotal_cents: 750,
+            unit: 'unidad',
+          },
+        ]),
+        items: [
+          {
+            product_id: 'p1',
+            product_name: 'Manzana Roja',
+            quantity: 3,
+            unit_price_cents: 250,
+            subtotal_cents: 750,
+            unit: 'unidad',
+          },
+        ],
+        total_cents: 750,
+        status: 'pending',
+      },
+    ];
+
+    vi.spyOn(customerOrderService, 'getCustomerOrders').mockResolvedValue(mockPendingOrders);
+    vi.spyOn(customerOrderService, 'convertOrderToSale').mockResolvedValue({
+      success: true,
+      message: 'Orden facturada con éxito',
+      sale_id: 'sale-001',
+    });
 
     render(<LiveOrdersTray onSaleCreated={handleSaleCreated} />);
 

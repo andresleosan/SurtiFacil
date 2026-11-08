@@ -1,0 +1,53 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400" width="100%" height="100%">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#f8fafc"/>
+      <stop offset="100%" stop-color="#e2e8f0"/>
+    </linearGradient>
+    <linearGradient id="oil" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#fef08a"/>
+      <stop offset="30%" stop-color="#facc15"/>
+      <stop offset="70%" stop-color="#eab308"/>
+      <stop offset="100%" stop-color="#ca8a04"/>
+    </linearGradient>
+    <linearGradient id="bottleShine" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.6"/>
+      <stop offset="50%" stop-color="#ffffff" stop-opacity="0.1"/>
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="130%" height="130%">
+      <feDropShadow dx="0" dy="12" stdDeviation="12" flood-color="#0f172a" flood-opacity="0.2"/>
+    </filter>
+  </defs>
+
+  <rect width="400" height="400" rx="24" fill="url(#bg)"/>
+  <circle cx="200" cy="200" r="140" fill="#fef9c3" opacity="0.6"/>
+
+  <g filter="url(#shadow)">
+    <!-- Botella de Aceite de 1 Litro -->
+    <!-- Tapa y Cuello Verde -->
+    <rect x="186" y="55" width="28" height="22" rx="4" fill="#15803d" stroke="#166534" stroke-width="1.5"/>
+    <path d="M188 77 L188 100 L212 100 L212 77 Z" fill="#fef08a" stroke="#ca8a04" stroke-width="1.5"/>
+
+    <!-- Hombros y Cuerpo de la botella -->
+    <path d="M188 100 C150 120 140 145 140 180 L140 315 C140 330 260 330 260 315 L260 180 C260 145 250 120 212 100 Z" fill="url(#oil)" stroke="#a16207" stroke-width="2"/>
+
+    <!-- Brillo del plástico pet -->
+    <path d="M148 160 L148 310" stroke="url(#bottleShine)" stroke-width="8" stroke-linecap="round"/>
+
+    <!-- Etiqueta Verde Gourmet Familia -->
+    <rect x="145" y="175" width="110" height="110" rx="10" fill="#065f46" stroke="#fbbf24" stroke-width="2"/>
+
+    <!-- Girasol / Gotas en etiqueta -->
+    <circle cx="200" cy="200" r="12" fill="#f59e0b" stroke="#ffffff" stroke-width="1.5"/>
+    <text x="200" y="205" font-size="12" text-anchor="middle">🌻</text>
+
+    <!-- Marca Gourmet -->
+    <text x="200" y="228" font-family="'Georgia', serif" font-size="20" font-weight="bold" font-style="italic" fill="#ffffff" text-anchor="middle">Gourmet</text>
+    <rect x="160" y="235" width="80" height="14" rx="3" fill="#d97706"/>
+    <text x="200" y="245" font-family="Arial, sans-serif" font-size="8" font-weight="bold" fill="#ffffff" text-anchor="middle" letter-spacing="0.5">ACEITE VEGETAL</text>
+    
+    <text x="200" y="260" font-family="Arial, sans-serif" font-size="8" fill="#a7f3d0" text-anchor="middle">0% Colesterol · Vitamina E</text>
+    <text x="200" y="275" font-family="'Arial Black', sans-serif" font-size="11" font-weight="900" fill="#fde047" text-anchor="middle">1000 ml (1 L)</text>
+  </g>
+</svg>

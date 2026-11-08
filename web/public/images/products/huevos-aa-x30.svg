@@ -1,0 +1,81 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400" width="100%" height="100%">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#f8fafc"/>
+      <stop offset="100%" stop-color="#e2e8f0"/>
+    </linearGradient>
+    <linearGradient id="tray" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#d4b996"/>
+      <stop offset="50%" stop-color="#be9d73"/>
+      <stop offset="100%" stop-color="#a38258"/>
+    </linearGradient>
+    <linearGradient id="egg" x1="30%" y1="10%" x2="80%" y2="90%">
+      <stop offset="0%" stop-color="#fef3c7"/>
+      <stop offset="40%" stop-color="#fde68a"/>
+      <stop offset="80%" stop-color="#d97706"/>
+      <stop offset="100%" stop-color="#b45309"/>
+    </linearGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="130%" height="130%">
+      <feDropShadow dx="0" dy="12" stdDeviation="12" flood-color="#0f172a" flood-opacity="0.2"/>
+    </filter>
+  </defs>
+
+  <rect width="400" height="400" rx="24" fill="url(#bg)"/>
+  <circle cx="200" cy="200" r="140" fill="#fef3c7" opacity="0.6"/>
+
+  <g filter="url(#shadow)">
+    <!-- Cubeta de Cartón Prensado (Perspectiva Isométrica 5x6 huecos) -->
+    <path d="M70 180 L200 115 L330 180 L200 285 Z" fill="url(#tray)" stroke="#8c6d46" stroke-width="2"/>
+    <path d="M70 180 L70 205 L200 310 L200 285 Z" fill="#8c6d46"/>
+    <path d="M330 180 L330 205 L200 310 L200 285 Z" fill="#6d5334"/>
+
+    <!-- Rejilla de Huevos Rojos/Campesinos Colombianos -->
+    <!-- Fila 1 -->
+    <ellipse cx="140" cy="155" rx="14" ry="19" fill="url(#egg)"/>
+    <ellipse cx="170" cy="140" rx="14" ry="19" fill="url(#egg)"/>
+    <ellipse cx="200" cy="130" rx="14" ry="19" fill="url(#egg)"/>
+    <ellipse cx="230" cy="140" rx="14" ry="19" fill="url(#egg)"/>
+    <ellipse cx="260" cy="155" rx="14" ry="19" fill="url(#egg)"/>
+
+    <!-- Fila 2 -->
+    <ellipse cx="120" cy="175" rx="15" ry="20" fill="url(#egg)"/>
+    <ellipse cx="155" cy="160" rx="15" ry="20" fill="url(#egg)"/>
+    <ellipse cx="185" cy="150" rx="15" ry="20" fill="url(#egg)"/>
+    <ellipse cx="215" cy="150" rx="15" ry="20" fill="url(#egg)"/>
+    <ellipse cx="245" cy="160" rx="15" ry="20" fill="url(#egg)"/>
+    <ellipse cx="280" cy="175" rx="15" ry="20" fill="url(#egg)"/>
+
+    <!-- Fila 3 -->
+    <ellipse cx="105" cy="195" rx="15" ry="21" fill="url(#egg)"/>
+    <ellipse cx="140" cy="180" rx="15" ry="21" fill="url(#egg)"/>
+    <ellipse cx="170" cy="170" rx="15" ry="21" fill="url(#egg)"/>
+    <ellipse cx="200" cy="165" rx="15" ry="21" fill="url(#egg)"/>
+    <ellipse cx="230" cy="170" rx="15" ry="21" fill="url(#egg)"/>
+    <ellipse cx="260" cy="180" rx="15" ry="21" fill="url(#egg)"/>
+    <ellipse cx="295" cy="195" rx="15" ry="21" fill="url(#egg)"/>
+
+    <!-- Fila 4 -->
+    <ellipse cx="125" cy="215" rx="16" ry="22" fill="url(#egg)"/>
+    <ellipse cx="160" cy="200" rx="16" ry="22" fill="url(#egg)"/>
+    <ellipse cx="190" cy="190" rx="16" ry="22" fill="url(#egg)"/>
+    <ellipse cx="220" cy="190" rx="16" ry="22" fill="url(#egg)"/>
+    <ellipse cx="250" cy="200" rx="16" ry="22" fill="url(#egg)"/>
+    <ellipse cx="275" cy="215" rx="16" ry="22" fill="url(#egg)"/>
+
+    <!-- Fila 5 Frontal -->
+    <ellipse cx="150" cy="235" rx="16" ry="22" fill="url(#egg)"/>
+    <ellipse cx="180" cy="225" rx="16" ry="22" fill="url(#egg)"/>
+    <ellipse cx="210" cy="225" rx="16" ry="22" fill="url(#egg)"/>
+    <ellipse cx="240" cy="235" rx="16" ry="22" fill="url(#egg)"/>
+  </g>
+
+  <!-- Cinta Frontal con Especificaciones Colombianas -->
+  <g filter="url(#shadow)">
+    <rect x="75" y="275" width="250" height="58" rx="12" fill="#15803d" stroke="#22c55e" stroke-width="2"/>
+    <rect x="85" y="285" width="46" height="38" rx="8" fill="#eab308"/>
+    <text x="108" y="312" font-family="'Arial Black', sans-serif" font-size="22" font-weight="900" fill="#713f12" text-anchor="middle">AA</text>
+    
+    <text x="145" y="302" font-family="'Arial Black', sans-serif" font-size="16" font-weight="900" fill="#ffffff">CUBETA x 30</text>
+    <text x="145" y="322" font-family="Arial, sans-serif" font-size="11" font-weight="bold" fill="#bbf7d0">Huevos Frescos de Granja</text>
+  </g>
+</svg>

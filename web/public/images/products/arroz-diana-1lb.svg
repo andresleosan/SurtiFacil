@@ -1,0 +1,55 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400" width="100%" height="100%">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#f8fafc"/>
+      <stop offset="100%" stop-color="#e2e8f0"/>
+    </linearGradient>
+    <linearGradient id="sack" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="25%" stop-color="#f8fafc"/>
+      <stop offset="70%" stop-color="#e2e8f0"/>
+      <stop offset="100%" stop-color="#cbd5e1"/>
+    </linearGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="130%" height="130%">
+      <feDropShadow dx="0" dy="12" stdDeviation="12" flood-color="#0f172a" flood-opacity="0.18"/>
+    </filter>
+  </defs>
+
+  <rect width="400" height="400" rx="24" fill="url(#bg)"/>
+  <circle cx="200" cy="200" r="140" fill="#fef3c7" opacity="0.6"/>
+
+  <g filter="url(#shadow)">
+    <!-- Bolsa de Arroz -->
+    <path d="M125 70 Q200 60 275 70 L290 325 Q200 340 110 325 Z" fill="url(#sack)"/>
+    
+    <!-- Banda Roja Superior Diana -->
+    <path d="M125 70 Q200 60 275 70 L278 135 Q200 125 122 135 Z" fill="#b91c1c"/>
+    <text x="200" y="112" font-family="'Georgia', serif" font-size="34" font-weight="bold" font-style="italic" fill="#ffffff" text-anchor="middle">Diana</text>
+    <text x="200" y="127" font-family="Arial, sans-serif" font-size="9" font-weight="bold" fill="#fde047" text-anchor="middle" letter-spacing="1">ARROZ BLANCO DE PRIMERA</text>
+
+    <!-- Ventana Transparente con granos de arroz -->
+    <ellipse cx="200" cy="200" rx="65" ry="40" fill="#f1f5f9" stroke="#cbd5e1" stroke-width="2"/>
+    <!-- Granos de arroz en la ventana -->
+    <g fill="#e2e8f0" stroke="#94a3b8" stroke-width="0.5">
+      <ellipse cx="170" cy="195" rx="7" ry="2.5" transform="rotate(-15 170 195)"/>
+      <ellipse cx="190" cy="190" rx="7" ry="2.5" transform="rotate(25 190 190)"/>
+      <ellipse cx="210" cy="195" rx="7" ry="2.5" transform="rotate(-30 210 195)"/>
+      <ellipse cx="230" cy="192" rx="7" ry="2.5" transform="rotate(10 230 192)"/>
+      <ellipse cx="180" cy="210" rx="7" ry="2.5" transform="rotate(40 180 210)"/>
+      <ellipse cx="200" cy="212" rx="7" ry="2.5" transform="rotate(-5 200 212)"/>
+      <ellipse cx="220" cy="208" rx="7" ry="2.5" transform="rotate(35 220 208)"/>
+    </g>
+
+    <!-- Escudo dorado con espiga -->
+    <circle cx="200" cy="165" r="16" fill="#f59e0b" stroke="#ffffff" stroke-width="2"/>
+    <text x="200" y="171" font-size="16" text-anchor="middle">🌾</text>
+
+    <!-- Sello de rendimiento colombiano -->
+    <rect x="145" y="252" width="110" height="24" rx="6" fill="#15803d"/>
+    <text x="200" y="268" font-family="Arial, sans-serif" font-size="11" font-weight="bold" fill="#ffffff" text-anchor="middle">Rinde más y no se pega</text>
+
+    <!-- Peso Neto -->
+    <text x="200" y="305" font-family="'Arial Black', sans-serif" font-size="22" font-weight="900" fill="#0f172a" text-anchor="middle">500 g</text>
+    <text x="200" y="322" font-family="Arial, sans-serif" font-size="11" font-weight="bold" fill="#64748b" text-anchor="middle">(1 LIBRA)</text>
+  </g>
+</svg>

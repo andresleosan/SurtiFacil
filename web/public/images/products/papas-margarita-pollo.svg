@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400" width="100%" height="100%">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#f8fafc"/>
+      <stop offset="100%" stop-color="#e2e8f0"/>
+    </linearGradient>
+    <linearGradient id="bag" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#eab308"/>
+      <stop offset="40%" stop-color="#facc15"/>
+      <stop offset="70%" stop-color="#fde047"/>
+      <stop offset="100%" stop-color="#ca8a04"/>
+    </linearGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="130%" height="130%">
+      <feDropShadow dx="0" dy="12" stdDeviation="12" flood-color="#0f172a" flood-opacity="0.2"/>
+    </filter>
+  </defs>
+
+  <rect width="400" height="400" rx="24" fill="url(#bg)"/>
+  <circle cx="200" cy="200" r="140" fill="#fef9c3" opacity="0.6"/>
+
+  <g filter="url(#shadow)">
+    <!-- Bolsa Amarilla de Papas Margarita Pollo -->
+    <path d="M125 70 Q200 60 275 70 L290 325 Q200 340 110 325 Z" fill="url(#bag)" stroke="#ca8a04" stroke-width="2"/>
+    
+    <!-- Sellado superior e inferior -->
+    <path d="M125 70 L275 70 L273 85 L127 85 Z" fill="#ca8a04"/>
+    <path d="M110 325 L290 325 L288 310 L112 310 Z" fill="#ca8a04"/>
+
+    <!-- Cinta y Flor Roja de Margarita -->
+    <ellipse cx="200" cy="140" rx="60" ry="32" fill="#dc2626" stroke="#ffffff" stroke-width="2"/>
+    <circle cx="200" cy="140" r="8" fill="#facc15"/>
+    <text x="200" y="146" font-family="'Brush Script MT', cursive, sans-serif" font-size="28" font-weight="bold" fill="#ffffff" text-anchor="middle">Margarita</text>
+
+    <!-- Hojuelas de papa frita crujiente -->
+    <g fill="#fef08a" stroke="#ca8a04" stroke-width="1.5">
+      <ellipse cx="165" cy="210" rx="24" ry="14" transform="rotate(-20 165 210)"/>
+      <ellipse cx="225" cy="205" rx="26" ry="15" transform="rotate(25 225 205)"/>
+      <ellipse cx="195" cy="225" rx="28" ry="16" transform="rotate(-5 195 225)"/>
+    </g>
+
+    <!-- Banda de Sabor a Pollo (Naranja y Verde) -->
+    <rect x="135" y="255" width="130" height="30" rx="8" fill="#ea580c" stroke="#ffffff" stroke-width="1.5"/>
+    <text x="200" y="275" font-family="'Arial Black', sans-serif" font-size="14" font-weight="900" fill="#ffffff" text-anchor="middle">SABOR A POLLO</text>
+
+    <!-- Peso Neto -->
+    <text x="200" y="304" font-family="'Arial Black', sans-serif" font-size="16" font-weight="900" fill="#713f12" text-anchor="middle">105 g</text>
+  </g>
+</svg>

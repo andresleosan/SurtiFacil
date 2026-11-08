@@ -1,4 +1,4 @@
-import { apiClient, emitDataChange } from './apiClient';
+import { apiClient, emitDataChange, getStoredAuthToken } from './apiClient';
 import { getLocalSales } from './mockData';
 import {
   CashClosing,
@@ -44,7 +44,7 @@ export function calculateCountedCents(breakdown: {
  * Consulta el resumen financiero del turno actual desde Cloudflare D1 o Mock.
  */
 export async function getCashShiftSummary(initialBaseCents = 10000000): Promise<CashShiftSummary> {
-  if (isMockMode()) {
+  if (isMockMode() || !getStoredAuthToken()) {
     const localSales = getLocalSales();
     const lastClosing = mockClosingsStorage[0];
     const openedAt = lastClosing ? lastClosing.closed_at : new Date(new Date().setHours(0, 0, 0, 0)).toISOString();
@@ -113,7 +113,7 @@ export async function getCashShiftSummary(initialBaseCents = 10000000): Promise<
 export async function recordCashClosing(input: CashClosingInput): Promise<CashClosing> {
   const countedCents = calculateCountedCents(input.breakdown);
 
-  if (!isMockMode()) {
+  if (!isMockMode() && getStoredAuthToken()) {
     try {
       const result = await apiClient.post<CashClosing>('/cash-closings', input);
       emitDataChange('cash-closings');

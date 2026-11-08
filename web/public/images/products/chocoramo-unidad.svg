@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400" width="100%" height="100%">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#f8fafc"/>
+      <stop offset="100%" stop-color="#e2e8f0"/>
+    </linearGradient>
+    <linearGradient id="wrap" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#ea580c"/>
+      <stop offset="35%" stop-color="#f97316"/>
+      <stop offset="70%" stop-color="#fb923c"/>
+      <stop offset="100%" stop-color="#c2410c"/>
+    </linearGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="130%" height="130%">
+      <feDropShadow dx="0" dy="12" stdDeviation="12" flood-color="#0f172a" flood-opacity="0.2"/>
+    </filter>
+  </defs>
+
+  <rect width="400" height="400" rx="24" fill="url(#bg)"/>
+  <circle cx="200" cy="200" r="140" fill="#ffedd5" opacity="0.6"/>
+
+  <g filter="url(#shadow)">
+    <!-- Paquete Naranja Chocoramo -->
+    <rect x="95" y="100" width="210" height="205" rx="14" fill="url(#wrap)" stroke="#c2410c" stroke-width="2"/>
+    
+    <!-- Sellado en zigzag superior e inferior -->
+    <path d="M95 100 L105 110 L115 100 L125 110 L135 100 L145 110 L155 100 L165 110 L175 100 L185 110 L195 100 L205 110 L215 100 L225 110 L235 100 L245 110 L255 100 L265 110 L275 100 L285 110 L295 100 L305 110" fill="none" stroke="#9a3412" stroke-width="2"/>
+    <path d="M95 305 L105 295 L115 305 L125 295 L135 305 L145 295 L155 305 L165 295 L175 305 L185 295 L195 305 L205 295 L215 305 L225 295 L235 305 L245 295 L255 305 L265 295 L275 305 L285 295 L295 305 L305 295" fill="none" stroke="#9a3412" stroke-width="2"/>
+
+    <!-- Cinta Azul Diagonal RAMO -->
+    <path d="M95 160 L305 130 L305 160 L95 190 Z" fill="#1d4ed8"/>
+    <text x="200" y="174" font-family="'Arial Black', Impact, sans-serif" font-size="16" font-weight="900" fill="#ffffff" text-anchor="middle" letter-spacing="3">RAMO</text>
+
+    <!-- Ilustración de la tajada de ponqué con cobertura de chocolate -->
+    <g transform="translate(145, 185)">
+      <rect x="0" y="0" width="110" height="60" rx="8" fill="#451a03" stroke="#290e02" stroke-width="2"/>
+      <rect x="5" y="5" width="100" height="50" rx="6" fill="#fde047"/>
+      <!-- Gotas de chocolate derretido -->
+      <path d="M0 0 Q25 15 50 0 T110 0 L110 12 Q75 18 50 10 T0 12 Z" fill="#451a03"/>
+    </g>
+
+    <!-- Letras CHOCORAMO -->
+    <text x="200" y="272" font-family="'Arial Black', Impact, sans-serif" font-size="24" font-weight="900" fill="#ffffff" text-anchor="middle" letter-spacing="1">CHOCORAMO</text>
+    <text x="200" y="288" font-family="Arial, sans-serif" font-size="10" font-weight="bold" fill="#fef08a" text-anchor="middle">Ponqué con Cubierta de Chocolate · 65 g</text>
+  </g>
+</svg>

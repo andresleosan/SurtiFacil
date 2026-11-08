@@ -382,7 +382,7 @@ export async function ensureDatabaseSchema(db: D1Database, force = false): Promi
       'SurtiFácil Abastos Central - Medellín',
       'La Candelaria / Centro',
       'Medellín',
-      '3001234567',
+      '573001234567',
       'Calle 50 # 50-20, Centro, Medellín',
       'Lunes a Domingo 7:00 AM - 9:00 PM',
       oneYearFromNow,
@@ -500,6 +500,7 @@ export async function ensureDatabaseSchema(db: D1Database, force = false): Promi
       unit: 'litro',
       category: 'Lácteos y Huevos',
       barcode: '7702177001234',
+      image_url: '/images/products/leche-alqueria-1l.svg',
       en_oferta: 1,
       precio_oferta_cents: 420000,
       last_cost_cents: 340000,
@@ -513,6 +514,7 @@ export async function ensureDatabaseSchema(db: D1Database, force = false): Promi
       unit: 'libra',
       category: 'Granos y Abarrotes',
       barcode: '7702001012345',
+      image_url: '/images/products/arroz-diana-1lb.svg',
       en_oferta: 0,
       precio_oferta_cents: null,
       last_cost_cents: 210000,
@@ -526,6 +528,7 @@ export async function ensureDatabaseSchema(db: D1Database, force = false): Promi
       unit: 'cubeta',
       category: 'Lácteos y Huevos',
       barcode: '7709990003030',
+      image_url: '/images/products/huevos-aa-x30.svg',
       en_oferta: 1,
       precio_oferta_cents: 1750000,
       last_cost_cents: 1450000,
@@ -539,6 +542,7 @@ export async function ensureDatabaseSchema(db: D1Database, force = false): Promi
       unit: 'libra',
       category: 'Despensa y Café',
       barcode: '7702004005009',
+      image_url: '/images/products/chocolate-corona-500g.svg',
       en_oferta: 0,
       precio_oferta_cents: null,
       last_cost_cents: 690000,
@@ -552,6 +556,7 @@ export async function ensureDatabaseSchema(db: D1Database, force = false): Promi
       unit: 'paquete',
       category: 'Panadería y Arepa',
       barcode: '7708881112223',
+      image_url: '/images/products/arepas-antioquenas-x10.svg',
       en_oferta: 0,
       precio_oferta_cents: null,
       last_cost_cents: 290000,
@@ -565,6 +570,7 @@ export async function ensureDatabaseSchema(db: D1Database, force = false): Promi
       unit: 'unidad',
       category: 'Lácteos y Huevos',
       barcode: '7702123456789',
+      image_url: '/images/products/quesito-antioqueno-400g.svg',
       en_oferta: 0,
       precio_oferta_cents: null,
       last_cost_cents: 760000,
@@ -578,6 +584,7 @@ export async function ensureDatabaseSchema(db: D1Database, force = false): Promi
       unit: 'litro',
       category: 'Granos y Abarrotes',
       barcode: '7702020304050',
+      image_url: '/images/products/aceite-gourmet-1l.svg',
       en_oferta: 0,
       precio_oferta_cents: null,
       last_cost_cents: 980000,
@@ -591,19 +598,124 @@ export async function ensureDatabaseSchema(db: D1Database, force = false): Promi
       unit: 'litro',
       category: 'Bebidas y Licores',
       barcode: '7702535001505',
+      image_url: '/images/products/cocacola-15l.svg',
       en_oferta: 0,
       precio_oferta_cents: null,
       last_cost_cents: 480000,
+    },
+    {
+      id: 'prod-frijol-cargamanto-1lb',
+      name: 'Fríjol Cargamanto Rojo 500g',
+      price_cents: 520000,
+      stock: 35,
+      min_stock: 10,
+      unit: 'libra',
+      category: 'Granos y Abarrotes',
+      barcode: '7703332221110',
+      image_url: '/images/products/frijol-cargamanto-1lb.svg',
+      en_oferta: 0,
+      precio_oferta_cents: null,
+      last_cost_cents: 390000,
+    },
+    {
+      id: 'prod-cafe-sello-rojo-500g',
+      name: 'Café Sello Rojo 500g',
+      price_cents: 1480000,
+      stock: 25,
+      min_stock: 8,
+      unit: 'libra',
+      category: 'Despensa y Café',
+      barcode: '7702004001230',
+      image_url: '/images/products/cafe-sello-rojo-500g.svg',
+      en_oferta: 1,
+      precio_oferta_cents: 1390000,
+      last_cost_cents: 1180000,
+    },
+    {
+      id: 'prod-panela-pastilla-unidad',
+      name: 'Panela en Pastilla 500g',
+      price_cents: 320000,
+      stock: 45,
+      min_stock: 12,
+      unit: 'unidad',
+      category: 'Despensa y Café',
+      barcode: '7705554443332',
+      image_url: '/images/products/panela-pastilla-unidad.svg',
+      en_oferta: 0,
+      precio_oferta_cents: null,
+      last_cost_cents: 220000,
+    },
+    {
+      id: 'prod-jabon-rey-unidad',
+      name: 'Jabón Rey Barra 300g',
+      price_cents: 290000,
+      stock: 60,
+      min_stock: 15,
+      unit: 'unidad',
+      category: 'Aseo y Hogar',
+      barcode: '7702008001114',
+      image_url: '/images/products/jabon-rey-unidad.svg',
+      en_oferta: 0,
+      precio_oferta_cents: null,
+      last_cost_cents: 190000,
+    },
+    {
+      id: 'prod-gaseosa-colombiana-15l',
+      name: 'Gaseosa Colombiana Postobón 1.5L',
+      price_cents: 580000,
+      stock: 38,
+      min_stock: 10,
+      unit: 'litro',
+      category: 'Bebidas y Licores',
+      barcode: '7702535002229',
+      image_url: '/images/products/gaseosa-colombiana-15l.svg',
+      en_oferta: 0,
+      precio_oferta_cents: null,
+      last_cost_cents: 420000,
+    },
+    {
+      id: 'prod-chocoramo-unidad',
+      name: 'Chocoramo Ramo 65g',
+      price_cents: 260000,
+      stock: 75,
+      min_stock: 20,
+      unit: 'unidad',
+      category: 'Snacks y Dulces',
+      barcode: '7702009003335',
+      image_url: '/images/products/chocoramo-unidad.svg',
+      en_oferta: 0,
+      precio_oferta_cents: null,
+      last_cost_cents: 180000,
+    },
+    {
+      id: 'prod-papas-margarita-pollo',
+      name: 'Papas Margarita Pollo 105g',
+      price_cents: 390000,
+      stock: 45,
+      min_stock: 12,
+      unit: 'unidad',
+      category: 'Snacks y Dulces',
+      barcode: '7702010004448',
+      image_url: '/images/products/papas-margarita-pollo.svg',
+      en_oferta: 0,
+      precio_oferta_cents: null,
+      last_cost_cents: 270000,
     },
   ];
 
   for (const p of seedProducts) {
     await safeRun(
       db,
-      `INSERT OR IGNORE INTO products (
-        id, negocio_id, name, price_cents, stock, min_stock, unit, category, barcode,
+      `INSERT INTO products (
+        id, negocio_id, name, price_cents, stock, min_stock, unit, category, image_url, barcode,
         visible_kiosco, visible_tienda, en_oferta, precio_oferta_cents, last_cost_cents, last_cost_source, created_at, updated_at
-      ) VALUES (?, 'surtifacil', ?, ?, ?, ?, ?, ?, ?, 1, 1, ?, ?, ?, 'purchase', datetime('now'), datetime('now'))`,
+      ) VALUES (?, 'surtifacil', ?, ?, ?, ?, ?, ?, ?, ?, 1, 1, ?, ?, ?, 'purchase', datetime('now'), datetime('now'))
+      ON CONFLICT(id) DO UPDATE SET
+        image_url = excluded.image_url,
+        price_cents = excluded.price_cents,
+        category = excluded.category,
+        barcode = excluded.barcode,
+        updated_at = datetime('now')`,
       [
         p.id,
         p.name,
@@ -612,6 +724,7 @@ export async function ensureDatabaseSchema(db: D1Database, force = false): Promi
         p.min_stock,
         p.unit,
         p.category,
+        p.image_url,
         p.barcode,
         p.en_oferta,
         p.precio_oferta_cents,
@@ -620,12 +733,77 @@ export async function ensureDatabaseSchema(db: D1Database, force = false): Promi
     );
   }
 
-  // 6. Semilla de Combo Desayuno Paisa
+  // 5.1 Enlace retroactivo de imágenes colombianas por nombre en todas las tiendas
   await safeRun(
     db,
-    `INSERT OR IGNORE INTO combos (
-      id, negocio_id, name, description, price_cents, items_json, active, visible_kiosco, visible_tienda, created_at, updated_at
-    ) VALUES (?, 'surtifacil', ?, ?, ?, ?, 1, 1, 1, datetime('now'), datetime('now'))`,
+    "UPDATE products SET image_url = '/images/products/leche-alqueria-1l.svg' WHERE lower(name) LIKE '%leche%' AND (image_url IS NULL OR image_url = '')"
+  );
+  await safeRun(
+    db,
+    "UPDATE products SET image_url = '/images/products/arroz-diana-1lb.svg' WHERE lower(name) LIKE '%arroz%' AND (image_url IS NULL OR image_url = '')"
+  );
+  await safeRun(
+    db,
+    "UPDATE products SET image_url = '/images/products/huevos-aa-x30.svg' WHERE (lower(name) LIKE '%huevo%' OR lower(name) LIKE '%cubeta%') AND (image_url IS NULL OR image_url = '')"
+  );
+  await safeRun(
+    db,
+    "UPDATE products SET image_url = '/images/products/chocolate-corona-500g.svg' WHERE (lower(name) LIKE '%chocolate%' OR lower(name) LIKE '%corona%') AND (image_url IS NULL OR image_url = '')"
+  );
+  await safeRun(
+    db,
+    "UPDATE products SET image_url = '/images/products/arepas-antioquenas-x10.svg' WHERE lower(name) LIKE '%arepa%' AND (image_url IS NULL OR image_url = '')"
+  );
+  await safeRun(
+    db,
+    "UPDATE products SET image_url = '/images/products/quesito-antioqueno-400g.svg' WHERE (lower(name) LIKE '%quesito%' OR lower(name) LIKE '%queso%') AND (image_url IS NULL OR image_url = '')"
+  );
+  await safeRun(
+    db,
+    "UPDATE products SET image_url = '/images/products/aceite-gourmet-1l.svg' WHERE lower(name) LIKE '%aceite%' AND (image_url IS NULL OR image_url = '')"
+  );
+  await safeRun(
+    db,
+    "UPDATE products SET image_url = '/images/products/cocacola-15l.svg' WHERE (lower(name) LIKE '%coca%' OR lower(name) LIKE '%cola%') AND (image_url IS NULL OR image_url = '')"
+  );
+  await safeRun(
+    db,
+    "UPDATE products SET image_url = '/images/products/frijol-cargamanto-1lb.svg' WHERE lower(name) LIKE '%frijol%' AND (image_url IS NULL OR image_url = '')"
+  );
+  await safeRun(
+    db,
+    "UPDATE products SET image_url = '/images/products/cafe-sello-rojo-500g.svg' WHERE lower(name) LIKE '%cafe%' AND (image_url IS NULL OR image_url = '')"
+  );
+  await safeRun(
+    db,
+    "UPDATE products SET image_url = '/images/products/panela-pastilla-unidad.svg' WHERE lower(name) LIKE '%panela%' AND (image_url IS NULL OR image_url = '')"
+  );
+  await safeRun(
+    db,
+    "UPDATE products SET image_url = '/images/products/jabon-rey-unidad.svg' WHERE lower(name) LIKE '%jabon%' AND (image_url IS NULL OR image_url = '')"
+  );
+  await safeRun(
+    db,
+    "UPDATE products SET image_url = '/images/products/gaseosa-colombiana-15l.svg' WHERE lower(name) LIKE '%colombiana%' AND (image_url IS NULL OR image_url = '')"
+  );
+  await safeRun(
+    db,
+    "UPDATE products SET image_url = '/images/products/chocoramo-unidad.svg' WHERE lower(name) LIKE '%chocoramo%' AND (image_url IS NULL OR image_url = '')"
+  );
+  await safeRun(
+    db,
+    "UPDATE products SET image_url = '/images/products/papas-margarita-pollo.svg' WHERE lower(name) LIKE '%margarita%' AND (image_url IS NULL OR image_url = '')"
+  );
+
+  // 6. Semilla de Combo Desayuno Paisa con Imagen
+  await safeRun(
+    db,
+    `INSERT INTO combos (
+      id, negocio_id, name, description, price_cents, items_json, image_url, active, visible_kiosco, visible_tienda, created_at, updated_at
+    ) VALUES (?, 'surtifacil', ?, ?, ?, ?, '/images/products/combo-desayuno-paisa.svg', 1, 1, 1, datetime('now'), datetime('now'))
+    ON CONFLICT(id) DO UPDATE SET
+      image_url = '/images/products/combo-desayuno-paisa.svg',
+      updated_at = datetime('now')`,
     [
       'combo-desayuno-paisa',
       'Combo Desayuno Paisa',

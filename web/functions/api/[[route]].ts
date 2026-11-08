@@ -224,20 +224,72 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         .run()
         .catch(() => {});
 
-      // Sembrar 3 productos base en la nueva tienda para que su POS, Kiosco y Tienda Vecinal arranquen con catálogo listo
+      // Sembrar 5 productos colombianos base en la nueva tienda con imágenes y catálogo listo
       const starterProducts = [
-        { name: 'Leche Entera 1L', price_cents: 450000, stock: 30, unit: 'litro', category: 'Lácteos y Huevos' },
-        { name: 'Arroz Blanco 1 Libra', price_cents: 280000, stock: 50, unit: 'libra', category: 'Granos y Abarrotes' },
-        { name: 'Arepa Antioqueña x10', price_cents: 420000, stock: 25, unit: 'paquete', category: 'Panadería y Arepa' },
+        {
+          name: 'Leche Entera Alquería 1L',
+          price_cents: 450000,
+          stock: 30,
+          unit: 'litro',
+          category: 'Lácteos y Huevos',
+          image_url: '/images/products/leche-alqueria-1l.svg',
+          barcode: '7702177001234',
+        },
+        {
+          name: 'Arroz Diana 500g (1 Libra)',
+          price_cents: 280000,
+          stock: 50,
+          unit: 'libra',
+          category: 'Granos y Abarrotes',
+          image_url: '/images/products/arroz-diana-1lb.svg',
+          barcode: '7702001012345',
+        },
+        {
+          name: 'Arepas Antioqueñas de Maíz x10',
+          price_cents: 420000,
+          stock: 25,
+          unit: 'paquete',
+          category: 'Panadería y Arepa',
+          image_url: '/images/products/arepas-antioquenas-x10.svg',
+          barcode: '7708881112223',
+        },
+        {
+          name: 'Cubeta de Huevos AA x30',
+          price_cents: 1850000,
+          stock: 20,
+          unit: 'cubeta',
+          category: 'Lácteos y Huevos',
+          image_url: '/images/products/huevos-aa-x30.svg',
+          barcode: '7709990003030',
+        },
+        {
+          name: 'Chocolate Corona 500g',
+          price_cents: 890000,
+          stock: 25,
+          unit: 'libra',
+          category: 'Despensa y Café',
+          image_url: '/images/products/chocolate-corona-500g.svg',
+          barcode: '7702004005009',
+        },
       ];
       for (let i = 0; i < starterProducts.length; i++) {
         const sp = starterProducts[i];
         await env.DB.prepare(
           `INSERT OR IGNORE INTO products (
-            id, negocio_id, name, price_cents, stock, min_stock, unit, category, visible_kiosco, visible_tienda, en_oferta, created_at, updated_at
-          ) VALUES (?, ?, ?, ?, ?, 5, ?, ?, 1, 1, 0, datetime('now'), datetime('now'))`
+            id, negocio_id, name, price_cents, stock, min_stock, unit, category, image_url, barcode, visible_kiosco, visible_tienda, en_oferta, created_at, updated_at
+          ) VALUES (?, ?, ?, ?, ?, 5, ?, ?, ?, ?, 1, 1, 0, datetime('now'), datetime('now'))`
         )
-          .bind(`prod-${negocioId}-${i + 1}`, negocioId, sp.name, sp.price_cents, sp.stock, sp.unit, sp.category)
+          .bind(
+            `prod-${negocioId}-${i + 1}`,
+            negocioId,
+            sp.name,
+            sp.price_cents,
+            sp.stock,
+            sp.unit,
+            sp.category,
+            sp.image_url,
+            sp.barcode
+          )
           .run()
           .catch(() => {});
       }

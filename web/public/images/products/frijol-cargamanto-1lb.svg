@@ -1,0 +1,65 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400" width="100%" height="100%">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#f8fafc"/>
+      <stop offset="100%" stop-color="#e2e8f0"/>
+    </linearGradient>
+    <linearGradient id="beanBag" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.8"/>
+      <stop offset="100%" stop-color="#f1f5f9" stop-opacity="0.9"/>
+    </linearGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="130%" height="130%">
+      <feDropShadow dx="0" dy="12" stdDeviation="12" flood-color="#0f172a" flood-opacity="0.2"/>
+    </filter>
+  </defs>
+
+  <rect width="400" height="400" rx="24" fill="url(#bg)"/>
+  <circle cx="200" cy="200" r="140" fill="#fee2e2" opacity="0.6"/>
+
+  <g filter="url(#shadow)">
+    <!-- Bolsa Transparente de Fríjoles -->
+    <path d="M120 70 Q200 60 280 70 L290 325 Q200 340 110 325 Z" fill="url(#beanBag)" stroke="#94a3b8" stroke-width="2"/>
+    
+    <!-- Franja Superior de Yute / Arpillera -->
+    <path d="M120 70 Q200 60 280 70 L283 130 Q200 120 117 130 Z" fill="#92400e"/>
+    <text x="200" y="105" font-family="'Arial Black', sans-serif" font-size="20" font-weight="900" fill="#fef3c7" text-anchor="middle">FRÍJOL CARGAMANTO</text>
+    <text x="200" y="122" font-family="Arial, sans-serif" font-size="10" font-weight="bold" fill="#fde68a" text-anchor="middle">COSECHA ANTIOQUEÑA</text>
+
+    <!-- Ventana Central con Fríjoles Cargamanto Rojos Pintaos -->
+    <g fill="#991b1b" stroke="#7f1d1d" stroke-width="1">
+      <ellipse cx="150" cy="160" rx="13" ry="8" transform="rotate(-20 150 160)"/>
+      <ellipse cx="185" cy="155" rx="13" ry="8" transform="rotate(35 185 155)"/>
+      <ellipse cx="220" cy="162" rx="13" ry="8" transform="rotate(-10 220 162)"/>
+      <ellipse cx="250" cy="158" rx="13" ry="8" transform="rotate(15 250 158)"/>
+
+      <ellipse cx="140" cy="185" rx="14" ry="9" transform="rotate(45 140 185)"/>
+      <ellipse cx="175" cy="180" rx="14" ry="9" transform="rotate(-15 175 180)"/>
+      <ellipse cx="210" cy="185" rx="14" ry="9" transform="rotate(25 210 185)"/>
+      <ellipse cx="245" cy="182" rx="14" ry="9" transform="rotate(-30 245 182)"/>
+
+      <ellipse cx="155" cy="210" rx="13" ry="8" transform="rotate(-10 155 210)"/>
+      <ellipse cx="190" cy="212" rx="13" ry="8" transform="rotate(20 190 212)"/>
+      <ellipse cx="225" cy="208" rx="13" ry="8" transform="rotate(-40 225 208)"/>
+
+      <ellipse cx="145" cy="235" rx="14" ry="9" transform="rotate(30 145 235)"/>
+      <ellipse cx="180" cy="238" rx="14" ry="9" transform="rotate(-25 180 238)"/>
+      <ellipse cx="215" cy="232" rx="14" ry="9" transform="rotate(15 215 232)"/>
+      <ellipse cx="250" cy="236" rx="14" ry="9" transform="rotate(-5 250 236)"/>
+    </g>
+
+    <!-- Manchas blancas de fríjol cargamanto -->
+    <g fill="#fef2f2" opacity="0.7">
+      <circle cx="150" cy="160" r="3"/>
+      <circle cx="185" cy="155" r="3"/>
+      <circle cx="210" cy="185" r="3.5"/>
+      <circle cx="180" cy="238" r="3.5"/>
+    </g>
+
+    <!-- Sello Bandeja Paisa -->
+    <rect x="140" y="260" width="120" height="26" rx="6" fill="#15803d"/>
+    <text x="200" y="278" font-family="Arial, sans-serif" font-size="11" font-weight="bold" fill="#ffffff" text-anchor="middle">Ideal Bandeja Paisa</text>
+
+    <!-- Peso Neto -->
+    <text x="200" y="308" font-family="'Arial Black', sans-serif" font-size="20" font-weight="900" fill="#0f172a" text-anchor="middle">500 g (1 LIBRA)</text>
+  </g>
+</svg>

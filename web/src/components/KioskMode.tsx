@@ -518,14 +518,26 @@ export default function KioskMode({ slug = 'surtifacil', onExit }: KioskModeProp
                   {filteredCombos.map((combo) => (
                     <article
                       key={combo.id}
-                      className="group flex flex-col justify-between rounded-3xl border-2 border-amber-200 bg-amber-50/40 p-4 shadow-sm hover:border-amber-400 hover:shadow-md transition"
+                      className="group flex flex-col justify-between rounded-3xl border-2 border-amber-200 bg-amber-50/40 p-4 shadow-sm hover:border-amber-400 hover:shadow-md transition overflow-hidden"
                     >
                       <div>
-                        <div className="flex justify-between items-start gap-2 mb-2">
-                          <span className="inline-flex items-center gap-1 rounded-full bg-amber-500 px-3 py-1 text-xs font-bold text-white uppercase tracking-wide">
+                        {/* Imagen del combo */}
+                        <div className="relative mb-3 flex h-36 w-full items-center justify-center rounded-2xl bg-gradient-to-b from-amber-100/60 to-amber-50 p-2 overflow-hidden border border-amber-200/60">
+                          {combo.image_url ? (
+                            <img
+                              src={combo.image_url}
+                              alt={combo.name}
+                              loading="lazy"
+                              className="h-full w-full object-contain transition-transform duration-300 group-hover:scale-105"
+                            />
+                          ) : (
+                            <span className="text-5xl" role="img" aria-label="Combo">🍱</span>
+                          )}
+                          <span className="absolute top-2 left-2 inline-flex items-center gap-1 rounded-full bg-amber-500 px-3 py-1 text-xs font-bold text-white uppercase tracking-wide shadow-xs">
                             🔥 Combo Ahorro
                           </span>
                         </div>
+
                         <h3 className="text-lg font-bold text-slate-800 line-clamp-2 mb-1">{combo.name}</h3>
                         {combo.description && (
                           <p className="text-xs text-slate-600 line-clamp-2 mb-3">{combo.description}</p>
@@ -548,6 +560,7 @@ export default function KioskMode({ slug = 'surtifacil', onExit }: KioskModeProp
                               price_cents: combo.price_cents,
                               stock: 50,
                               unit: 'combo',
+                              image_url: combo.image_url,
                             })
                           }
                           aria-label={`Agregar combo ${combo.name} al pedido`}
@@ -569,24 +582,38 @@ export default function KioskMode({ slug = 'surtifacil', onExit }: KioskModeProp
                     return (
                       <article
                         key={prod.id}
-                        className="group flex flex-col justify-between rounded-3xl border border-slate-200 bg-white p-4 shadow-sm hover:border-sf-primary hover:shadow-md transition"
+                        className="group flex flex-col justify-between rounded-3xl border border-slate-200 bg-white p-4 shadow-sm hover:border-sf-primary hover:shadow-md transition overflow-hidden"
                       >
                         <div>
-                          <div className="flex items-center justify-between gap-2 mb-2">
-                            <span className="rounded-lg bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-600 capitalize">
-                              {prod.unit || 'unidad'}
-                            </span>
+                          {/* Fotografía o Gráfico Realista del Producto */}
+                          <div className="relative mb-3 flex h-36 w-full items-center justify-center rounded-2xl bg-gradient-to-b from-slate-50 to-slate-100/70 p-2 overflow-hidden border border-slate-100">
+                            {prod.image_url ? (
+                              <img
+                                src={prod.image_url}
+                                alt={prod.name}
+                                loading="lazy"
+                                className="h-full w-full object-contain transition-transform duration-300 group-hover:scale-105"
+                              />
+                            ) : (
+                              <span className="text-5xl" role="img" aria-label="Producto">🛒</span>
+                            )}
                             {isOffer && (
-                              <span className="rounded-lg bg-red-100 px-2 py-0.5 text-xs font-black text-red-600 uppercase">
-                                En Oferta
+                              <span className="absolute top-2 right-2 rounded-lg bg-red-500 px-2.5 py-1 text-[11px] font-black text-white shadow-xs uppercase tracking-wider">
+                                🔥 Oferta
                               </span>
                             )}
                           </div>
 
-                          <h3 className="text-lg font-bold text-slate-800 line-clamp-2 leading-snug mb-1">
+                          <div className="flex items-center justify-between gap-2 mb-1.5">
+                            <span className="rounded-lg bg-slate-100 px-2.5 py-0.5 text-xs font-semibold text-slate-600 capitalize">
+                              {prod.unit || 'unidad'}
+                            </span>
+                            <span className="text-xs text-slate-400 capitalize">{prod.category || 'General'}</span>
+                          </div>
+
+                          <h3 className="text-lg font-bold text-slate-800 line-clamp-2 leading-snug">
                             {prod.name}
                           </h3>
-                          <p className="text-xs text-slate-400 capitalize">{prod.category || 'General'}</p>
                         </div>
 
                         <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between gap-3">
@@ -778,9 +805,22 @@ export default function KioskMode({ slug = 'surtifacil', onExit }: KioskModeProp
                   key={item.product_id}
                   className="flex items-center justify-between gap-3 rounded-2xl border border-slate-100 bg-slate-50 p-3"
                 >
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate font-semibold text-slate-800">{item.product_name}</p>
-                    <p className="text-xs text-slate-500">{formatCentsCOP(item.unit_price_cents)} c/u</p>
+                  <div className="flex items-center gap-3 min-w-0 flex-1">
+                    {item.image_url ? (
+                      <img
+                        src={item.image_url}
+                        alt=""
+                        className="h-12 w-12 rounded-xl object-contain bg-white p-1 border border-slate-200 shrink-0"
+                      />
+                    ) : (
+                      <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-white border border-slate-200 text-xl shrink-0">
+                        🛒
+                      </div>
+                    )}
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate font-semibold text-slate-800">{item.product_name}</p>
+                      <p className="text-xs text-slate-500">{formatCentsCOP(item.unit_price_cents)} c/u</p>
+                    </div>
                   </div>
                   <div className="flex items-center gap-2">
                     <div className="flex items-center rounded-xl bg-white border border-slate-200">

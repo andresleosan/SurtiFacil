@@ -5,6 +5,7 @@ import BarcodeScanner from './BarcodeScanner';
 import { useBarcode } from '../hooks/useBarcode';
 import { Icon } from './ui/Icon';
 import { Modal } from './ui/Modal';
+import { COLOMBIAN_PRODUCT_CATALOG, findColombianProductImage } from '../data/colombianCatalog';
 
 interface AddProductModalProps {
   isOpen: boolean;
@@ -14,7 +15,9 @@ interface AddProductModalProps {
     price_cents: number;
     stock: number;
     category: string;
+    unit?: string;
     barcode?: string;
+    image_url?: string;
   }) => void | Promise<void>;
 }
 
@@ -26,14 +29,25 @@ const MODES: Array<{ value: InputMode; label: string; emoji: string }> = [
   { value: 'audio', label: 'Voz', emoji: '🎙️' },
 ];
 
-const CATEGORIES = ['Abarrotes', 'Bebidas', 'Lácteos', 'Limpieza', 'Otros'];
+const CATEGORIES = [
+  'Abarrotes',
+  'Granos y Despensa',
+  'Lácteos y Huevos',
+  'Panadería y Arepas',
+  'Bebidas',
+  'Limpieza',
+  'Snacks y Dulces',
+  'Otros',
+];
 
 const EMPTY_FORM = {
   name: '',
   price: '',
-  stock: '',
+  stock: '50',
   category: 'Abarrotes',
+  unit: 'unidad',
   barcode: '',
+  image_url: '',
 };
 
 const AddProductModal = ({ isOpen, onClose, onAddProduct }: AddProductModalProps) => {
@@ -44,11 +58,38 @@ const AddProductModal = ({ isOpen, onClose, onAddProduct }: AddProductModalProps
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
-    setFormData((prev) => ({ ...prev, [name]: value }));
+    setFormData((prev) => {
+      const next = { ...prev, [name]: value };
+      // Auto-emparejar imagen típica si se escribe el nombre y no tiene imagen aún
+      if (name === 'name' && !prev.image_url) {
+        const autoImg = findColombianProductImage(value, prev.barcode);
+        if (autoImg) next.image_url = autoImg;
+      }
+      return next;
+    });
+  };
+
+  const handleSelectPreset = (presetId: string) => {
+    const item = COLOMBIAN_PRODUCT_CATALOG.find((p) => p.id === presetId);
+    if (!item) return;
+    setFormData({
+      name: item.name,
+      price: (item.price_cents / 100).toFixed(0),
+      stock: '50',
+      category: item.category,
+      unit: item.unit,
+      barcode: item.barcode,
+      image_url: item.image_url,
+    });
   };
 
   const handleBarcodeScan = (code: string) => {
-    setFormData((prev) => ({ ...prev, barcode: code }));
+    const autoImg = findColombianProductImage('', code);
+    setFormData((prev) => ({
+      ...prev,
+      barcode: code,
+      image_url: prev.image_url || autoImg || '',
+    }));
     setMode('manual');
   };
 
@@ -118,7 +159,9 @@ const AddProductModal = ({ isOpen, onClose, onAddProduct }: AddProductModalProps
         price_cents: Math.round(price * 100),
         stock,
         category: formData.category,
+        unit: formData.unit || 'unidad',
         barcode: formData.barcode.trim() || undefined,
+        image_url: formData.image_url.trim() || undefined,
       });
       resetAndClose();
     } catch (err) {
@@ -185,6 +228,28 @@ const AddProductModal = ({ isOpen, onClose, onAddProduct }: AddProductModalProps
 
           {mode === 'manual' && (
             <form id="add-product-form" onSubmit={handleSubmit} className="space-y-3">
+              {/* Selector Rápido de Catálogo Colombiano */}
+              <div className="rounded-xl border border-amber-200 bg-amber-50/50 p-2.5">
+                <label htmlFor="colombian-preset" className="mb-1 block text-xs font-bold text-amber-900">
+                  🇨🇴 Plantillas de Productos Típicos Colombianos (1-Clic)
+                </label>
+                <select
+                  id="colombian-preset"
+                  onChange={(e) => {
+                    if (e.target.value) handleSelectPreset(e.target.value);
+                  }}
+                  defaultValue=""
+                  className="input text-xs bg-white border-amber-300"
+                >
+                  <option value="">Selecciona para autocompletar foto, precio y código...</option>
+                  {COLOMBIAN_PRODUCT_CATALOG.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name} — ${(p.price_cents / 100).toLocaleString('es-CO')} ({p.category})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
               <div>
                 <label htmlFor="add-name" className="mb-1 block text-sm font-medium text-sf-text">
                   Nombre del producto *
@@ -195,7 +260,7 @@ const AddProductModal = ({ isOpen, onClose, onAddProduct }: AddProductModalProps
                   name="name"
                   value={formData.name}
                   onChange={handleInputChange}
-                  placeholder="Ej: Arroz Diana"
+                  placeholder="Ej: Arroz Diana 500g"
                   autoComplete="off"
                   className="input"
                 />
@@ -237,21 +302,69 @@ const AddProductModal = ({ isOpen, onClose, onAddProduct }: AddProductModalProps
                 </div>
               </div>
 
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label htmlFor="add-category" className="mb-1 block text-sm font-medium text-sf-text">
+                    Categoría
+                  </label>
+                  <select
+                    id="add-category"
+                    name="category"
+                    value={formData.category}
+                    onChange={handleInputChange}
+                    className="input"
+                  >
+                    {CATEGORIES.map((category) => (
+                      <option key={category}>{category}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label htmlFor="add-unit" className="mb-1 block text-sm font-medium text-sf-text">
+                    Presentación / Unidad
+                  </label>
+                  <select
+                    id="add-unit"
+                    name="unit"
+                    value={formData.unit}
+                    onChange={handleInputChange}
+                    className="input"
+                  >
+                    <option value="unidad">Unidad</option>
+                    <option value="libra">Libra (500g)</option>
+                    <option value="kilo">Kilo (1000g)</option>
+                    <option value="litro">Litro</option>
+                    <option value="paquete">Paquete</option>
+                    <option value="cubeta">Cubeta</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Imagen / Empaque del Producto */}
               <div>
-                <label htmlFor="add-category" className="mb-1 block text-sm font-medium text-sf-text">
-                  Categoría
+                <label htmlFor="add-image" className="mb-1 block text-sm font-medium text-sf-text">
+                  Foto o Ilustración de Empaque (URL)
                 </label>
-                <select
-                  id="add-category"
-                  name="category"
-                  value={formData.category}
-                  onChange={handleInputChange}
-                  className="input"
-                >
-                  {CATEGORIES.map((category) => (
-                    <option key={category}>{category}</option>
-                  ))}
-                </select>
+                <div className="flex items-center gap-2">
+                  {formData.image_url ? (
+                    <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-slate-50 p-1 border border-slate-200 overflow-hidden">
+                      <img src={formData.image_url} alt="Vista previa" className="h-full w-full object-contain" />
+                    </div>
+                  ) : (
+                    <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-xl border border-slate-200">
+                      🛒
+                    </div>
+                  )}
+                  <input
+                    id="add-image"
+                    type="text"
+                    name="image_url"
+                    value={formData.image_url}
+                    onChange={handleInputChange}
+                    placeholder="/images/products/arroz-diana-1lb.svg o URL web"
+                    className="input flex-1 text-xs"
+                  />
+                </div>
               </div>
 
               <div>

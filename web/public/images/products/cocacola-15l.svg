@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400" width="100%" height="100%">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#f8fafc"/>
+      <stop offset="100%" stop-color="#e2e8f0"/>
+    </linearGradient>
+    <linearGradient id="soda" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#261005"/>
+      <stop offset="40%" stop-color="#451a03"/>
+      <stop offset="70%" stop-color="#1f0a02"/>
+      <stop offset="100%" stop-color="#0f0501"/>
+    </linearGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="130%" height="130%">
+      <feDropShadow dx="0" dy="12" stdDeviation="12" flood-color="#0f172a" flood-opacity="0.2"/>
+    </filter>
+  </defs>
+
+  <rect width="400" height="400" rx="24" fill="url(#bg)"/>
+  <circle cx="200" cy="200" r="140" fill="#fee2e2" opacity="0.6"/>
+
+  <g filter="url(#shadow)">
+    <!-- Botella Icónica Contorno 1.5L -->
+    <!-- Tapa Roja -->
+    <rect x="187" y="55" width="26" height="20" rx="4" fill="#dc2626" stroke="#b91c1c" stroke-width="1.5"/>
+    <rect x="189" y="75" width="22" height="15" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1"/>
+
+    <!-- Silueta de Botella -->
+    <path d="M189 90 C160 115 155 135 150 160 C145 185 140 215 145 245 C148 265 145 295 148 325 C150 335 250 335 252 325 C255 295 252 265 255 245 C260 215 255 185 250 160 C245 135 240 115 211 90 Z" fill="url(#soda)" stroke="#3f1a04" stroke-width="2"/>
+
+    <!-- Brillo curvo del vidrio/pet -->
+    <path d="M158 135 C150 170 148 230 152 315" stroke="#ffffff" stroke-width="6" stroke-linecap="round" opacity="0.3"/>
+
+    <!-- Cinturón / Etiqueta Roja Icónica -->
+    <rect x="143" y="195" width="114" height="72" rx="4" fill="#dc2626" stroke="#b91c1c" stroke-width="1.5"/>
+
+    <!-- Cinta Blanca Ondulada Dynamic Ribbon -->
+    <path d="M145 235 Q175 220 200 240 T255 230" fill="none" stroke="#ffffff" stroke-width="3" stroke-linecap="round"/>
+
+    <!-- Letras Coca-Cola estilo script -->
+    <text x="200" y="222" font-family="'Brush Script MT', 'Segoe Script', cursive, sans-serif" font-size="24" font-weight="bold" fill="#ffffff" text-anchor="middle" letter-spacing="0.5">Coca-Cola</text>
+    <text x="200" y="255" font-family="Arial, sans-serif" font-size="8" font-weight="bold" fill="#fef08a" text-anchor="middle" letter-spacing="1">SABOR ORIGINAL</text>
+
+    <!-- Base y Contenido -->
+    <text x="200" y="300" font-family="'Arial Black', sans-serif" font-size="16" font-weight="900" fill="#f87171" text-anchor="middle">1.5 L</text>
+    <text x="200" y="316" font-family="Arial, sans-serif" font-size="9" font-weight="bold" fill="#fecaca" text-anchor="middle">Gaseosa Refrescante</text>
+  </g>
+</svg>

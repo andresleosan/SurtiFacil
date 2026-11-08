@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400" width="100%" height="100%">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#fffbeb"/>
+      <stop offset="100%" stop-color="#fef3c7"/>
+    </linearGradient>
+    <linearGradient id="board" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#92400e"/>
+      <stop offset="100%" stop-color="#78350f"/>
+    </linearGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="130%" height="130%">
+      <feDropShadow dx="0" dy="12" stdDeviation="12" flood-color="#0f172a" flood-opacity="0.2"/>
+    </filter>
+  </defs>
+
+  <rect width="400" height="400" rx="24" fill="url(#bg)"/>
+  <circle cx="200" cy="200" r="145" fill="#fde68a" opacity="0.6"/>
+
+  <g filter="url(#shadow)">
+    <!-- Tabla de Madera Paisa / Bandeja de Servir -->
+    <ellipse cx="200" cy="250" rx="150" ry="70" fill="url(#board)" stroke="#b45309" stroke-width="3"/>
+    <ellipse cx="200" cy="245" rx="142" ry="64" fill="#a16207" opacity="0.3"/>
+
+    <!-- 1. Jarra / Taza de Chocolate Humeante (Izquierda) -->
+    <path d="M110 180 C105 230 115 260 145 260 C175 260 185 230 180 180 Z" fill="#b91c1c" stroke="#7f1d1d" stroke-width="2"/>
+    <ellipse cx="145" cy="180" rx="35" ry="12" fill="#451a03" stroke="#7f1d1d" stroke-width="2"/>
+    <!-- Asa de la taza -->
+    <path d="M110 195 C90 195 90 235 115 240" fill="none" stroke="#b91c1c" stroke-width="8" stroke-linecap="round"/>
+    <!-- Humito aromático -->
+    <path d="M135 160 Q130 140 140 125" fill="none" stroke="#ca8a04" stroke-width="2" stroke-linecap="round" opacity="0.7"/>
+    <path d="M150 165 Q155 145 148 130" fill="none" stroke="#ca8a04" stroke-width="2" stroke-linecap="round" opacity="0.7"/>
+
+    <!-- 2. Arepa de Maíz Doradita (Centro-Frente) -->
+    <ellipse cx="205" cy="260" rx="55" ry="24" fill="#fef08a" stroke="#ca8a04" stroke-width="2"/>
+    <!-- Huellas de parrilla -->
+    <ellipse cx="185" cy="255" rx="8" ry="3" fill="#78350f" opacity="0.4"/>
+    <ellipse cx="225" cy="262" rx="10" ry="4" fill="#78350f" opacity="0.4"/>
+    <ellipse cx="200" cy="265" rx="7" ry="2.5" fill="#78350f" opacity="0.5"/>
+
+    <!-- 3. Tajada de Quesito Blanco Antioqueño (Derecha) -->
+    <path d="M225 210 L285 200 L295 245 L235 255 Z" fill="#ffffff" stroke="#cbd5e1" stroke-width="2"/>
+    <path d="M285 200 L305 215 L295 245 Z" fill="#e2e8f0" stroke="#cbd5e1" stroke-width="2"/>
+    <path d="M225 210 L245 195 L305 215 L285 200 Z" fill="#f8fafc" stroke="#cbd5e1" stroke-width="2"/>
+
+    <!-- Badge Cinta de Oferta Especial COMBO PAISA -->
+    <rect x="75" y="65" width="250" height="52" rx="14" fill="#d97706" stroke="#fbbf24" stroke-width="2.5"/>
+    <text x="200" y="94" font-family="'Arial Black', Impact, sans-serif" font-size="19" font-weight="900" fill="#ffffff" text-anchor="middle" letter-spacing="0.5">COMBO DESAYUNO PAISA</text>
+    <text x="200" y="110" font-family="Arial, sans-serif" font-size="10" font-weight="bold" fill="#fef3c7" text-anchor="middle">Chocolate Corona + Quesito + Arepas x10</text>
+  </g>
+</svg>

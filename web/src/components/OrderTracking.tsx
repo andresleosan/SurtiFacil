@@ -167,8 +167,9 @@ export default function OrderTracking({ token = '', onExit }: OrderTrackingProps
   const currentStepIdx = getStatusStepIndex(order.status);
   const isDelivery = order.delivery_type === 'delivery';
 
-  // Enlace directo a WhatsApp del local
-  const storePhone = (store?.telefono_whatsapp || '').replace(/[^0-9]/g, '');
+  // Enlace directo a WhatsApp del local (normalizado con código país Colombia 57)
+  const rawDigits = (store?.telefono_whatsapp || '').replace(/[^0-9]/g, '');
+  const storePhone = rawDigits.length === 10 ? `57${rawDigits}` : rawDigits;
   const whatsappUrl = storePhone
     ? `https://wa.me/${storePhone}?text=${encodeURIComponent(
         `Hola ${store?.nombre || 'SurtiFácil'}, tengo una consulta sobre mi pedido ${order.order_code}.`

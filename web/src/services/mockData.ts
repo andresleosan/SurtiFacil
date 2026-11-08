@@ -23,18 +23,21 @@ const baseProducts: Product[] = [
     name: 'Leche Entera 1L',
     price_cents: 350, // $3.50
     stock: 32,
+    image_url: '/images/products/leche-alqueria-1l.svg',
   },
   {
     id: 'p4',
     name: 'Queso Cheddar',
     price_cents: 650, // $6.50
     stock: 12,
+    image_url: '/images/products/quesito-antioqueno-400g.svg',
   },
   {
     id: 'p5',
     name: 'Huevos (Docena)',
     price_cents: 280, // $2.80
     stock: 24,
+    image_url: '/images/products/huevos-aa-x30.svg',
   },
   {
     id: 'p6',
@@ -47,6 +50,7 @@ const baseProducts: Product[] = [
     name: 'Arroz 1kg',
     price_cents: 420, // $4.20
     stock: 89,
+    image_url: '/images/products/arroz-diana-1lb.svg',
   },
   {
     id: 'p8',

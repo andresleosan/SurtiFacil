@@ -300,19 +300,23 @@ export default function PublicStorefront({ slug = 'surtifacil', onExit }: Public
 
             {/* Acciones de Cabecera */}
             <div className="flex items-center gap-2 shrink-0">
-              {store.telefono_whatsapp && (
-                <a
-                  href={`https://wa.me/${store.telefono_whatsapp.replace(/[^0-9]/g, '')}?text=${encodeURIComponent(
-                    `Hola ${store.nombre}, estoy viendo su tienda vecinal y tengo una consulta.`
-                  )}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="hidden sm:inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700 transition"
-                >
-                  <Icon name="chat" size={16} />
-                  <span>WhatsApp</span>
-                </a>
-              )}
+              {store.telefono_whatsapp && (() => {
+                const rawDigits = store.telefono_whatsapp.replace(/[^0-9]/g, '');
+                const normalized = rawDigits.length === 10 ? `57${rawDigits}` : rawDigits;
+                return (
+                  <a
+                    href={`https://wa.me/${normalized}?text=${encodeURIComponent(
+                      `Hola ${store.nombre}, estoy viendo su tienda vecinal y tengo una consulta.`
+                    )}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="hidden sm:inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700 transition"
+                  >
+                    <Icon name="chat" size={16} />
+                    <span>WhatsApp</span>
+                  </a>
+                );
+              })()}
 
               {onExit && (
                 <button
@@ -442,6 +446,17 @@ export default function PublicStorefront({ slug = 'surtifacil', onExit }: Public
                     className="card p-4 flex flex-col justify-between border-2 border-amber-200/60 bg-gradient-to-br from-amber-50/40 via-white to-white"
                   >
                     <div>
+                      {combo.image_url && (
+                        <div className="relative mb-2.5 flex h-28 w-full items-center justify-center rounded-xl bg-amber-100/50 p-2 overflow-hidden border border-amber-200/50">
+                          <img
+                            src={combo.image_url}
+                            alt={combo.name}
+                            className="h-full w-full object-contain"
+                            loading="lazy"
+                          />
+                        </div>
+                      )}
+
                       <div className="flex items-center justify-between gap-2">
                         <span className="rounded-md bg-amber-100 px-2 py-0.5 text-[11px] font-bold text-amber-800">
                           Combo Especial
@@ -518,12 +533,12 @@ export default function PublicStorefront({ slug = 'surtifacil', onExit }: Public
                   >
                     <div>
                       {/* Imagen o Icono */}
-                      <div className="relative mb-2 flex h-28 w-full items-center justify-center rounded-xl bg-slate-100 overflow-hidden">
+                      <div className="relative mb-2 flex h-28 w-full items-center justify-center rounded-xl bg-gradient-to-b from-slate-50 to-slate-100 p-1.5 overflow-hidden border border-slate-100">
                         {product.image_url ? (
                           <img
                             src={product.image_url}
                             alt={product.name}
-                            className="h-full w-full object-cover"
+                            className="h-full w-full object-contain transition-transform duration-200 hover:scale-105"
                             loading="lazy"
                           />
                         ) : (
@@ -673,7 +688,18 @@ export default function PublicStorefront({ slug = 'surtifacil', onExit }: Public
                 </h3>
                 <div className="divide-y divide-gray-100 rounded-xl border border-slate-200 bg-white">
                   {cart.map((item) => (
-                    <div key={item.product_id} className="flex items-center justify-between p-3 gap-2">
+                    <div key={item.product_id} className="flex items-center justify-between p-3 gap-2.5">
+                      {item.image_url ? (
+                        <img
+                          src={item.image_url}
+                          alt=""
+                          className="h-10 w-10 shrink-0 rounded-lg object-contain bg-slate-50 p-1 border border-slate-200"
+                        />
+                      ) : (
+                        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-base">
+                          🛒
+                        </div>
+                      )}
                       <div className="min-w-0 flex-1">
                         <div className="text-xs font-semibold text-sf-text truncate">{item.product_name}</div>
                         <div className="text-[11px] text-gray-500 tabular-nums">

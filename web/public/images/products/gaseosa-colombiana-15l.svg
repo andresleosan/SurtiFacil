@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400" width="100%" height="100%">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#f8fafc"/>
+      <stop offset="100%" stop-color="#e2e8f0"/>
+    </linearGradient>
+    <linearGradient id="kola" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#ea580c"/>
+      <stop offset="40%" stop-color="#f97316"/>
+      <stop offset="70%" stop-color="#c2410c"/>
+      <stop offset="100%" stop-color="#9a3412"/>
+    </linearGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="130%" height="130%">
+      <feDropShadow dx="0" dy="12" stdDeviation="12" flood-color="#0f172a" flood-opacity="0.2"/>
+    </filter>
+  </defs>
+
+  <rect width="400" height="400" rx="24" fill="url(#bg)"/>
+  <circle cx="200" cy="200" r="140" fill="#ffedd5" opacity="0.6"/>
+
+  <g filter="url(#shadow)">
+    <!-- Botella de Colombiana Postobón 1.5L -->
+    <!-- Tapa Roja -->
+    <rect x="187" y="55" width="26" height="20" rx="4" fill="#dc2626" stroke="#b91c1c" stroke-width="1.5"/>
+    <rect x="189" y="75" width="22" height="15" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1"/>
+
+    <!-- Silueta de Botella PET -->
+    <path d="M189 90 C160 115 155 135 150 160 C145 185 140 215 145 245 C148 265 145 295 148 325 C150 335 250 335 252 325 C255 295 252 265 255 245 C260 215 255 185 250 160 C245 135 240 115 211 90 Z" fill="url(#kola)" stroke="#9a3412" stroke-width="2"/>
+
+    <!-- Brillo -->
+    <path d="M158 135 C150 170 148 230 152 315" stroke="#ffffff" stroke-width="6" stroke-linecap="round" opacity="0.3"/>
+
+    <!-- Etiqueta Colombiana (Tricolor) -->
+    <rect x="143" y="190" width="114" height="82" rx="4" fill="#dc2626" stroke="#facc15" stroke-width="2"/>
+    
+    <!-- Tricolor Colombiano en Etiqueta -->
+    <rect x="143" y="190" width="114" height="18" fill="#facc15"/>
+    <rect x="143" y="208" width="114" height="10" fill="#1d4ed8"/>
+    <rect x="143" y="218" width="114" height="10" fill="#dc2626"/>
+
+    <!-- Marca Postobón y Colombiana -->
+    <text x="200" y="203" font-family="Arial, sans-serif" font-size="8" font-weight="900" fill="#78350f" text-anchor="middle" letter-spacing="0.5">POSTOBÓN</text>
+    <text x="200" y="244" font-family="'Arial Black', Impact, sans-serif" font-size="16" font-weight="900" fill="#ffffff" text-anchor="middle" letter-spacing="1">Colombiana</text>
+    <text x="200" y="260" font-family="Arial, sans-serif" font-size="9" font-weight="bold" fill="#fde047" text-anchor="middle">¡LA NUESTRA!</text>
+
+    <!-- Base y Contenido -->
+    <text x="200" y="302" font-family="'Arial Black', sans-serif" font-size="16" font-weight="900" fill="#ea580c" text-anchor="middle">1.5 L</text>
+    <text x="200" y="318" font-family="Arial, sans-serif" font-size="9" font-weight="bold" fill="#78350f" text-anchor="middle">Gaseosa Sabor a Kola</text>
+  </g>
+</svg>

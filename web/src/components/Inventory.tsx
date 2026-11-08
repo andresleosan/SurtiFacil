@@ -26,6 +26,7 @@ interface EditDraft {
   barcode: string;
   unit: string;
   min_stock: string;
+  image_url: string;
   visible_kiosco: boolean;
   visible_tienda: boolean;
   en_oferta: boolean;
@@ -40,6 +41,7 @@ const EMPTY_DRAFT: EditDraft = {
   barcode: '',
   unit: 'unidad',
   min_stock: '5',
+  image_url: '',
   visible_kiosco: true,
   visible_tienda: true,
   en_oferta: false,
@@ -196,6 +198,7 @@ const Inventory = () => {
   const [comboName, setComboName] = useState('');
   const [comboDescription, setComboDescription] = useState('');
   const [comboPricePesos, setComboPricePesos] = useState('');
+  const [comboImageUrl, setComboImageUrl] = useState('');
   const [comboItems, setComboItems] = useState<ComboItem[]>([]);
   const [comboSaving, setComboSaving] = useState(false);
   const [comboError, setComboError] = useState('');
@@ -216,6 +219,7 @@ const Inventory = () => {
       barcode: product.barcode ?? '',
       unit: product.unit || 'unidad',
       min_stock: String(product.min_stock ?? 5),
+      image_url: product.image_url ?? '',
       visible_kiosco: product.visible_kiosco !== undefined ? Boolean(product.visible_kiosco) : true,
       visible_tienda: product.visible_tienda !== undefined ? Boolean(product.visible_tienda) : true,
       en_oferta: product.en_oferta !== undefined ? Boolean(product.en_oferta) : false,
@@ -324,6 +328,7 @@ const Inventory = () => {
         barcode: editDraft.barcode.trim() || undefined,
         unit: editDraft.unit || 'unidad',
         min_stock: minStock,
+        image_url: editDraft.image_url.trim() || undefined,
         visible_kiosco: editDraft.visible_kiosco,
         visible_tienda: editDraft.visible_tienda,
         en_oferta: editDraft.en_oferta,
@@ -391,6 +396,7 @@ const Inventory = () => {
     setComboName('');
     setComboDescription('');
     setComboPricePesos('');
+    setComboImageUrl('/images/products/combo-desayuno-paisa.svg');
     setComboItems([]);
     setComboError('');
     setShowComboModal(true);
@@ -401,6 +407,7 @@ const Inventory = () => {
     setComboName(c.name);
     setComboDescription(c.description);
     setComboPricePesos(String(Math.round(c.price_cents / 100)));
+    setComboImageUrl(c.image_url || '');
     setComboItems([...c.items]);
     setComboError('');
     setShowComboModal(true);
@@ -469,6 +476,7 @@ const Inventory = () => {
           description: comboDescription.trim(),
           price_cents: pesos * 100,
           items: comboItems,
+          image_url: comboImageUrl.trim() || undefined,
         });
       } else {
         await createCombo({
@@ -476,6 +484,7 @@ const Inventory = () => {
           description: comboDescription.trim(),
           price_cents: pesos * 100,
           items: comboItems,
+          image_url: comboImageUrl.trim() || undefined,
         });
       }
       setShowComboModal(false);
@@ -638,6 +647,20 @@ const Inventory = () => {
                 return (
                   <li key={product.id} className="card p-3">
                     <div className="flex items-start gap-3">
+                      {product.image_url ? (
+                        <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-slate-50 p-1 border border-slate-200 overflow-hidden">
+                          <img
+                            src={product.image_url}
+                            alt=""
+                            className="h-full w-full object-contain"
+                            loading="lazy"
+                          />
+                        </div>
+                      ) : (
+                        <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-xl border border-slate-200">
+                          📦
+                        </span>
+                      )}
                       <div className="min-w-0 flex-1">
                         <p className="truncate font-medium text-sf-text">{product.name}</p>
                         <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-gray-500">
@@ -719,7 +742,27 @@ const Inventory = () => {
                     const tone = stockTone(product.stock);
                     return (
                       <tr key={product.id} className="transition hover:bg-sf-light">
-                        <td className="px-4 py-3 text-sm font-medium text-sf-text">{product.name}</td>
+                        <td className="px-4 py-3 text-sm font-medium text-sf-text">
+                          <div className="flex items-center gap-3">
+                            {product.image_url ? (
+                              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-slate-50 p-1 border border-slate-200 overflow-hidden">
+                                <img
+                                  src={product.image_url}
+                                  alt=""
+                                  className="h-full w-full object-contain"
+                                  loading="lazy"
+                                />
+                              </div>
+                            ) : (
+                              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-base border border-slate-200">
+                                📦
+                              </span>
+                            )}
+                            <span className="truncate max-w-[220px]" title={product.name}>
+                              {product.name}
+                            </span>
+                          </div>
+                        </td>
                         <td className="px-4 py-3 text-sm">
                           <span className="chip bg-sf-cyan/10 text-sf-cyan">{product.category || 'Sin categoría'}</span>
                         </td>
@@ -932,9 +975,20 @@ const Inventory = () => {
                       >
                         <div>
                           <div className="flex items-start justify-between gap-2">
-                            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-xl">
-                              📦
-                            </span>
+                            {product.image_url ? (
+                              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-slate-50 p-1 border border-slate-200 overflow-hidden">
+                                <img
+                                  src={product.image_url}
+                                  alt=""
+                                  className="h-full w-full object-contain"
+                                  loading="lazy"
+                                />
+                              </div>
+                            ) : (
+                              <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-xl border border-slate-200">
+                                📦
+                              </span>
+                            )}
                             <div className="flex flex-wrap items-center justify-end gap-1">
                               <span className="chip bg-slate-100 text-[10px] font-semibold text-slate-700 capitalize">
                                 {product.unit || 'unidad'}
@@ -1119,9 +1173,15 @@ const Inventory = () => {
                   >
                     <div>
                       <div className="flex items-start justify-between">
-                        <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-100 text-xl">
-                          🎁
-                        </span>
+                        {c.image_url ? (
+                          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-amber-50 p-1 border border-amber-200 overflow-hidden">
+                            <img src={c.image_url} alt="" className="h-full w-full object-contain" />
+                          </div>
+                        ) : (
+                          <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-100 text-xl">
+                            🎁
+                          </span>
+                        )}
                         {ahorroCents > 0 && (
                           <span className="chip bg-emerald-100 text-xs font-bold text-emerald-800">
                             Ahorra {formatCentsCOP(ahorroCents)}
@@ -1334,6 +1394,31 @@ const Inventory = () => {
             />
           </div>
 
+          <div>
+            <label htmlFor="edit-image" className="mb-1 block text-sm font-medium text-gray-700">
+              Foto o Ilustración de Empaque (URL)
+            </label>
+            <div className="flex items-center gap-2">
+              {editDraft.image_url ? (
+                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-slate-50 p-1 border border-slate-200 overflow-hidden">
+                  <img src={editDraft.image_url} alt="Vista previa" className="h-full w-full object-contain" />
+                </div>
+              ) : (
+                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-xl border border-slate-200">
+                  📦
+                </div>
+              )}
+              <input
+                id="edit-image"
+                type="text"
+                value={editDraft.image_url}
+                onChange={(event) => setEditDraft({ ...editDraft, image_url: event.target.value })}
+                placeholder="/images/products/arroz-diana-1lb.svg o URL web"
+                className="input flex-1 text-xs"
+              />
+            </div>
+          </div>
+
           <div className="flex gap-4 border-t border-slate-100 pt-3">
             <label className="flex items-center gap-2 text-xs font-semibold text-slate-700">
               <input
@@ -1439,6 +1524,31 @@ const Inventory = () => {
                 onChange={(e) => setComboPricePesos(e.target.value)}
                 placeholder="9500"
                 className="input pl-8 font-bold"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label htmlFor="combo-image" className="mb-1 block text-sm font-medium text-gray-700">
+              Ilustración del Combo (URL)
+            </label>
+            <div className="flex items-center gap-2">
+              {comboImageUrl ? (
+                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-amber-50 p-1 border border-amber-200 overflow-hidden">
+                  <img src={comboImageUrl} alt="Vista previa" className="h-full w-full object-contain" />
+                </div>
+              ) : (
+                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-amber-100 text-xl border border-amber-200">
+                  🍱
+                </div>
+              )}
+              <input
+                id="combo-image"
+                type="text"
+                value={comboImageUrl}
+                onChange={(e) => setComboImageUrl(e.target.value)}
+                placeholder="/images/products/combo-desayuno-paisa.svg"
+                className="input flex-1 text-xs"
               />
             </div>
           </div>

@@ -1,0 +1,55 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400" width="100%" height="100%">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#f8fafc"/>
+      <stop offset="100%" stop-color="#e2e8f0"/>
+    </linearGradient>
+    <linearGradient id="pouch" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#dc2626"/>
+      <stop offset="25%" stop-color="#ef4444"/>
+      <stop offset="70%" stop-color="#b91c1c"/>
+      <stop offset="100%" stop-color="#991b1b"/>
+    </linearGradient>
+    <linearGradient id="whiteBand" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="60%" stop-color="#f8fafc"/>
+      <stop offset="100%" stop-color="#e2e8f0"/>
+    </linearGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="130%" height="130%">
+      <feDropShadow dx="0" dy="12" stdDeviation="12" flood-color="#0f172a" flood-opacity="0.18"/>
+    </filter>
+  </defs>
+
+  <rect width="400" height="400" rx="24" fill="url(#bg)"/>
+  <circle cx="200" cy="200" r="140" fill="#fee2e2" opacity="0.6"/>
+
+  <!-- Pouch Body -->
+  <g filter="url(#shadow)">
+    <!-- Bolsa de Leche con pliegues realistas -->
+    <path d="M135 75 Q200 65 265 75 L285 315 Q200 335 115 315 Z" fill="url(#pouch)"/>
+    
+    <!-- Banda Blanca Central -->
+    <path d="M127 140 Q200 130 273 140 L279 240 Q200 250 121 240 Z" fill="url(#whiteBand)"/>
+    
+    <!-- Sellado superior de la bolsa -->
+    <path d="M135 75 Q200 65 265 75 L263 90 Q200 80 137 90 Z" fill="#991b1b"/>
+    <line x1="145" y1="82" x2="255" y2="82" stroke="#fca5a5" stroke-dasharray="4,4" stroke-width="2"/>
+
+    <!-- Marca Alquería -->
+    <text x="200" y="180" font-family="'Arial Black', Impact, sans-serif" font-size="28" font-weight="900" fill="#dc2626" text-anchor="middle" letter-spacing="1">ALQUERÍA</text>
+    
+    <!-- Cinta azul de calidad -->
+    <rect x="150" y="195" width="100" height="18" rx="4" fill="#1e40af"/>
+    <text x="200" y="208" font-family="Arial, sans-serif" font-size="10" font-weight="bold" fill="#ffffff" text-anchor="middle" letter-spacing="0.5">LECHE ENTERA</text>
+
+    <!-- Gotas y frescura -->
+    <circle cx="160" cy="225" r="4" fill="#3b82f6"/>
+    <circle cx="200" cy="228" r="5" fill="#3b82f6"/>
+    <circle cx="240" cy="225" r="4" fill="#3b82f6"/>
+    <text x="200" y="280" font-family="'Arial Black', sans-serif" font-size="22" font-weight="900" fill="#ffffff" text-anchor="middle">1 LITRO</text>
+    <text x="200" y="300" font-family="Arial, sans-serif" font-size="11" font-weight="bold" fill="#fecaca" text-anchor="middle">UHT · Larga Vida</text>
+  </g>
+
+  <!-- Brillo de la bolsa plástica -->
+  <path d="M140 100 Q150 200 135 300" stroke="#ffffff" stroke-width="6" stroke-linecap="round" opacity="0.35"/>
+</svg>
