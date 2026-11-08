@@ -1,6 +1,11 @@
 import { Product } from '../firebase/db';
 import { apiClient, emitDataChange, onDataChange } from './apiClient';
 import { mockProducts } from './mockData';
+import {
+  cacheProductsForTenant,
+  getCachedProductsForTenant,
+  isOfflineModeActive,
+} from './offlineSyncService';
 
 function isMockMode(): boolean {
   return import.meta.env.VITE_USE_MOCK_DATA === 'true';
@@ -78,13 +83,31 @@ export function subscribeToProducts(onData: ProductsListener, onError: ProductsE
   let active = true;
 
   const fetchAndEmit = async () => {
+    if (isOfflineModeActive()) {
+      const cached = await getCachedProductsForTenant();
+      if (!active) return;
+      if (cached.length > 0) {
+        onData(sortByName(cached));
+        return;
+      }
+    }
     try {
       const data = await apiClient.get<any[]>('/products');
       if (!active) return;
       const mapped = (data || []).map(mapProduct);
-      onData(sortByName(mapped));
+      const sorted = sortByName(mapped);
+      void cacheProductsForTenant(sorted);
+      onData(sorted);
     } catch {
       if (!active) return;
+      if (isOfflineModeActive()) {
+        const cached = await getCachedProductsForTenant();
+        if (!active) return;
+        if (cached.length > 0) {
+          onData(sortByName(cached));
+          return;
+        }
+      }
       console.error('Error subscribing to products.');
       onError(new Error(LOAD_ERROR));
     }

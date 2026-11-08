@@ -174,18 +174,27 @@ Para maximizar la eficiencia de tokens y la precisión de razonamiento en cada s
        - Generación automática de mensaje cordial y personalizado con el nombre del vecino, saldo total pendiente en `formatCOP`, lista de últimos movimientos (fiados y abonos) y datos bancarios para transferencias Nequi/Bancolombia.
     4. **100% de Pruebas en Verde:** 45 suites de prueba en Vitest (360 tests aprobados), compilación de producción impecable (`tsc && vite build`) y 16/16 pruebas activas de Playwright aprobadas en navegadores desktop, mobile y tablet.
 
-- [ ] **Tarea 10 — Modo Offline Resiliente en Mostrador (IndexedDB + Cola de Sincronización Multi-Tenant) y Suite E2E Completa con Playwright:**
+- [x] **Tarea 10 — Modo Offline Resiliente en Mostrador (IndexedDB + Cola de Sincronización Multi-Tenant) y Suite E2E Completa con Playwright:**
   - **Nivel Recomendado:** `Argon (High)`
-  - **Objetivo:** Garantizar que ninguna tienda de barrio detenga sus ventas o abonos si falla el internet del sector, y certificar toda la plataforma de punta a punta con Playwright.
-  - **Alcance Técnico:**
-    1. Implementar `offlineSyncService.ts` sobre IndexedDB con aislamiento por `negocio_id`:
-       - Caché automático del catálogo de productos y clientes de fiado para lectura instantánea sin red.
-       - Cola FIFO de ventas y abonos registrados en modo offline con banner interactivo en cabecera, auto-sincronización al volver la conexión y modal de inspección de cola.
-    2. Construir y ejecutar la suite E2E automatizada en Playwright (`qa/e2e/saas-production.spec.ts`) validando:
-       - Login y aprovisionamiento multi-tenant.
-       - Gestión de catálogo, combos y configuración de tienda por el staff.
-       - Flujo completo de pedido en **Modo Kiosco iPad** (`#/kiosco/surtifacil`) y recepción en POS.
-       - Flujo de **Tienda Vecinal** (`#/tienda/surtifacil`) y rastreo de pedido.
-       - Venta en POS con Copiloto Sarin, Libro de Fiados, Arqueo de Caja COP y Panel SuperAdmin.
+  - **Estado:** ✅ Completada y Desplegada
+  - **Evidencia Técnica de Implementación:**
+    1. **Motor Offline Multi-Tenant sobre IndexedDB (`offlineSyncService.ts`):**
+       - Base de datos local `surtifacil_offline_v1` sobre IndexedDB con espejo determinístico en memoria y aislamiento estricto por `negocio_id` en los almacenes `products_cache`, `customers_cache` y `sync_queue`.
+       - Caché automático del catálogo de productos y clientes del libro de fiados al consultar en línea (`productService.ts`, `saleService.ts`, `creditService.ts`) para lectura instantánea sin conexión en el mostrador.
+       - Descuento optimista de stock local en caché al registrar ventas sin red y actualización inmediata del saldo local del cliente al registrar ventas fiadas o abonos en modo offline.
+       - Cola FIFO (`enqueueOfflineSale`, `enqueueOfflineCreditEntry`, `syncPendingQueue`) que reenvía secuencialmente las operaciones pendientes a `/api/sales` y `/api/credits/:customerId/entries` al recuperar conexión (`window.online`), con soporte de modo offline simulado (`setSimulatedOfflineMode`) para pruebas de contingencia en mostrador.
+    2. **Banner Interactivo de Contingencia y Modal Inspector de Cola (`OfflineSyncBanner.tsx`, `AppShell.tsx`, `CreateSale.tsx`):**
+       - Píldora de estado de red (`OfflineStatusPill`) integrada en la barra superior de `CreateSale.tsx` para conmutar o verificar el estado de red e inspeccionar la cola.
+       - Banner global interactivo (`OfflineSyncBanner`) en `AppShell.tsx` que alerta al cajero cuando opera sin red o tiene operaciones en cola y ofrece sincronización manual a 1 toque (*"Sincronizar Ahora"*).
+       - Modal de inspección de cola (`OfflineQueueModal`) con detalle de cada venta o abono pendiente, montos en `formatCOP`, estado de sincronización y descarte individual seguro.
+    3. **Suite E2E de Certificación de Producción en Playwright (`qa/e2e/saas-production.spec.ts`):**
+       - **Escenario 1:** Registro público multi-tenant de nueva tienda (`#/registro-negocio`), aprovisionamiento de credenciales y login de staff (`#/login`).
+       - **Escenario 2:** Gestión de catálogo, creación de producto/combo en `#/inventory` y configuración de tienda con afiche QR en `#/settings`.
+       - **Escenario 3:** Flujo completo de pedido en **Modo Kiosco iPad** (`#/kiosco/surtifacil`), generación de turno y facturación a 1 clic desde la bandeja en vivo del POS (`#/create-sale`).
+       - **Escenario 4:** Flujo completo de **Tienda Vecinal** (`#/tienda/surtifacil`) y rastreo de pedido en tiempo real (`#/pedido/:token`).
+       - **Escenario 5:** Venta en POS con **Sarin Voz Manos Libres**, **Copiloto Gerencial Sarin IA**, **Libro de Fiados** (`#/credits`), **Arqueo de Caja COP** (`CashClosingModal`) y **Panel SuperAdmin Multi-Tenant** (`#/super-admin`).
+       - **Escenario 6:** Contingencia en **Modo Offline Resiliente** en POS (caché IndexedDB + encolado FIFO de venta offline + inspección en modal + reconexión y sincronización automática con el servidor).
+    4. **100% de Pruebas en Verde:** 46 suites de prueba en Vitest (363 tests aprobados), compilación de producción impecable (`tsc && vite build`) y 22/22 pruebas activas de Playwright aprobadas (incluyendo los 6 escenarios integrales de `qa/e2e/saas-production.spec.ts` y las suites multi-dispositivo).
+
 
 

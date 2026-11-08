@@ -8,6 +8,7 @@ import { Modal } from '../ui/Modal';
 import { findNavItem, MOBILE_TAB_LABELS, MOBILE_TAB_PAGES, NAV_GROUPS, NAV_ITEMS } from './navItems';
 import { SarinBusinessCopilot } from '../SarinBusinessCopilot';
 import CashClosingModal from '../CashClosingModal';
+import { OfflineQueueModal, OfflineStatusPill, OfflineSyncBanner } from '../OfflineSyncBanner';
 
 const SIDEBAR_STORAGE_KEY = 'surtifacil.sidebar.collapsed';
 
@@ -57,6 +58,7 @@ export function AppShell({ user, page, onNavigate, onLogout, children }: AppShel
   const isMobile = useIsMobile();
   const [copilotOpen, setCopilotOpen] = useState(false);
   const [closingModalOpen, setClosingModalOpen] = useState(false);
+  const [offlineModalOpen, setOfflineModalOpen] = useState(false);
   const visibleItems = useMemo(
     () => NAV_ITEMS.filter((item) => canAccessPage(user.role, item.page)),
     [user.role],
@@ -77,7 +79,12 @@ export function AppShell({ user, page, onNavigate, onLogout, children }: AppShel
       )}
       <div className="flex min-w-0 flex-1 flex-col">
         {isMobile ? (
-          <MobileTopBar user={user} page={page} onOpenCopilot={() => setCopilotOpen(true)} />
+          <MobileTopBar
+            user={user}
+            page={page}
+            onOpenCopilot={() => setCopilotOpen(true)}
+            onOpenOfflineModal={() => setOfflineModalOpen(true)}
+          />
         ) : (
           <DesktopTopBar
             user={user}
@@ -86,8 +93,10 @@ export function AppShell({ user, page, onNavigate, onLogout, children }: AppShel
             onLogout={onLogout}
             onOpenCopilot={() => setCopilotOpen(true)}
             onOpenClosingModal={() => setClosingModalOpen(true)}
+            onOpenOfflineModal={() => setOfflineModalOpen(true)}
           />
         )}
+        <OfflineSyncBanner onOpenModal={() => setOfflineModalOpen(true)} />
         <main className={`container mx-auto w-full flex-1 px-4 py-4 md:px-6 md:py-8 ${isMobile ? 'pb-tabbar' : ''}`}>
           {children}
         </main>
@@ -109,6 +118,9 @@ export function AppShell({ user, page, onNavigate, onLogout, children }: AppShel
 
       {/* Modal Arqueo y Cierre de Caja COP */}
       <CashClosingModal isOpen={closingModalOpen} onClose={() => setClosingModalOpen(false)} />
+
+      {/* Modal Resiliencia Offline y Cola FIFO */}
+      <OfflineQueueModal isOpen={offlineModalOpen} onClose={() => setOfflineModalOpen(false)} />
     </div>
   );
 }
@@ -375,9 +387,18 @@ interface DesktopTopBarProps {
   onLogout: () => void;
   onOpenCopilot?: () => void;
   onOpenClosingModal?: () => void;
+  onOpenOfflineModal?: () => void;
 }
 
-function DesktopTopBar({ user, page, onNavigate, onLogout, onOpenCopilot, onOpenClosingModal }: DesktopTopBarProps) {
+function DesktopTopBar({
+  user,
+  page,
+  onNavigate,
+  onLogout,
+  onOpenCopilot,
+  onOpenClosingModal,
+  onOpenOfflineModal,
+}: DesktopTopBarProps) {
   const current = findNavItem(page);
   const [profileOpen, setProfileOpen] = useState(false);
   const isSuperAdmin = user.email.toLowerCase() === 'andres.san1404@gmail.com' || (user as any).isSuperAdmin;
@@ -411,6 +432,9 @@ function DesktopTopBar({ user, page, onNavigate, onLogout, onOpenCopilot, onOpen
       </div>
 
       <div className="flex items-center gap-3">
+        {/* Indicador de Estado Online / Cola Offline FIFO */}
+        {onOpenOfflineModal && <OfflineStatusPill onOpenModal={onOpenOfflineModal} />}
+
         {/* Botón Sarin Copiloto Gerencial */}
         <button
           type="button"
@@ -540,7 +564,17 @@ function DesktopTopBar({ user, page, onNavigate, onLogout, onOpenCopilot, onOpen
   );
 }
 
-function MobileTopBar({ user, page, onOpenCopilot }: { user: User; page: Page; onOpenCopilot?: () => void }) {
+function MobileTopBar({
+  user,
+  page,
+  onOpenCopilot,
+  onOpenOfflineModal,
+}: {
+  user: User;
+  page: Page;
+  onOpenCopilot?: () => void;
+  onOpenOfflineModal?: () => void;
+}) {
   const current = findNavItem(page);
   return (
     <header className="sticky top-0 z-30 flex h-14 items-center justify-between bg-sf-primary px-4 text-white shadow-md">
@@ -549,6 +583,16 @@ function MobileTopBar({ user, page, onOpenCopilot }: { user: User; page: Page; o
         <span className="truncate text-base font-bold">{current?.label ?? 'Surti Fácil'}</span>
       </div>
       <div className="flex items-center gap-2">
+        {onOpenOfflineModal && (
+          <button
+            type="button"
+            onClick={onOpenOfflineModal}
+            aria-label="Inspeccionar cola offline y resiliencia"
+            className="flex h-9 w-9 items-center justify-center rounded-full bg-white/20 text-sm transition active:scale-95"
+          >
+            📡
+          </button>
+        )}
         <button
           type="button"
           onClick={onOpenCopilot}

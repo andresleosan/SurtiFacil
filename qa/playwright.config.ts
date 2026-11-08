@@ -9,7 +9,7 @@ const qaPort = Number.isInteger(requestedPort) && requestedPort >= 1024 && reque
 const qaBaseUrl = `http://127.0.0.1:${qaPort}`;
 
 export default defineConfig({
-  testDir: path.resolve(rootDir, 'qa/tests'),
+  testDir: path.resolve(rootDir, 'qa'),
   outputDir: path.resolve(rootDir, 'qa/test-results'),
   fullyParallel: false,
   forbidOnly: !!process.env.CI,
@@ -29,6 +29,7 @@ export default defineConfig({
     {
       name: 'chromium',
       use: { ...devices['Desktop Chrome'] },
+      testMatch: /(tests|e2e)\/.*\.spec\.ts/,
     },
     {
       // Teléfono Android típico de caja (412x915, táctil, DPR 2.6).

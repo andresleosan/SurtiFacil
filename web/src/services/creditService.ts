@@ -1,6 +1,12 @@
 import { CreditCustomer, CreditEntry, CreditEntryType, UserRole } from '../firebase/db';
 import { addLocalCreditEntry, getLocalCreditEntries, mockCreditCustomers } from './mockData';
 import { apiClient, emitDataChange, onDataChange } from './apiClient';
+import {
+  cacheCreditCustomersForTenant,
+  enqueueOfflineCreditEntry,
+  getCachedCreditCustomersForTenant,
+  isOfflineModeActive,
+} from './offlineSyncService';
 
 function isMockMode(): boolean {
   return import.meta.env.VITE_USE_MOCK_DATA === 'true';
@@ -116,13 +122,31 @@ export function subscribeToCreditCustomers(onData: CreditCustomersListener, onEr
   let active = true;
 
   const fetchAndEmit = async () => {
+    if (isOfflineModeActive()) {
+      const cached = await getCachedCreditCustomersForTenant();
+      if (!active) return;
+      if (cached.length > 0) {
+        onData(sortByName(cached));
+        return;
+      }
+    }
     try {
       const list = await apiClient.get<any[]>('/credits/customers');
       if (!active) return;
       const mapped = (list || []).map(mapCustomer);
-      onData(sortByName(mapped));
+      const sorted = sortByName(mapped);
+      void cacheCreditCustomersForTenant(sorted);
+      onData(sorted);
     } catch {
       if (!active) return;
+      if (isOfflineModeActive()) {
+        const cached = await getCachedCreditCustomersForTenant();
+        if (!active) return;
+        if (cached.length > 0) {
+          onData(sortByName(cached));
+          return;
+        }
+      }
       console.error('Error subscribing to credit customers.');
       onError(new Error(LOAD_ERROR));
     }
@@ -215,6 +239,18 @@ export async function addCreditEntry(
 ): Promise<CreditEntry> {
   const entry = validateEntryInput(input);
   const delta = entry.type === 'debt' ? entry.amount_cents : -entry.amount_cents;
+
+  if (isOfflineModeActive()) {
+    const queued = await enqueueOfflineCreditEntry(customerId, entry, actor);
+    return {
+      id: queued.id,
+      customer_id: customerId,
+      ...entry,
+      created_by_uid: actor.uid,
+      created_by_role: actor.role,
+      createdAt: new Date(queued.created_at),
+    };
+  }
 
   if (isMockMode()) {
     const customer = mockCreditCustomers.find((candidate) => candidate.id === customerId);

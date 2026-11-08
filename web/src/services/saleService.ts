@@ -3,6 +3,12 @@ import { PaymentMethod, Product, SaleItem, Sale } from '../firebase/db';
 import { mockProducts, addLocalSale, getLocalSales, mockCreditCustomers, addLocalCreditEntry } from './mockData';
 import { refreshProducts } from './productService';
 import { apiClient, emitDataChange } from './apiClient';
+import {
+  cacheProductsForTenant,
+  enqueueOfflineSale,
+  getCachedProductsForTenant,
+  isOfflineModeActive,
+} from './offlineSyncService';
 
 function isMockMode(): boolean {
   return import.meta.env.VITE_USE_MOCK_DATA === 'true';
@@ -65,10 +71,21 @@ export async function getProducts(): Promise<Product[]> {
     return mockProducts;
   }
 
+  if (isOfflineModeActive()) {
+    const cached = await getCachedProductsForTenant();
+    if (cached.length > 0) return cached;
+  }
+
   try {
     const list = await apiClient.get<any[]>('/products');
-    return (list || []).map(mapProduct);
+    const mapped = (list || []).map(mapProduct);
+    void cacheProductsForTenant(mapped);
+    return mapped;
   } catch {
+    if (isOfflineModeActive()) {
+      const cached = await getCachedProductsForTenant();
+      if (cached.length > 0) return cached;
+    }
     console.error('Error getting products from Firebase');
     throw new Error('Error al cargar productos');
   }
@@ -87,6 +104,11 @@ export async function createSale(
   }
   if (paymentMethod === 'credit' && !creditCustomerId) {
     throw new Error('Selecciona el cliente al que se le fía');
+  }
+
+  if (isOfflineModeActive()) {
+    const queued = await enqueueOfflineSale(cartItems, paymentMethod, creditCustomerId);
+    return queued.id;
   }
 
   if (isMockMode()) {

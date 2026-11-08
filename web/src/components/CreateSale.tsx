@@ -359,6 +359,7 @@ const CreateSale = () => {
                     {lastCreatedSale && (
                       <span className="text-xs text-green-800">
                         Comprobante #{lastCreatedSale.id.slice(0, 8)} · {formatCentsCOP(lastCreatedSale.total)}
+                        {lastCreatedSale.id.startsWith('offline_') ? ' · 📡 Encolada en Modo Offline (FIFO)' : ''}
                       </span>
                     )}
                   </div>
