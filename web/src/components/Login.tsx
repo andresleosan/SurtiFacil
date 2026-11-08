@@ -1,5 +1,10 @@
 import { useState } from 'react';
-import { getSafeAuthErrorMessage, loginUser, loginWithGoogle } from '../services/authService';
+import {
+  getSafeAuthErrorMessage,
+  loginUser,
+  loginWithGoogle,
+  loginWithQuickRole,
+} from '../services/authService';
 import { Icon } from './ui/Icon';
 
 function GoogleLogo() {
@@ -19,6 +24,7 @@ const Login = () => {
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
+  const [quickLoadingRole, setQuickLoadingRole] = useState<string | null>(null);
   const [error, setError] = useState('');
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
@@ -47,7 +53,25 @@ const Login = () => {
     }
   };
 
-  const busy = loading || googleLoading;
+  const handleQuickAccess = async (
+    roleKey: 'admin' | 'cashier' | 'manager' | 'superadmin',
+    targetHash?: string
+  ) => {
+    setQuickLoadingRole(roleKey);
+    setError('');
+    try {
+      await loginWithQuickRole(roleKey);
+      if (targetHash) {
+        window.location.hash = targetHash;
+      }
+    } catch (err) {
+      setError(getSafeAuthErrorMessage(err));
+    } finally {
+      setQuickLoadingRole(null);
+    }
+  };
+
+  const busy = loading || googleLoading || quickLoadingRole !== null;
 
   return (
     <main className="min-h-screen bg-sf-light text-sf-text font-poppins flex">
@@ -222,7 +246,85 @@ const Login = () => {
               </button>
             </form>
 
-            <div className="mt-6 border-t border-slate-100 pt-5 text-center space-y-3">
+            <div className="mt-6 border-t border-slate-200 pt-5 space-y-3" data-testid="quick-access-panel">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold uppercase tracking-wider text-slate-500">
+                  ⚡ Acceso Rápido de Prueba (1 Clic)
+                </span>
+                <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-700">
+                  Multi-Rol Activo
+                </span>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => handleQuickAccess('admin', '#/dashboard')}
+                  className="min-h-[44px] rounded-xl border border-blue-200 bg-blue-50/70 px-3 py-2 text-left hover:bg-blue-100/80 transition disabled:opacity-50"
+                >
+                  <span className="block text-xs font-bold text-sf-primary">
+                    {quickLoadingRole === 'admin' ? 'Entrando...' : '🏪 Entrar como Admin'}
+                  </span>
+                  <span className="block text-[10px] text-slate-500 truncate">admin@surtifacil.com</span>
+                </button>
+
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => handleQuickAccess('cashier', '#/create-sale')}
+                  className="min-h-[44px] rounded-xl border border-emerald-200 bg-emerald-50/70 px-3 py-2 text-left hover:bg-emerald-100/80 transition disabled:opacity-50"
+                >
+                  <span className="block text-xs font-bold text-emerald-800">
+                    {quickLoadingRole === 'cashier' ? 'Entrando...' : '🛒 Entrar como Cajero'}
+                  </span>
+                  <span className="block text-[10px] text-slate-500 truncate">cajero@surtifacil.com</span>
+                </button>
+
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => handleQuickAccess('manager', '#/inventory')}
+                  className="min-h-[44px] rounded-xl border border-amber-200 bg-amber-50/70 px-3 py-2 text-left hover:bg-amber-100/80 transition disabled:opacity-50"
+                >
+                  <span className="block text-xs font-bold text-amber-900">
+                    {quickLoadingRole === 'manager' ? 'Entrando...' : '📦 Entrar como Gerente'}
+                  </span>
+                  <span className="block text-[10px] text-slate-500 truncate">gerente@surtifacil.com</span>
+                </button>
+
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => handleQuickAccess('superadmin', '#/super-admin')}
+                  className="min-h-[44px] rounded-xl border border-purple-200 bg-purple-50/70 px-3 py-2 text-left hover:bg-purple-100/80 transition disabled:opacity-50"
+                >
+                  <span className="block text-xs font-bold text-purple-900">
+                    {quickLoadingRole === 'superadmin' ? 'Entrando...' : '👑 Entrar como SuperAdmin'}
+                  </span>
+                  <span className="block text-[10px] text-slate-500 truncate">andres.san1404@gmail.com</span>
+                </button>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2 pt-1">
+                <a
+                  href="#/tienda/surtifacil"
+                  className="min-h-[44px] rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 flex items-center justify-center gap-1.5 text-xs font-semibold text-slate-700 hover:border-sf-primary hover:text-sf-primary transition"
+                >
+                  <span>🛍️</span>
+                  <span>Vista Cliente Tienda</span>
+                </a>
+                <a
+                  href="#/kiosco/surtifacil"
+                  className="min-h-[44px] rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 flex items-center justify-center gap-1.5 text-xs font-semibold text-slate-700 hover:border-sf-primary hover:text-sf-primary transition"
+                >
+                  <span>📱</span>
+                  <span>Vista Cliente Kiosco</span>
+                </a>
+              </div>
+            </div>
+
+            <div className="mt-5 border-t border-slate-100 pt-4 text-center space-y-2.5">
               <p className="text-sm text-slate-600">
                 ¿No tienes cuenta aún?{' '}
                 <a

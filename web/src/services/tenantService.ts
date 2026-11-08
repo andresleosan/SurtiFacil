@@ -88,14 +88,19 @@ const MOCK_NEGOCIOS: Negocio[] = [
 
 export async function registerStore(input: RegisterStoreInput) {
   try {
-    return await apiClient.post<{ success: boolean; message: string; negocio: any; user: any }>(
-      '/registro-negocio',
-      input
-    );
+    return await apiClient.post<{
+      success: boolean;
+      message: string;
+      token?: string;
+      negocio: any;
+      user: any;
+    }>('/registro-negocio', input);
   } catch (error) {
     // Si la API no está disponible en dev o preview sin Cloudflare Functions
     console.warn('API /registro-negocio falló, usando simulación local:', error);
     const slug = input.slug.toLowerCase().trim();
+    const userId = `user-${slug}-${Date.now()}`;
+    const email = input.email.toLowerCase().trim();
     const newNegocio: Negocio = {
       id: slug,
       slug,
@@ -110,7 +115,7 @@ export async function registerStore(input: RegisterStoreInput) {
       cuota_ia_total: 300,
       cuota_ia_usada: 0,
       costo_domicilio_cents: 0,
-      total_products: 0,
+      total_products: 3,
       total_users: 1,
       total_sales: 0,
     };
@@ -118,8 +123,15 @@ export async function registerStore(input: RegisterStoreInput) {
     return {
       success: true,
       message: '¡Tienda registrada exitosamente!',
+      token: `d1:${userId}:${email}:admin:${slug}`,
       negocio: newNegocio,
-      user: { email: input.email, role: 'admin' },
+      user: {
+        id: userId,
+        email,
+        displayName: input.owner_name || input.nombre,
+        role: 'admin',
+        negocioId: slug,
+      },
     };
   }
 }

@@ -13,6 +13,26 @@ export class ApiError extends Error {
 }
 
 let activeNegocioIdOverride: string | null = null;
+let storedAuthTokenOverride: string | null = null;
+
+export function getStoredAuthToken(): string | null {
+  if (storedAuthTokenOverride) return storedAuthTokenOverride;
+  if (typeof window !== 'undefined' && window.localStorage) {
+    return localStorage.getItem('sf_auth_token');
+  }
+  return null;
+}
+
+export function setStoredAuthToken(token: string | null): void {
+  storedAuthTokenOverride = token;
+  if (typeof window !== 'undefined' && window.localStorage) {
+    if (token) {
+      localStorage.setItem('sf_auth_token', token);
+    } else {
+      localStorage.removeItem('sf_auth_token');
+    }
+  }
+}
 
 export function getActiveNegocioId(): string | null {
   if (activeNegocioIdOverride) return activeNegocioIdOverride;
@@ -44,13 +64,13 @@ function getBaseUrl(): string {
 async function getAuthToken(): Promise<string | null> {
   try {
     const auth = getAuth();
-    if (auth.currentUser) {
+    if (auth.currentUser && typeof auth.currentUser.getIdToken === 'function') {
       return await auth.currentUser.getIdToken();
     }
   } catch {
     // Si Firebase Auth no está listo o en entorno de test sin Auth
   }
-  return null;
+  return getStoredAuthToken();
 }
 
 /**

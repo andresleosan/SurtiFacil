@@ -1,4 +1,5 @@
 import { verifyFirebaseIdToken, DecodedFirebaseToken } from './firebaseAuth';
+import { ensureDatabaseSchema } from './dbSchema';
 import { D1Database, Env } from '../types';
 
 export interface AuthenticatedUser {
@@ -48,49 +49,64 @@ export async function authenticateRequest(
     throw new Error('Conexión a la base de datos D1 no disponible.');
   }
 
-  // 1. Buscar usuario por UID de Firebase
+  // Asegurar que la base de datos D1 tenga el esquema multi-tenant actualizado y semillas
+  await ensureDatabaseSchema(db);
+
+  // 1. Buscar usuario por UID
   let userRow = await db
     .prepare('SELECT id, negocio_id, email, display_name, role, is_super_admin, active FROM users WHERE id = ?')
     .bind(decoded.uid)
     .first<UserRow>();
 
-  // 2. Si no se encuentra por UID pero tenemos email, buscar por email (caso inicial/semillas)
+  // 2. Si no se encuentra por UID pero tenemos email, buscar por email (caso inicial/semillas/registro)
   if (!userRow && decoded.email) {
     const existingByEmail = await db
-      .prepare('SELECT id, negocio_id, email, display_name, role, is_super_admin, active FROM users WHERE email = ?')
+      .prepare('SELECT id, negocio_id, email, display_name, role, is_super_admin, active FROM users WHERE lower(email) = ?')
       .bind(decoded.email.toLowerCase())
       .first<UserRow>();
 
     if (existingByEmail) {
-      // Vincular el UID oficial de Firebase
       await db
-        .prepare("UPDATE users SET id = ?, last_login = datetime('now') WHERE id = ?")
-        .bind(decoded.uid, existingByEmail.id)
-        .run();
+        .prepare("UPDATE users SET last_login = datetime('now') WHERE id = ?")
+        .bind(existingByEmail.id)
+        .run()
+        .catch(() => {});
 
-      userRow = {
-        ...existingByEmail,
-        id: decoded.uid,
-      };
+      userRow = existingByEmail;
     }
   }
 
-  // 3. Caso especial de provisión inicial para SuperAdmin (andres.san1404@gmail.com)
-  if (!userRow && decoded.email && decoded.email.toLowerCase() === 'andres.san1404@gmail.com') {
+  // 3. Auto-aprovisionamiento para SuperAdmin (andres.san1404@gmail.com) o cualquier cuenta autenticada válida (Google / Firebase / D1)
+  if (!userRow && decoded.email) {
+    const normalizedEmail = decoded.email.toLowerCase();
+    const isSuper = normalizedEmail === 'andres.san1404@gmail.com' ? 1 : 0;
+    const assignedRole =
+      typeof decoded.role === 'string' && ['admin', 'manager', 'cashier'].includes(decoded.role)
+        ? (decoded.role as 'admin' | 'manager' | 'cashier')
+        : 'admin';
+    const assignedNegocio =
+      typeof decoded.negocioId === 'string' && decoded.negocioId.trim()
+        ? decoded.negocioId.trim()
+        : 'surtifacil';
+    const displayName =
+      decoded.name ||
+      (isSuper ? 'Andrés Sánchez (SuperAdmin)' : normalizedEmail.split('@')[0] || 'Tendero SurtiFácil');
+
     await db
       .prepare(
-        "INSERT INTO users (id, negocio_id, email, display_name, role, is_super_admin, active, last_login) VALUES (?, 'surtifacil', ?, ?, 'admin', 1, 1, datetime('now'))"
+        "INSERT OR IGNORE INTO users (id, negocio_id, email, display_name, role, is_super_admin, active, last_login) VALUES (?, ?, ?, ?, ?, ?, 1, datetime('now'))"
       )
-      .bind(decoded.uid, decoded.email.toLowerCase(), decoded.name || 'Andrés Sánchez (SuperAdmin)')
-      .run();
+      .bind(decoded.uid, assignedNegocio, normalizedEmail, displayName, assignedRole, isSuper)
+      .run()
+      .catch(() => {});
 
     userRow = {
       id: decoded.uid,
-      negocio_id: 'surtifacil',
-      email: decoded.email.toLowerCase(),
-      display_name: decoded.name || 'Andrés Sánchez (SuperAdmin)',
-      role: 'admin',
-      is_super_admin: 1,
+      negocio_id: assignedNegocio,
+      email: normalizedEmail,
+      display_name: displayName,
+      role: assignedRole,
+      is_super_admin: isSuper,
       active: 1,
     };
   }

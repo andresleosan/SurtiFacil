@@ -38,6 +38,7 @@ CREATE TABLE IF NOT EXISTS users (
   role TEXT NOT NULL CHECK(role IN ('admin', 'manager', 'cashier')) DEFAULT 'cashier',
   is_super_admin INTEGER NOT NULL DEFAULT 0,
   active INTEGER NOT NULL DEFAULT 1,
+  password_hash TEXT,
   created_at TEXT DEFAULT (datetime('now')),
   last_login TEXT,
   deleted_at TEXT,
@@ -292,15 +293,12 @@ INSERT OR IGNORE INTO negocios (
 
 INSERT OR IGNORE INTO users (
   id, negocio_id, email, display_name, role, is_super_admin, active
-) VALUES (
-  'admin-andres-san1404',
-  'surtifacil',
-  'andres.san1404@gmail.com',
-  'Andrés Sánchez (SuperAdmin)',
-  'admin',
-  1,
-  1
-);
+) VALUES
+  ('admin-andres-san1404', 'surtifacil', 'andres.san1404@gmail.com', 'Andrés Sánchez (SuperAdmin)', 'admin', 1, 1),
+  ('user-admin-surtifacil', 'surtifacil', 'admin@surtifacil.com', 'Don Carlos (Administrador)', 'admin', 0, 1),
+  ('user-manager-surtifacil', 'surtifacil', 'gerente@surtifacil.com', 'Marta Gómez (Gerente Inventario)', 'manager', 0, 1),
+  ('user-cashier-surtifacil', 'surtifacil', 'cajero@surtifacil.com', 'Mateo Restrepo (Cajero Mostrador)', 'cashier', 0, 1),
+  ('user-ejemplo-mitienda', 'surtifacil', 'ejemplo@mitienda.com', 'Tendero Demo (SurtiFácil)', 'admin', 0, 1);
 
 INSERT OR IGNORE INTO combos (
   id, negocio_id, name, description, price_cents, items_json, active, visible_kiosco, visible_tienda

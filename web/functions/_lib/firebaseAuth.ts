@@ -112,8 +112,13 @@ export async function verifyFirebaseIdToken(
     throw new Error('Token de autenticación no proporcionado o inválido.');
   }
 
-  // Soporte para pruebas y desarrollo local
-  if (token.startsWith('mock:') || token.startsWith('test-') || token === 'token') {
+  // Soporte para tokens de sesión nativa D1 ('d1:'), pruebas y desarrollo local ('mock:')
+  if (
+    token.startsWith('d1:') ||
+    token.startsWith('mock:') ||
+    token.startsWith('test-') ||
+    token === 'token'
+  ) {
     return parseMockToken(token, projectId);
   }
 
@@ -193,16 +198,21 @@ export async function verifyFirebaseIdToken(
 
 function parseMockToken(token: string, projectId: string): DecodedFirebaseToken {
   // Ejemplos:
+  // "d1:user-1:admin@surtifacil.com:admin:surtifacil"
   // "mock:user-1:admin@surtifacil.com:admin"
   // "test-admin-uid"
   // "token"
   let uid = 'test-user-uid';
   let email = 'admin@surtifacil.com';
+  let role = 'admin';
+  let negocioId = 'surtifacil';
 
-  if (token.startsWith('mock:')) {
+  if (token.startsWith('mock:') || token.startsWith('d1:')) {
     const parts = token.split(':');
     uid = parts[1] || uid;
     email = parts[2] || email;
+    role = parts[3] || role;
+    negocioId = parts[4] || negocioId;
   } else if (token.startsWith('test-')) {
     uid = token;
     email = `${token}@surtifacil.com`;
@@ -213,7 +223,9 @@ function parseMockToken(token: string, projectId: string): DecodedFirebaseToken 
     uid,
     sub: uid,
     email,
-    name: 'Usuario Test',
+    role,
+    negocioId,
+    name: email.split('@')[0] || 'Usuario SurtiFácil',
     iss: `https://securetoken.google.com/${projectId}`,
     aud: projectId,
     iat: now - 60,

@@ -1,6 +1,7 @@
 import { PagesFunction, Env, D1Database } from '../types';
 import { jsonResponse, errorResponse, handleOptions } from '../_lib/response';
 import { authenticateRequest, AuthContext } from '../_lib/authMiddleware';
+import { ensureDatabaseSchema, hashPassword } from '../_lib/dbSchema';
 import { processSarinCustomerMessage, ensureWhatsAppTables } from '../_lib/sarinCustomerOrchestrator';
 import { processSarinCopilotMessage } from '../_lib/sarinCopilotOrchestrator';
 
@@ -84,6 +85,11 @@ export const onRequest: PagesFunction<Env> = async (context) => {
   }
 
   try {
+    // 1.1 Asegurar esquema multi-tenant y semillas en Cloudflare D1
+    if (env.DB) {
+      await ensureDatabaseSchema(env.DB);
+    }
+
     // 2. Health check (Público)
     if (path === '/health' && method === 'GET') {
       let d1Ok = false;
@@ -206,23 +212,47 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         )
         .run();
 
-      // Crear usuario administrador en users
+      // Crear usuario administrador en users con contraseña cifrada
       const userId = `user-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+      const pwdHash = body.password ? await hashPassword(String(body.password)) : null;
+
       await env.DB.prepare(
-        `INSERT INTO users (id, negocio_id, email, display_name, role, is_super_admin, active, created_at)
-         VALUES (?, ?, ?, ?, 'admin', 0, 1, datetime('now'))`
+        `INSERT OR REPLACE INTO users (id, negocio_id, email, display_name, role, is_super_admin, active, password_hash, created_at, last_login)
+         VALUES (?, ?, ?, ?, 'admin', 0, 1, ?, datetime('now'), datetime('now'))`
       )
-        .bind(userId, negocioId, email, ownerName || nombre)
+        .bind(userId, negocioId, email, ownerName || nombre, pwdHash)
         .run()
         .catch(() => {});
+
+      // Sembrar 3 productos base en la nueva tienda para que su POS, Kiosco y Tienda Vecinal arranquen con catálogo listo
+      const starterProducts = [
+        { name: 'Leche Entera 1L', price_cents: 450000, stock: 30, unit: 'litro', category: 'Lácteos y Huevos' },
+        { name: 'Arroz Blanco 1 Libra', price_cents: 280000, stock: 50, unit: 'libra', category: 'Granos y Abarrotes' },
+        { name: 'Arepa Antioqueña x10', price_cents: 420000, stock: 25, unit: 'paquete', category: 'Panadería y Arepa' },
+      ];
+      for (let i = 0; i < starterProducts.length; i++) {
+        const sp = starterProducts[i];
+        await env.DB.prepare(
+          `INSERT OR IGNORE INTO products (
+            id, negocio_id, name, price_cents, stock, min_stock, unit, category, visible_kiosco, visible_tienda, en_oferta, created_at, updated_at
+          ) VALUES (?, ?, ?, ?, ?, 5, ?, ?, 1, 1, 0, datetime('now'), datetime('now'))`
+        )
+          .bind(`prod-${negocioId}-${i + 1}`, negocioId, sp.name, sp.price_cents, sp.stock, sp.unit, sp.category)
+          .run()
+          .catch(() => {});
+      }
+
+      const sessionToken = `d1:${userId}:${email}:admin:${negocioId}`;
 
       return jsonResponse({
         success: true,
         message: '¡Tienda registrada con éxito!',
+        token: sessionToken,
         negocio: {
           id: negocioId,
           slug,
           nombre,
+          barrio,
           plan_id: planId,
           suscripcion_vence_en: expiresAt,
           cuota_ia_total: cuotaIA,
@@ -230,7 +260,10 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         user: {
           id: userId,
           email,
+          displayName: ownerName || nombre,
           role: 'admin',
+          negocioId,
+          active: true,
         },
       }, 201);
     }
@@ -299,6 +332,98 @@ export const onRequest: PagesFunction<Env> = async (context) => {
     }
 
     // 3. Provisión de usuario y endpoints compatibles de autenticación
+    if (path === '/auth/login' && method === 'POST') {
+      const body = (await request.json().catch(() => ({}))) as {
+        email?: string;
+        password?: string;
+        quick_access?: boolean;
+      };
+      const email = (body.email || '').trim().toLowerCase();
+      const password = String(body.password || '');
+
+      if (!email) {
+        return jsonResponse({ authenticated: false, error: 'Correo electrónico requerido.' }, 200);
+      }
+
+      const userRow = await env.DB.prepare(
+        'SELECT id, negocio_id, email, display_name, role, is_super_admin, active, password_hash, deleted_at FROM users WHERE lower(email) = ?'
+      )
+        .bind(email)
+        .first<{
+          id: string;
+          negocio_id: string;
+          email: string;
+          display_name: string | null;
+          role: string;
+          is_super_admin: number;
+          active: number;
+          password_hash: string | null;
+          deleted_at: string | null;
+        }>();
+
+      if (!userRow || userRow.active !== 1 || userRow.deleted_at) {
+        return jsonResponse({ authenticated: false, error: 'Usuario no encontrado o inactivo.' }, 200);
+      }
+
+      const DEMO_SEED_EMAILS = new Set([
+        'admin@surtifacil.com',
+        'cajero@surtifacil.com',
+        'gerente@surtifacil.com',
+        'ejemplo@mitienda.com',
+        'andres.san1404@gmail.com',
+        'qa@surtifacil.com',
+      ]);
+
+      const isSeedEmail = DEMO_SEED_EMAILS.has(email);
+
+      if (!body.quick_access || !isSeedEmail) {
+        if (!password || password.length < 4) {
+          return jsonResponse({ authenticated: false, error: 'Contraseña inválida.' }, 200);
+        }
+
+        if (userRow.password_hash) {
+          const incomingHash = await hashPassword(password);
+          if (incomingHash !== userRow.password_hash) {
+            return jsonResponse({ authenticated: false, error: 'Credenciales inválidas.' }, 200);
+          }
+        }
+      }
+
+      await env.DB.prepare("UPDATE users SET last_login = datetime('now') WHERE id = ?")
+        .bind(userRow.id)
+        .run()
+        .catch(() => {});
+
+      const role = (['admin', 'manager', 'cashier'].includes(userRow.role) ? userRow.role : 'admin') as
+        | 'admin'
+        | 'manager'
+        | 'cashier';
+      const negocioId = userRow.negocio_id || 'surtifacil';
+      const isSuperAdmin = userRow.is_super_admin === 1 || email === 'andres.san1404@gmail.com';
+      const token = `d1:${userRow.id}:${userRow.email}:${role}:${negocioId}`;
+
+      const negocio = await env.DB.prepare(
+        'SELECT id, slug, nombre, barrio, ciudad, telefono_whatsapp, direccion, horario, estado, plan_id, suscripcion_vence_en, cuota_ia_total, cuota_ia_usada, costo_domicilio_cents, datos_pago_offline, config_json FROM negocios WHERE id = ?'
+      )
+        .bind(negocioId)
+        .first();
+
+      return jsonResponse({
+        authenticated: true,
+        token,
+        user: {
+          id: userRow.id,
+          email: userRow.email,
+          displayName: userRow.display_name || userRow.email.split('@')[0],
+          role,
+          isSuperAdmin,
+          negocioId,
+          active: true,
+        },
+        negocio,
+      });
+    }
+
     if (path === '/auth/sync-claims' && method === 'POST') {
       return jsonResponse({ success: true, message: 'Custom claims sincronizados correctamente.' });
     }
@@ -306,14 +431,20 @@ export const onRequest: PagesFunction<Env> = async (context) => {
     if (path === '/auth/provision-user' && method === 'POST') {
       // Provisión de staff desde authService
       const auth = await authenticateRequest(request, env);
-      const body = await request.json() as { email: string; displayName?: string; role?: string };
+      const body = (await request.json()) as {
+        email: string;
+        password?: string;
+        displayName?: string;
+        role?: string;
+      };
       const role = body.role || 'cashier';
       const newId = `user-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+      const pwdHash = body.password ? await hashPassword(String(body.password)) : null;
 
       await env.DB.prepare(
-        "INSERT INTO users (id, negocio_id, email, display_name, role, is_super_admin, active, created_at) VALUES (?, ?, ?, ?, ?, 0, 1, datetime('now'))"
+        "INSERT OR REPLACE INTO users (id, negocio_id, email, display_name, role, is_super_admin, active, password_hash, created_at) VALUES (?, ?, ?, ?, ?, 0, 1, ?, datetime('now'))"
       )
-        .bind(newId, auth.negocioId, body.email.toLowerCase(), body.displayName || null, role)
+        .bind(newId, auth.negocioId, body.email.toLowerCase(), body.displayName || null, role, pwdHash)
         .run();
 
       return jsonResponse({

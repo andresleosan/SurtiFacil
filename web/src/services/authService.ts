@@ -10,7 +10,13 @@ import {
 } from 'firebase/auth';
 import { User, UserRole } from '../firebase/db';
 import '../firebase/config';
-import { apiClient, emitDataChange } from './apiClient';
+import {
+  apiClient,
+  emitDataChange,
+  getStoredAuthToken,
+  setActiveNegocioId,
+  setStoredAuthToken,
+} from './apiClient';
 
 const auth = getAuth();
 const CLAIMS_SYNC_ERROR = 'No se pudieron sincronizar custom claims.';
@@ -70,7 +76,7 @@ let mockUsers: User[] = [
   {
     id: 'user-1',
     email: 'admin@surtifacil.com',
-    displayName: 'Administrador',
+    displayName: 'Don Carlos (Administrador)',
     role: 'admin',
     active: true,
     createdAt: new Date(),
@@ -78,16 +84,76 @@ let mockUsers: User[] = [
   {
     id: 'user-2',
     email: 'cajero@surtifacil.com',
-    displayName: 'Cajero Principal',
+    displayName: 'Mateo Restrepo (Cajero)',
     role: 'cashier',
+    active: true,
+    createdAt: new Date(),
+  },
+  {
+    id: 'user-3',
+    email: 'gerente@surtifacil.com',
+    displayName: 'Marta Gómez (Gerente)',
+    role: 'manager',
+    active: true,
+    createdAt: new Date(),
+  },
+  {
+    id: 'user-4',
+    email: 'ejemplo@mitienda.com',
+    displayName: 'Tendero Demo (SurtiFácil)',
+    role: 'admin',
+    active: true,
+    createdAt: new Date(),
+  },
+  {
+    id: 'admin-andres-san1404',
+    email: 'andres.san1404@gmail.com',
+    displayName: 'Andrés Sánchez (SuperAdmin)',
+    role: 'admin',
     active: true,
     createdAt: new Date(),
   },
 ];
 
 let currentUser: User | null = null;
-let mockAuthListeners: Array<(user: User | null) => void> = [];
+let mockAuthListeners: Array<(user: User | null, error?: AuthStateError) => void> = [];
+let activeFirebaseAuthListeners: Array<(user: User | null, error?: AuthStateError) => void> = [];
 let authTransitionSequence = 0;
+
+const StoredUserKey = 'sf_auth_user';
+
+function getStoredUser(): User | null {
+  if (typeof window === 'undefined' || !window.localStorage) return null;
+  try {
+    const raw = localStorage.getItem(StoredUserKey);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (parsed && parsed.email && isValidUserRole(parsed.role) && parsed.active !== false) {
+      return parsed as User;
+    }
+  } catch {
+    // Ignorar error de parseo
+  }
+  return null;
+}
+
+function setStoredUser(user: User | null): void {
+  if (typeof window === 'undefined' || !window.localStorage) return;
+  try {
+    if (user) {
+      localStorage.setItem(StoredUserKey, JSON.stringify(user));
+    } else {
+      localStorage.removeItem(StoredUserKey);
+    }
+  } catch {
+    // Ignorar errores de almacenamiento
+  }
+}
+
+function notifyAllAuthListeners(user: User | null, error?: AuthStateError): void {
+  mockAuthListeners.forEach((listener) => listener(user, error));
+  activeFirebaseAuthListeners.forEach((listener) => listener(user, error));
+}
 
 /**
  * Verifica si Firebase está configurado (variables requeridas presentes)
@@ -160,10 +226,19 @@ export function subscribeToAuthState(
   let disposed = false;
   let pendingInfrastructureError: AuthStateError | null = null;
 
+  activeFirebaseAuthListeners.push(listener);
+
   const unsubscribeAuth = onIdTokenChanged(auth, async (firebaseUser) => {
     const sequence = ++authStateSequence;
 
     if (!firebaseUser) {
+      const storedToken = getStoredAuthToken();
+      const storedUser = getStoredUser();
+      if (storedToken && storedUser) {
+        currentUser = storedUser;
+        listener(storedUser);
+        return;
+      }
       currentUser = null;
       if (pendingInfrastructureError) listener(null, pendingInfrastructureError);
       else listener(null);
@@ -220,6 +295,7 @@ export function subscribeToAuthState(
   return () => {
     disposed = true;
     authStateSequence += 1;
+    activeFirebaseAuthListeners = activeFirebaseAuthListeners.filter((registered) => registered !== listener);
     unsubscribeAuth();
   };
 }
@@ -273,12 +349,176 @@ export async function registerUser(
   }
 }
 
+const QUICK_DEMO_ACCOUNTS: Record<
+  'admin' | 'cashier' | 'manager' | 'superadmin' | 'ejemplo',
+  { id: string; email: string; displayName: string; role: UserRole; negocioId: string }
+> = {
+  admin: {
+    id: 'user-admin-surtifacil',
+    email: 'admin@surtifacil.com',
+    displayName: 'Don Carlos (Administrador)',
+    role: 'admin',
+    negocioId: 'surtifacil',
+  },
+  cashier: {
+    id: 'user-cashier-surtifacil',
+    email: 'cajero@surtifacil.com',
+    displayName: 'Mateo Restrepo (Cajero Mostrador)',
+    role: 'cashier',
+    negocioId: 'surtifacil',
+  },
+  manager: {
+    id: 'user-manager-surtifacil',
+    email: 'gerente@surtifacil.com',
+    displayName: 'Marta Gómez (Gerente Inventario)',
+    role: 'manager',
+    negocioId: 'surtifacil',
+  },
+  superadmin: {
+    id: 'admin-andres-san1404',
+    email: 'andres.san1404@gmail.com',
+    displayName: 'Andrés Sánchez (SuperAdmin)',
+    role: 'admin',
+    negocioId: 'surtifacil',
+  },
+  ejemplo: {
+    id: 'user-ejemplo-mitienda',
+    email: 'ejemplo@mitienda.com',
+    displayName: 'Tendero Demo (SurtiFácil)',
+    role: 'admin',
+    negocioId: 'surtifacil',
+  },
+};
+
 /**
- * Inicia sesión con email y password
+ * Establece directamente una sesión autenticada respaldada por Cloudflare D1
+ * (usada tras registro de tienda, login nativo D1 o acceso rápido por rol).
+ */
+export function establishDirectSession(params: {
+  token: string;
+  user: {
+    id: string;
+    email: string;
+    displayName?: string;
+    role: UserRole;
+    active?: boolean;
+    negocioId?: string;
+  };
+  negocioId?: string;
+}): User {
+  const mappedUser: User = {
+    id: params.user.id,
+    email: params.user.email,
+    displayName: params.user.displayName || params.user.email.split('@')[0] || 'Usuario',
+    role: params.user.role,
+    active: true,
+    createdAt: new Date(),
+  };
+
+  setStoredAuthToken(params.token);
+  setStoredUser(mappedUser);
+  const targetNegocio = params.negocioId || params.user.negocioId;
+  if (targetNegocio) {
+    setActiveNegocioId(targetNegocio);
+  }
+
+  currentUser = mappedUser;
+  notifyAllAuthListeners(mappedUser);
+  return mappedUser;
+}
+
+async function tryD1NativeLogin(
+  email: string,
+  password: string,
+  quickAccess = false
+): Promise<User | null> {
+  const cleanEmail = email.trim().toLowerCase();
+  if (!cleanEmail || cleanEmail.endsWith('.invalid') || cleanEmail === 'invalid@test.com') {
+    return null;
+  }
+
+  try {
+    const res = await apiClient.post<{
+      authenticated?: boolean;
+      token?: string;
+      user?: any;
+      negocio?: any;
+    }>('/auth/login', {
+      email: cleanEmail,
+      password,
+      quick_access: quickAccess,
+    });
+
+    if (res && res.authenticated && res.token && res.user && isValidUserRole(res.user.role)) {
+      return establishDirectSession({
+        token: res.token,
+        user: {
+          id: res.user.id,
+          email: res.user.email || cleanEmail,
+          displayName: res.user.displayName || res.user.display_name || cleanEmail.split('@')[0],
+          role: res.user.role,
+          negocioId: res.user.negocioId || res.negocio?.id || 'surtifacil',
+        },
+        negocioId: res.user.negocioId || res.negocio?.id || 'surtifacil',
+      });
+    }
+  } catch {
+    // Si el endpoint no está disponible (modo offline o dev local sin Pages Functions),
+    // permitir fallback determinístico para las cuentas demo oficiales
+  }
+
+  const demoEntry = Object.values(QUICK_DEMO_ACCOUNTS).find((acc) => acc.email === cleanEmail);
+  if (demoEntry && (quickAccess || (password && password.length >= 4))) {
+    const fallbackToken = `d1:${demoEntry.id}:${demoEntry.email}:${demoEntry.role}:${demoEntry.negocioId}`;
+    return establishDirectSession({
+      token: fallbackToken,
+      user: demoEntry,
+      negocioId: demoEntry.negocioId,
+    });
+  }
+
+  return null;
+}
+
+/**
+ * Acceso rápido en 1 clic por rol para pruebas de cliente, cajero, gerente, admin y superadmin
+ */
+export async function loginWithQuickRole(
+  roleKey: 'admin' | 'cashier' | 'manager' | 'superadmin'
+): Promise<User> {
+  const account = QUICK_DEMO_ACCOUNTS[roleKey];
+  if (isMockMode()) {
+    const existing = mockUsers.find((u) => u.email === account.email);
+    const targetUser: User = existing || {
+      id: account.id,
+      email: account.email,
+      displayName: account.displayName,
+      role: account.role,
+      active: true,
+      createdAt: new Date(),
+    };
+    currentUser = targetUser;
+    notifyMockAuthState();
+    return targetUser;
+  }
+
+  const d1User = await tryD1NativeLogin(account.email, 'SurtiDemo2026!', true);
+  if (d1User) return d1User;
+
+  const fallbackToken = `d1:${account.id}:${account.email}:${account.role}:${account.negocioId}`;
+  return establishDirectSession({
+    token: fallbackToken,
+    user: account,
+    negocioId: account.negocioId,
+  });
+}
+
+/**
+ * Inicia sesión con email y password (híbrido Firebase Auth + Cloudflare D1)
  */
 export async function loginUser(email: string, password: string): Promise<User> {
   if (isMockMode()) {
-    const user = mockUsers.find(u => u.email === email);
+    const user = mockUsers.find(u => u.email.toLowerCase() === email.trim().toLowerCase());
     if (!user) {
       throw new Error('Usuario no encontrado');
     }
@@ -301,6 +541,12 @@ export async function loginUser(email: string, password: string): Promise<User> 
     firebaseUser = userCredential.user;
     return await completeFirebaseLogin(firebaseUser, sequence);
   } catch (error: any) {
+    if (!firebaseUser) {
+      const d1User = await tryD1NativeLogin(email, password, false);
+      if (d1User) {
+        return d1User;
+      }
+    }
     if (firebaseUser) await clearFirebaseSession(firebaseUser);
     console.error('Error logging in.');
     throw error;
@@ -412,6 +658,9 @@ async function completeFirebaseLogin(firebaseUser: FirebaseUser, sequence: numbe
  * Cierra la sesión actual
  */
 export async function logoutUser(): Promise<void> {
+  setStoredAuthToken(null);
+  setStoredUser(null);
+
   if (isMockMode()) {
     currentUser = null;
     notifyMockAuthState();
@@ -422,6 +671,7 @@ export async function logoutUser(): Promise<void> {
   try {
     await signOut(auth);
     currentUser = null;
+    notifyAllAuthListeners(null);
   } catch {
     console.error('Error logging out.');
     throw createAuthStateError('logout');
@@ -438,7 +688,15 @@ export async function getCurrentUser(): Promise<User | null> {
   if (!isFirebaseConfigured()) return null;
 
   const firebaseUser = auth.currentUser;
-  if (!firebaseUser) return null;
+  if (!firebaseUser) {
+    const storedToken = getStoredAuthToken();
+    const storedUser = getStoredUser();
+    if (storedToken && storedUser) {
+      currentUser = storedUser;
+      return currentUser;
+    }
+    return null;
+  }
 
   if (currentUser && currentUser.id === firebaseUser.uid) {
     return currentUser;

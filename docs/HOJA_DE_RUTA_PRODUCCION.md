@@ -196,5 +196,42 @@ Para maximizar la eficiencia de tokens y la precisión de razonamiento en cada s
        - **Escenario 6:** Contingencia en **Modo Offline Resiliente** en POS (caché IndexedDB + encolado FIFO de venta offline + inspección en modal + reconexión y sincronización automática con el servidor).
     4. **100% de Pruebas en Verde:** 46 suites de prueba en Vitest (363 tests aprobados), compilación de producción impecable (`tsc && vite build`) y 22/22 pruebas activas de Playwright aprobadas (incluyendo los 6 escenarios integrales de `qa/e2e/saas-production.spec.ts` y las suites multi-dispositivo).
 
+---
+
+## Fase 2 — Certificación de Acceso Real en Producción y Pruebas Multi-Rol
+
+- [x] **Tarea 11 — Auto-Migración de Esquema Multi-Tenant en Cloudflare D1 (`dbSchema.ts`) y Semillas Operativas en Producción:**
+  - **Nivel Recomendado:** `3.8 Flash (High)`
+  - **Estado:** ✅ Completada y Desplegada
+  - **Evidencia Técnica de Implementación:**
+    1. **Migrador Idempotente de Esquema en Frío (`web/functions/_lib/dbSchema.ts`):**
+       - Soluciona de raíz el error en producción `D1_ERROR: no such column: negocio_id` y `D1_ERROR: no such table: negocios` en `surtifacil-db` ejecutando automáticamente `ensureDatabaseSchema(env.DB)` antes de cada petición `/api/*` y dentro de `authenticateRequest`.
+       - Crea todas las tablas multi-tenant (`negocios`, `users`, `suppliers`, `products`, `combos`, `credit_customers`, `credit_entries`, `sales`, `sale_items`, `purchase_orders`, `purchase_order_items`, `customer_orders`, `cash_closings`) y migra mediante `ALTER TABLE ... ADD COLUMN` cualquier tabla heredada de Fase 1 añadiendo `negocio_id`, `is_super_admin`, `password_hash`, `visible_kiosco`, `visible_tienda`, `en_oferta`, `precio_oferta_cents`, `last_cost_cents`, etc.
+    2. **Semillas Oficiales de Producción (`INSERT OR IGNORE`):**
+       - Tiendas activas (`surtifacil`, `abastos-la-80`), catálogo completo de abastos visible en Kiosco y Tienda Vecinal, combo `Combo Desayuno Paisa`, clientes de fiados (`Don Carlos Restrepo`, `Doña Marta Gómez`), proveedores y cuentas oficiales por rol (`andres.san1404@gmail.com`, `admin@surtifacil.com`, `gerente@surtifacil.com`, `cajero@surtifacil.com`, `ejemplo@mitienda.com`, `qa@surtifacil.com`).
+
+- [x] **Tarea 12 — Autenticación Híbrida (Firebase + D1 Nativo `/api/auth/login`), Aprovisionamiento Google/Registro y Panel de Acceso Rápido Multi-Rol en `Login.tsx`:**
+  - **Nivel Recomendado:** `Argon (Medium)`
+  - **Estado:** ✅ Completada y Desplegada
+  - **Evidencia Técnica de Implementación:**
+    1. **Endpoint de Login Nativo en Cloudflare D1 (`POST /api/auth/login` en `web/functions/api/[[route]].ts`):**
+       - Verifica usuarios contra la tabla `users` en D1 mediante hash SHA-256 (`hashPassword` con Web Crypto API) para tiendas recién registradas y empleados creados desde `#/users`, además de habilitar el acceso de las cuentas semilla oficiales (`ejemplo@mitienda.com`, `admin@surtifacil.com`, `cajero@surtifacil.com`, `gerente@surtifacil.com`, `andres.san1404@gmail.com`).
+       - Emite tokens de sesión (`d1:<uid>:<email>:<role>:<negocioId>`) validados por `verifyFirebaseIdToken` (`firebaseAuth.ts`) e inyectados automáticamente por `apiClient.ts` (`sf_auth_token`).
+    2. **Auto-Aprovisionamiento en Login con Google y Entrada Directa tras Registro (`authMiddleware.ts` y `RegisterStore.tsx`):**
+       - Cualquier usuario autenticado con Google o Firebase que ingrese por primera vez es auto-aprovisionado automáticamente en la tabla `users` de D1 sin ser rechazado.
+       - Al registrar una nueva tienda en `#/registro-negocio`, se cifra su `password_hash` en D1, se siembran 3 productos iniciales en su catálogo y se habilita el botón **"🚀 Entrar directo a mi tienda ahora"** (`establishDirectSession`) para ingresar en 1 clic sin volver a digitar credenciales.
+    3. **Panel de Acceso Rápido Multi-Rol en `Login.tsx` (`loginWithQuickRole`):**
+       - Botones táctiles (`min-h-[44px]`) en `#/login` para ingresar en 1 clic como **🏪 Admin** (`admin@surtifacil.com`), **🛒 Cajero** (`cajero@surtifacil.com`), **📦 Gerente** (`gerente@surtifacil.com`), **👑 SuperAdmin** (`andres.san1404@gmail.com`), **🛍️ Vista Cliente Tienda** (`#/tienda/surtifacil`) y **📱 Vista Cliente Kiosco** (`#/kiosco/surtifacil`).
+
+- [x] **Tarea 13 — Suite E2E de Certificación de Acceso Multi-Rol (`qa/e2e/access-roles.spec.ts`):**
+  - **Nivel Recomendado:** `Argon (High)`
+  - **Estado:** ✅ Completada y Desplegada
+  - **Evidencia Técnica de Implementación:**
+    1. **Escenario 1:** Inicio de sesión por formulario en `#/login` con `ejemplo@mitienda.com` y verificación de carga del `Panel de Control`.
+    2. **Escenario 2:** Acceso Rápido en 1 Clic para **Cajero**, **Gerente**, **Admin** y **SuperAdmin**, validando redirección a cada módulo y bloqueo RBAC (`Acceso restringido` para Cajero en `#/suppliers` y para Gerente en `#/employees`).
+    3. **Escenario 3:** Registro de nueva tienda en `#/registro-negocio`, entrada directa en 1 clic (`🚀 Entrar directo a mi tienda ahora`), cierre de sesión y re-ingreso mediante correo y contraseña en `#/login`.
+    4. **Escenario 4:** Acceso directo desde `#/login` como **Cliente** hacia **Tienda Vecinal** (`#/tienda/surtifacil`) y **Kiosco Táctil iPad** (`#/kiosco/surtifacil`) verificando catálogo en vivo.
+
+
 
 

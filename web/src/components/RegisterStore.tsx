@@ -1,6 +1,7 @@
 import { useState, useId } from 'react';
 import { SAAS_PLANS, MEDELLIN_NEIGHBORHOODS, type SaaSPlanId, type RegisterStoreInput } from '../types/tenant';
 import { registerStore } from '../services/tenantService';
+import { establishDirectSession } from '../services/authService';
 import { formatCOP } from '../utils/currency';
 import { Icon } from './ui/Icon';
 
@@ -85,7 +86,9 @@ export default function RegisterStore() {
       const result = await registerStore(payload);
       setRegisteredSuccess({
         negocio: result.negocio,
-        email: email.trim(),
+        user: result.user,
+        token: result.token,
+        email: email.trim().toLowerCase(),
       });
     } catch (err: any) {
       setError(err?.message || 'No se pudo registrar la tienda. Inténtalo de nuevo.');
@@ -96,6 +99,28 @@ export default function RegisterStore() {
 
   if (registeredSuccess) {
     const negocio = registeredSuccess.negocio;
+    const targetSlug = negocio?.slug || slug || 'surtifacil';
+
+    const handleDirectEnter = () => {
+      const userId = registeredSuccess.user?.id || `user-${targetSlug}`;
+      const userEmail = registeredSuccess.email || email.trim().toLowerCase();
+      const token =
+        registeredSuccess.token || `d1:${userId}:${userEmail}:admin:${targetSlug}`;
+
+      establishDirectSession({
+        token,
+        user: {
+          id: userId,
+          email: userEmail,
+          displayName: ownerName.trim() || nombre.trim() || 'Administrador',
+          role: 'admin',
+          negocioId: targetSlug,
+        },
+        negocioId: targetSlug,
+      });
+      window.location.hash = '#/dashboard';
+    };
+
     return (
       <main className="min-h-screen bg-sf-light text-sf-text font-poppins flex items-center justify-center px-4 py-12">
         <div className="w-full max-w-lg rounded-2xl bg-white p-8 shadow-md border border-slate-200/90 text-center space-y-6">
@@ -113,7 +138,7 @@ export default function RegisterStore() {
           <div className="rounded-xl bg-slate-50 p-4 border border-slate-200 text-left space-y-2 text-xs sm:text-sm text-slate-700">
             <div className="flex justify-between">
               <span className="text-slate-500">Identificador (Slug):</span>
-              <span className="font-mono font-bold text-sf-primary">#{negocio?.slug || slug}</span>
+              <span className="font-mono font-bold text-sf-primary">#{targetSlug}</span>
             </div>
             <div className="flex justify-between">
               <span className="text-slate-500">Barrio / Comuna:</span>
@@ -132,9 +157,17 @@ export default function RegisterStore() {
           </div>
 
           <div className="pt-2 space-y-3">
+            <button
+              type="button"
+              onClick={handleDirectEnter}
+              className="btn-primary w-full min-h-[48px] flex items-center justify-center gap-2 text-base font-semibold shadow-sm hover:shadow-md transition"
+            >
+              <span>🚀 Entrar directo a mi tienda ahora</span>
+            </button>
+
             <a
               href="#/login"
-              className="btn-primary w-full min-h-[48px] flex items-center justify-center gap-2 text-base font-semibold shadow-sm hover:shadow-md transition"
+              className="btn-secondary w-full min-h-[44px] flex items-center justify-center gap-2 text-sm font-semibold transition"
             >
               <span>Iniciar sesión en mi tienda</span>
               <span>→</span>
