@@ -24,6 +24,7 @@ import {
 } from '../services/reportService';
 import { useIsMobile } from '../hooks/useMediaQuery';
 import { PageHeader } from './ui/PageHeader';
+import { downloadCSV } from '../utils/csvExporter';
 
 const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884D8', '#82CA9D'];
 
@@ -69,22 +70,16 @@ const Reports = () => {
   };
 
   const exportToCSV = () => {
-    const headers = ['Fecha', 'Total', 'Ventas'];
-    const rows = dailySales.map(d => [d.date, String(d.total), String(d.count)]);
+    const headers = ['Fecha', 'Total (COP)', 'Ventas'];
+    const rows = dailySales.map((d) => [d.date, String(Math.round(d.total / 100)), String(d.count)]);
     const esc = (v: string): string => {
       const FORMULA = ['=', '+', '-', '@', '\t', '\r'];
       const needsPrefix = FORMULA.some((ch) => v.startsWith(ch));
       const escaped = v.replace(/"/g, '""').replace(/\n/g, ' ');
       return needsPrefix ? `"'${escaped}"` : `"${escaped}"`;
     };
-    const csvContent = [headers, ...rows].map(row => row.map(esc).join(',')).join('\n');
-    const blob = new Blob([csvContent], { type: 'text/csv' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `ventas_${new Date().toISOString().split('T')[0]}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
+    const csvContent = [headers, ...rows].map((row) => row.map(esc).join(',')).join('\n');
+    downloadCSV(csvContent, `reporte_ventas_${new Date().toISOString().split('T')[0]}.csv`);
   };
 
   if (loading) {

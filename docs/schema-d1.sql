@@ -243,6 +243,30 @@ CREATE TABLE IF NOT EXISTS customer_orders (
 CREATE INDEX IF NOT EXISTS idx_customer_orders_negocio ON customer_orders(negocio_id, status);
 CREATE INDEX IF NOT EXISTS idx_customer_orders_token ON customer_orders(tracking_token);
 
+-- 10.1 Tabla de Arqueos y Cierres de Caja en Pesos Colombianos (COP)
+CREATE TABLE IF NOT EXISTS cash_closings (
+  id TEXT PRIMARY KEY,
+  negocio_id TEXT NOT NULL DEFAULT 'surtifacil' REFERENCES negocios(id) ON DELETE CASCADE,
+  closing_number INTEGER NOT NULL,
+  opened_at TEXT NOT NULL,
+  closed_at TEXT NOT NULL DEFAULT (datetime('now')),
+  closed_by_uid TEXT NOT NULL,
+  closed_by_name TEXT,
+  initial_cash_cents INTEGER NOT NULL DEFAULT 0,
+  sales_cash_cents INTEGER NOT NULL DEFAULT 0,
+  credit_payments_cash_cents INTEGER NOT NULL DEFAULT 0,
+  expected_cash_cents INTEGER NOT NULL,
+  counted_cash_cents INTEGER NOT NULL,
+  difference_cents INTEGER NOT NULL,
+  status TEXT NOT NULL CHECK(status IN ('balanced', 'surplus', 'shortage')),
+  breakdown_json TEXT NOT NULL DEFAULT '{}',
+  notes TEXT,
+  total_sales_count INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_cash_closings_negocio ON cash_closings(negocio_id, closed_at);
+
 -- ==============================================================================
 -- 11. Semillas Iniciales (Negocio Insignia y SuperAdmin de la Plataforma)
 -- ==============================================================================

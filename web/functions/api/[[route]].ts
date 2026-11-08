@@ -826,8 +826,28 @@ export const onRequest: PagesFunction<Env> = async (context) => {
     }
 
     // 5. Ventas y Cobro en Mostrador (/sales)
-    if (path === '/sales' || path === '/sales/create') {
+    if (path === '/sales' || path === '/sales/create' || path.startsWith('/sales/')) {
       const auth = await authenticateRequest(request, env);
+
+      // GET /api/sales/:id (Detalle de venta individual para tirilla térmica)
+      if (method === 'GET' && path.startsWith('/sales/')) {
+        const singleSaleId = path.replace(/^\/sales\//, '');
+        if (singleSaleId && singleSaleId !== 'create') {
+          const sale = await env.DB.prepare('SELECT * FROM sales WHERE id = ? AND negocio_id = ?')
+            .bind(singleSaleId, auth.negocioId)
+            .first<any>();
+          if (!sale) {
+            return errorResponse('Venta no encontrada.', 404);
+          }
+          const items = await env.DB.prepare('SELECT * FROM sale_items WHERE sale_id = ?')
+            .bind(singleSaleId)
+            .all();
+          return jsonResponse({
+            ...sale,
+            items: items.results || [],
+          });
+        }
+      }
 
       // GET /api/sales
       if (method === 'GET') {
@@ -1048,6 +1068,249 @@ export const onRequest: PagesFunction<Env> = async (context) => {
           },
           201
         );
+      }
+    }
+
+    // 5.1 Arqueos y Cierres de Caja COP (/cash-closings)
+    if (path === '/cash-closings' || path.startsWith('/cash-closings/')) {
+      const auth = await authenticateRequest(request, env);
+
+      // Asegurar tabla en D1
+      await env.DB.prepare(
+        `CREATE TABLE IF NOT EXISTS cash_closings (
+          id TEXT PRIMARY KEY,
+          negocio_id TEXT NOT NULL DEFAULT 'surtifacil' REFERENCES negocios(id) ON DELETE CASCADE,
+          closing_number INTEGER NOT NULL,
+          opened_at TEXT NOT NULL,
+          closed_at TEXT NOT NULL DEFAULT (datetime('now')),
+          closed_by_uid TEXT NOT NULL,
+          closed_by_name TEXT,
+          initial_cash_cents INTEGER NOT NULL DEFAULT 0,
+          sales_cash_cents INTEGER NOT NULL DEFAULT 0,
+          credit_payments_cash_cents INTEGER NOT NULL DEFAULT 0,
+          expected_cash_cents INTEGER NOT NULL,
+          counted_cash_cents INTEGER NOT NULL,
+          difference_cents INTEGER NOT NULL,
+          status TEXT NOT NULL CHECK(status IN ('balanced', 'surplus', 'shortage')),
+          breakdown_json TEXT NOT NULL DEFAULT '{}',
+          notes TEXT,
+          total_sales_count INTEGER NOT NULL DEFAULT 0,
+          created_at TEXT DEFAULT (datetime('now'))
+        )`
+      ).run().catch(() => {});
+
+      // GET /api/cash-closings/summary (Resumen de turno actual)
+      if (method === 'GET' && path === '/cash-closings/summary') {
+        const lastClosing = await env.DB.prepare(
+          'SELECT closed_at FROM cash_closings WHERE negocio_id = ? ORDER BY closed_at DESC LIMIT 1'
+        ).bind(auth.negocioId).first<{ closed_at: string }>();
+
+        const now = new Date();
+        const startOfTodayIso = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
+        const openedAt = lastClosing?.closed_at || startOfTodayIso;
+
+        const initialBaseParam = url.searchParams.get('initial_base_cents');
+        const initialCashCents = initialBaseParam !== null ? Math.max(0, parseInt(initialBaseParam, 10) || 0) : 10000000;
+
+        // 1. Ventas en efectivo desde el último cierre
+        const salesCashRow = await env.DB.prepare(
+          "SELECT COUNT(*) as count, COALESCE(SUM(total_cents), 0) as total_cash_cents FROM sales WHERE negocio_id = ? AND payment_method = 'cash' AND created_at >= ?"
+        ).bind(auth.negocioId, openedAt).first<{ count: number; total_cash_cents: number }>();
+
+        const salesCashCents = salesCashRow?.total_cash_cents || 0;
+        const salesCashCount = salesCashRow?.count || 0;
+
+        // 2. Abonos de fiados recibidos en efectivo desde el último cierre
+        const creditPaymentsRow = await env.DB.prepare(
+          "SELECT COUNT(*) as count, COALESCE(SUM(amount_cents), 0) as total_credit_cash_cents FROM credit_entries WHERE negocio_id = ? AND type = 'payment' AND created_at >= ?"
+        ).bind(auth.negocioId, openedAt).first<{ count: number; total_credit_cash_cents: number }>();
+
+        const creditPaymentsCashCents = creditPaymentsRow?.total_credit_cash_cents || 0;
+        const creditPaymentsCashCount = creditPaymentsRow?.count || 0;
+
+        // 3. Ventas por otros medios (tarjeta, otros, fiado) para visibilidad gerencial
+        const otherSalesRows = await env.DB.prepare(
+          "SELECT payment_method, COUNT(*) as count, COALESCE(SUM(total_cents), 0) as total_cents FROM sales WHERE negocio_id = ? AND payment_method != 'cash' AND created_at >= ? GROUP BY payment_method"
+        ).bind(auth.negocioId, openedAt).all<{ payment_method: string; count: number; total_cents: number }>();
+
+        const expectedCashCents = initialCashCents + salesCashCents + creditPaymentsCashCents;
+
+        return jsonResponse({
+          opened_at: openedAt,
+          initial_cash_cents: initialCashCents,
+          sales_cash_cents: salesCashCents,
+          sales_cash_count: salesCashCount,
+          credit_payments_cash_cents: creditPaymentsCashCents,
+          credit_payments_cash_count: creditPaymentsCashCount,
+          expected_cash_cents: expectedCashCents,
+          other_sales: otherSalesRows.results || [],
+        });
+      }
+
+      // POST /api/cash-closings (Guardar Acta de Cierre Inmutable)
+      if (method === 'POST' && path === '/cash-closings') {
+        const body = (await request.json()) as {
+          initial_cash_cents?: number;
+          breakdown?: {
+            bills?: Record<string, number>;
+            coins?: Record<string, number>;
+          };
+          notes?: string;
+        };
+
+        const initialCashCents = Math.max(0, Math.floor(Number(body.initial_cash_cents) || 0));
+
+        const BILL_VALUES_CENTS: Record<string, number> = {
+          '100000': 10000000,
+          '50000': 5000000,
+          '20000': 2000000,
+          '10000': 1000000,
+          '5000': 500000,
+          '2000': 200000,
+        };
+
+        const COIN_VALUES_CENTS: Record<string, number> = {
+          '1000': 100000,
+          '500': 50000,
+          '200': 20000,
+          '100': 10000,
+          '50': 5000,
+        };
+
+        let countedCashCents = 0;
+        const billsBreakdown: Record<string, number> = {};
+        const coinsBreakdown: Record<string, number> = {};
+
+        if (body.breakdown?.bills) {
+          for (const [denom, count] of Object.entries(body.breakdown.bills)) {
+            const qty = Math.max(0, Math.floor(Number(count) || 0));
+            billsBreakdown[denom] = qty;
+            const unitCents = BILL_VALUES_CENTS[denom] ?? (Number(denom) * 100);
+            countedCashCents += unitCents * qty;
+          }
+        }
+
+        if (body.breakdown?.coins) {
+          for (const [denom, count] of Object.entries(body.breakdown.coins)) {
+            const qty = Math.max(0, Math.floor(Number(count) || 0));
+            coinsBreakdown[denom] = qty;
+            const unitCents = COIN_VALUES_CENTS[denom] ?? (Number(denom) * 100);
+            countedCashCents += unitCents * qty;
+          }
+        }
+
+        const lastClosing = await env.DB.prepare(
+          'SELECT closed_at FROM cash_closings WHERE negocio_id = ? ORDER BY closed_at DESC LIMIT 1'
+        ).bind(auth.negocioId).first<{ closed_at: string }>();
+
+        const now = new Date();
+        const startOfTodayIso = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
+        const openedAt = lastClosing?.closed_at || startOfTodayIso;
+
+        const salesCashRow = await env.DB.prepare(
+          "SELECT COUNT(*) as count, COALESCE(SUM(total_cents), 0) as total_cash_cents FROM sales WHERE negocio_id = ? AND payment_method = 'cash' AND created_at >= ?"
+        ).bind(auth.negocioId, openedAt).first<{ count: number; total_cash_cents: number }>();
+
+        const salesCashCents = salesCashRow?.total_cash_cents || 0;
+        const totalSalesCount = salesCashRow?.count || 0;
+
+        const creditPaymentsRow = await env.DB.prepare(
+          "SELECT COUNT(*) as count, COALESCE(SUM(amount_cents), 0) as total_credit_cash_cents FROM credit_entries WHERE negocio_id = ? AND type = 'payment' AND created_at >= ?"
+        ).bind(auth.negocioId, openedAt).first<{ count: number; total_credit_cash_cents: number }>();
+
+        const creditPaymentsCashCents = creditPaymentsRow?.total_credit_cash_cents || 0;
+
+        const expectedCashCents = initialCashCents + salesCashCents + creditPaymentsCashCents;
+        const differenceCents = countedCashCents - expectedCashCents;
+
+        let status: 'balanced' | 'surplus' | 'shortage' = 'balanced';
+        if (differenceCents > 0) status = 'surplus';
+        else if (differenceCents < 0) status = 'shortage';
+
+        const maxNumberRow = await env.DB.prepare(
+          'SELECT COALESCE(MAX(closing_number), 0) + 1 as next_number FROM cash_closings WHERE negocio_id = ?'
+        ).bind(auth.negocioId).first<{ next_number: number }>();
+
+        const closingNumber = maxNumberRow?.next_number || 1;
+        const closingId = `cclose-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+        const closedAt = new Date().toISOString();
+
+        await env.DB.prepare(
+          `INSERT INTO cash_closings (
+            id, negocio_id, closing_number, opened_at, closed_at, closed_by_uid, closed_by_name,
+            initial_cash_cents, sales_cash_cents, credit_payments_cash_cents, expected_cash_cents,
+            counted_cash_cents, difference_cents, status, breakdown_json, notes, total_sales_count, created_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`
+        ).bind(
+          closingId,
+          auth.negocioId,
+          closingNumber,
+          openedAt,
+          closedAt,
+          auth.user.id,
+          auth.user.displayName || auth.user.email,
+          initialCashCents,
+          salesCashCents,
+          creditPaymentsCashCents,
+          expectedCashCents,
+          countedCashCents,
+          differenceCents,
+          status,
+          JSON.stringify({ bills: billsBreakdown, coins: coinsBreakdown }),
+          body.notes?.trim() || null,
+          totalSalesCount
+        ).run();
+
+        const createdRecord = await env.DB.prepare(
+          'SELECT * FROM cash_closings WHERE id = ? AND negocio_id = ?'
+        ).bind(closingId, auth.negocioId).first<any>();
+
+        return jsonResponse({
+          ...createdRecord,
+          breakdown: { bills: billsBreakdown, coins: coinsBreakdown },
+        }, 201);
+      }
+
+      // GET /api/cash-closings (Historial de cierres)
+      if (method === 'GET' && path === '/cash-closings') {
+        const rows = await env.DB.prepare(
+          'SELECT * FROM cash_closings WHERE negocio_id = ? ORDER BY closed_at DESC LIMIT 50'
+        ).bind(auth.negocioId).all<any>();
+
+        const mapped = (rows.results || []).map((row) => {
+          let breakdown = { bills: {}, coins: {} };
+          try {
+            breakdown = typeof row.breakdown_json === 'string' ? JSON.parse(row.breakdown_json) : row.breakdown_json;
+          } catch {}
+          return {
+            ...row,
+            breakdown,
+          };
+        });
+
+        return jsonResponse(mapped);
+      }
+
+      // GET /api/cash-closings/:id
+      if (method === 'GET' && path.startsWith('/cash-closings/')) {
+        const targetId = path.replace(/^\/cash-closings\//, '');
+        const record = await env.DB.prepare(
+          'SELECT * FROM cash_closings WHERE id = ? AND negocio_id = ?'
+        ).bind(targetId, auth.negocioId).first<any>();
+
+        if (!record) {
+          return errorResponse('Acta de cierre no encontrada.', 404);
+        }
+
+        let breakdown = { bills: {}, coins: {} };
+        try {
+          breakdown = typeof record.breakdown_json === 'string' ? JSON.parse(record.breakdown_json) : record.breakdown_json;
+        } catch {}
+
+        return jsonResponse({
+          ...record,
+          breakdown,
+        });
       }
     }
 

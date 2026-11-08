@@ -87,3 +87,61 @@
     bottom: calc(4rem + env(safe-area-inset-bottom));
   }
 }
+
+/* ==============================================================================
+   Estilos de Impresión Térmica de Mostrador (58mm / 80mm)
+   ============================================================================== */
+@media print {
+  body {
+    background-color: #ffffff !important;
+    color: #000000 !important;
+    font-size: 12px !important;
+  }
+
+  /* Ocultar elementos de navegación, modales exteriores y botones */
+  nav,
+  aside,
+  header,
+  footer,
+  .no-print,
+  .bottom-tabbar,
+  [role="dialog"] > div:first-child:not(.thermal-receipt-printable) {
+    display: none !important;
+  }
+
+  /* Contenedores térmicos optimizados para 58mm y 80mm */
+  .thermal-receipt-printable {
+    display: block !important;
+    position: absolute !important;
+    left: 0 !important;
+    top: 0 !important;
+    width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: #ffffff !important;
+    color: #000000 !important;
+    box-shadow: none !important;
+    border: none !important;
+  }
+
+  .thermal-58mm {
+    width: 58mm !important;
+    max-width: 58mm !important;
+    margin: 0 auto !important;
+    padding: 2mm !important;
+    font-family: monospace, "Courier New", Courier !important;
+    font-size: 11px !important;
+    line-height: 1.2 !important;
+  }
+
+  .thermal-80mm {
+    width: 80mm !important;
+    max-width: 80mm !important;
+    margin: 0 auto !important;
+    padding: 3mm !important;
+    font-family: monospace, "Courier New", Courier !important;
+    font-size: 13px !important;
+    line-height: 1.25 !important;
+  }
+}
+

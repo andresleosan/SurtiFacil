@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { CreditCustomer, PaymentMethod, Product, SaleItem } from '../firebase/db';
+import { CreditCustomer, PaymentMethod, Product, SaleItem, Sale } from '../firebase/db';
 import { createSale } from '../services/saleService';
 import { useProducts } from '../hooks/useProducts';
 import { useCreditCustomers } from '../hooks/useCreditCustomers';
@@ -14,6 +14,8 @@ import { LiveOrdersTray } from './LiveOrdersTray';
 import type { CustomerOrder } from '../types/customerOrder';
 import { SarinVoicePOS } from './SarinVoicePOS';
 import type { VoiceSaleCommandResult } from '../utils/sarinVoiceParser';
+import ThermalReceiptModal from './ThermalReceiptModal';
+import CashClosingModal from './CashClosingModal';
 
 const PAYMENT_OPTIONS: Array<{ value: PaymentMethod; label: string; emoji: string }> = [
   { value: 'cash', label: 'Efectivo', emoji: '💵' },
@@ -45,6 +47,9 @@ const CreateSale = () => {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState(false);
   const [activeTab, setActiveTab] = useState<'pos' | 'orders'>('pos');
+  const [lastCreatedSale, setLastCreatedSale] = useState<Sale | null>(null);
+  const [receiptModalOpen, setReceiptModalOpen] = useState(false);
+  const [closingModalOpen, setClosingModalOpen] = useState(false);
 
   const handleLoadOrderToCart = (order: CustomerOrder) => {
     const items = order.items || [];
@@ -236,13 +241,27 @@ const CreateSale = () => {
     try {
       setSubmitting(true);
       setError('');
-      await createSale(cartItems, paymentMethod, paymentMethod === 'credit' ? creditCustomerId : undefined);
+      const itemsSnapshot = [...cartItems];
+      const methodSnapshot = paymentMethod;
+      const creditCust = creditCustomers.find((c) => c.id === creditCustomerId);
+      const saleId = await createSale(cartItems, paymentMethod, paymentMethod === 'credit' ? creditCustomerId : undefined);
+      const createdSaleObj: Sale = {
+        id: saleId,
+        date: new Date(),
+        total,
+        payment_method: methodSnapshot,
+        credit_customer_id: creditCust?.id,
+        credit_customer_name: creditCust?.name,
+        items: itemsSnapshot,
+        createdAt: new Date(),
+      };
+      setLastCreatedSale(createdSaleObj);
       setSuccess(true);
       setCartItems([]);
       setPaymentMethod('cash');
       setCreditCustomerId('');
       setCartOpen(false);
-      window.setTimeout(() => setSuccess(false), 4000);
+      window.setTimeout(() => setSuccess(false), 8000);
     } catch (err: unknown) {
       setError(err instanceof Error && err.message ? err.message : 'Error al crear la venta');
     } finally {
@@ -273,6 +292,15 @@ const CreateSale = () => {
       <PageHeader
         title="Nueva venta"
         description={isMobile ? undefined : 'Toca un producto para agregarlo al carrito o atiende pedidos en vivo.'}
+        actions={
+          <button
+            type="button"
+            onClick={() => setClosingModalOpen(true)}
+            className="btn-secondary min-h-[44px] px-3 text-xs font-bold text-slate-700 hover:text-slate-900 flex items-center gap-2"
+          >
+            <span>🔒 Arqueo / Cierre COP</span>
+          </button>
+        }
       />
 
       {/* Selector de Modo Mostrador / Bandeja de Pedidos */}
@@ -322,8 +350,38 @@ const CreateSale = () => {
             </div>
           )}
           {success && (
-            <div role="status" className="rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-700">
-              ✅ Venta registrada exitosamente
+            <div role="status" className="rounded-xl border border-green-200 bg-green-50 p-4 text-green-900 shadow-sm">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <span className="text-xl">✅</span>
+                  <div>
+                    <span className="font-bold text-sm block">Venta registrada exitosamente</span>
+                    {lastCreatedSale && (
+                      <span className="text-xs text-green-800">
+                        Comprobante #{lastCreatedSale.id.slice(0, 8)} · {formatCentsCOP(lastCreatedSale.total)}
+                      </span>
+                    )}
+                  </div>
+                </div>
+                {lastCreatedSale && (
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setReceiptModalOpen(true)}
+                      className="btn-primary min-h-[38px] px-3 text-xs font-semibold"
+                    >
+                      🖨️ Tirilla Térmica
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setReceiptModalOpen(true)}
+                      className="btn-success min-h-[38px] px-3 text-xs font-semibold"
+                    >
+                      📲 Enviar WhatsApp
+                    </button>
+                  </div>
+                )}
+              </div>
             </div>
           )}
           {productsError && !error && (
@@ -448,6 +506,21 @@ const CreateSale = () => {
       )}
 
       {isScannerOpen && <BarcodeScanner onScan={handleScan} onClose={closeScanner} />}
+
+      {receiptModalOpen && lastCreatedSale && (
+        <ThermalReceiptModal
+          isOpen={receiptModalOpen}
+          onClose={() => setReceiptModalOpen(false)}
+          sale={lastCreatedSale}
+        />
+      )}
+
+      {closingModalOpen && (
+        <CashClosingModal
+          isOpen={closingModalOpen}
+          onClose={() => setClosingModalOpen(false)}
+        />
+      )}
     </section>
   );
 };

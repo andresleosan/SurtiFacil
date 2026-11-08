@@ -4,6 +4,10 @@ import { getRecentSales } from '../services/saleService';
 import { useIsMobile } from '../hooks/useMediaQuery';
 import { Icon } from './ui/Icon';
 import { PageHeader } from './ui/PageHeader';
+import { formatCentsCOP } from '../utils/currency';
+import { exportSalesToCSV } from '../utils/csvExporter';
+import ThermalReceiptModal from './ThermalReceiptModal';
+import CashClosingModal from './CashClosingModal';
 
 const PAGE_SIZE = 50;
 
@@ -43,6 +47,8 @@ const Sales = () => {
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState('');
   const [expandedSaleId, setExpandedSaleId] = useState<string | null>(null);
+  const [selectedSaleForReceipt, setSelectedSaleForReceipt] = useState<Sale | null>(null);
+  const [closingModalOpen, setClosingModalOpen] = useState(false);
 
   const loadFirstPage = useCallback(async () => {
     try {
@@ -84,14 +90,42 @@ const Sales = () => {
     setExpandedSaleId((current) => (current === saleId ? null : saleId));
   };
 
+  const handleExportCSV = () => {
+    if (sales.length === 0) return;
+    exportSalesToCSV(sales);
+  };
+
   const header = (
     <PageHeader
       title="Historial de ventas"
       actions={
-        <button type="button" onClick={() => void loadFirstPage()} disabled={loading} className="btn-secondary">
-          <Icon name="refresh" size={18} />
-          Actualizar
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setClosingModalOpen(true)}
+            className="btn-secondary min-h-[44px] px-3 text-xs font-semibold text-slate-800"
+          >
+            <span>🔒 Arqueo / Cierre COP</span>
+          </button>
+          <button
+            type="button"
+            onClick={handleExportCSV}
+            disabled={sales.length === 0}
+            className="btn-secondary min-h-[44px] px-3 text-xs font-semibold text-slate-800"
+          >
+            <Icon name="clipboard" size={16} />
+            <span>📥 Exportar Excel</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => void loadFirstPage()}
+            disabled={loading}
+            className="btn-secondary min-h-[44px] px-3 text-xs font-semibold text-slate-800"
+          >
+            <Icon name="refresh" size={16} />
+            <span>Actualizar</span>
+          </button>
+        </div>
       }
     />
   );
@@ -149,7 +183,7 @@ const Sales = () => {
                   <span className="font-semibold text-sf-primary">{formatPrice(sale.total)}</span>
                   <Icon name={expanded ? 'chevron-down' : 'chevron-right'} className="text-gray-400" size={18} />
                 </button>
-                {expanded && <SaleDetails sale={sale} />}
+                {expanded && <SaleDetails sale={sale} onViewReceipt={setSelectedSaleForReceipt} />}
               </li>
             );
           })}
@@ -197,7 +231,7 @@ const Sales = () => {
           </div>
           {expandedSaleId && (() => {
             const selected = sales.find((sale) => sale.id === expandedSaleId);
-            return selected ? <SaleDetails sale={selected} /> : null;
+            return selected ? <SaleDetails sale={selected} onViewReceipt={setSelectedSaleForReceipt} /> : null;
           })()}
         </div>
       )}
@@ -209,14 +243,40 @@ const Sales = () => {
           </button>
         </div>
       )}
+
+      {selectedSaleForReceipt && (
+        <ThermalReceiptModal
+          isOpen={Boolean(selectedSaleForReceipt)}
+          onClose={() => setSelectedSaleForReceipt(null)}
+          sale={selectedSaleForReceipt}
+        />
+      )}
+
+      {closingModalOpen && (
+        <CashClosingModal
+          isOpen={closingModalOpen}
+          onClose={() => setClosingModalOpen(false)}
+          onClosedSuccess={() => void loadFirstPage()}
+        />
+      )}
     </section>
   );
 };
 
-function SaleDetails({ sale }: { sale: Sale }) {
+function SaleDetails({ sale, onViewReceipt }: { sale: Sale; onViewReceipt: (sale: Sale) => void }) {
   return (
     <div className="space-y-3 border-t border-gray-200 bg-sf-light px-4 py-4">
-      <h4 className="font-semibold text-sf-text">Detalles de la venta</h4>
+      <div className="flex items-center justify-between">
+        <h4 className="font-semibold text-sf-text">Detalles de la venta</h4>
+        <button
+          type="button"
+          onClick={() => onViewReceipt(sale)}
+          className="btn-primary min-h-[38px] px-3 text-xs flex items-center gap-1.5"
+        >
+          <Icon name="receipt" size={16} />
+          <span>🖨️ Ver Tirilla Térmica</span>
+        </button>
+      </div>
       <dl className="grid grid-cols-2 gap-3 text-sm md:grid-cols-4">
         <div className="col-span-2 md:col-span-1">
           <dt className="text-gray-600">ID Venta</dt>

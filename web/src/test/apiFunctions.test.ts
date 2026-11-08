@@ -19,6 +19,7 @@ class MockD1Database implements D1Database {
     customer_orders: any[];
     whatsapp_conversations: any[];
     whatsapp_messages: any[];
+    cash_closings: any[];
   };
 
   constructor() {
@@ -126,6 +127,7 @@ class MockD1Database implements D1Database {
         },
       ],
       whatsapp_messages: [],
+      cash_closings: [],
     };
   }
 
@@ -235,6 +237,29 @@ class MockD1Database implements D1Database {
           return { results: p ? [p as T] : [], success: true };
         }
 
+        if (q.includes('FROM sales') && q.includes("payment_method = 'cash'")) {
+          const sales = db.tables.sales.filter(
+            (s) => s.negocio_id === boundValues[0] && s.payment_method === 'cash'
+          );
+          const totalCash = sales.reduce((acc, s) => acc + (s.total_cents || s.total || 0), 0);
+          return { results: [{ count: sales.length, total_cash_cents: totalCash } as unknown as T], success: true };
+        }
+
+        if (q.includes('FROM credit_entries') && q.includes("type = 'payment'")) {
+          const entries = db.tables.credit_entries.filter(
+            (e) => e.negocio_id === boundValues[0] && e.type === 'payment'
+          );
+          const totalCash = entries.reduce((acc, e) => acc + (e.amount_cents || 0), 0);
+          return { results: [{ count: entries.length, total_credit_cash_cents: totalCash } as unknown as T], success: true };
+        }
+
+        if (q.includes('FROM sales WHERE id = ? AND negocio_id = ?')) {
+          const s = db.tables.sales.find(
+            (sale) => sale.id === boundValues[0] && sale.negocio_id === boundValues[1]
+          );
+          return { results: s ? [s as T] : [], success: true };
+        }
+
         if (q.includes('FROM sales WHERE negocio_id = ?')) {
           const s = db.tables.sales.filter((sale) => sale.negocio_id === boundValues[0]);
           return { results: s as T[], success: true };
@@ -333,6 +358,33 @@ class MockD1Database implements D1Database {
             (m) => m.conversation_id === boundValues[0] && (!boundValues[1] || m.negocio_id === boundValues[1])
           );
           return { results: list as T[], success: true };
+        }
+
+        if (q.includes('FROM cash_closings') && q.includes('ORDER BY closed_at DESC LIMIT 1')) {
+          const list = db.tables.cash_closings
+            .filter((c) => c.negocio_id === boundValues[0])
+            .sort((a, b) => new Date(b.closed_at).getTime() - new Date(a.closed_at).getTime());
+          return { results: list.length > 0 ? [list[0] as T] : [], success: true };
+        }
+
+        if (q.includes('FROM cash_closings') && q.includes('ORDER BY closed_at DESC')) {
+          const list = db.tables.cash_closings
+            .filter((c) => c.negocio_id === boundValues[0])
+            .sort((a, b) => new Date(b.closed_at).getTime() - new Date(a.closed_at).getTime());
+          return { results: list as T[], success: true };
+        }
+
+        if (q.includes('FROM cash_closings') && q.includes('WHERE id = ? AND negocio_id = ?')) {
+          const c = db.tables.cash_closings.find(
+            (cl) => cl.id === boundValues[0] && cl.negocio_id === boundValues[1]
+          );
+          return { results: c ? [c as T] : [], success: true };
+        }
+
+        if (q.includes('SELECT COALESCE(MAX(closing_number), 0) + 1 as next_number FROM cash_closings')) {
+          const closings = db.tables.cash_closings.filter((c) => c.negocio_id === boundValues[0]);
+          const maxNum = closings.reduce((max, c) => Math.max(max, c.closing_number || 0), 0);
+          return { results: [{ next_number: maxNum + 1 } as unknown as T], success: true };
         }
 
         return { results: [], success: true };
@@ -659,6 +711,30 @@ class MockD1Database implements D1Database {
               conv.last_message_text = lastMsg;
             }
           }
+        }
+
+        if (q.startsWith('INSERT INTO cash_closings')) {
+          const [id, negocio_id, closing_number, opened_at, closed_at, closed_by_uid, closed_by_name, initial_cash_cents, sales_cash_cents, credit_payments_cash_cents, expected_cash_cents, counted_cash_cents, difference_cents, status, breakdown_json, notes, total_sales_count] = boundValues;
+          db.tables.cash_closings.push({
+            id,
+            negocio_id,
+            closing_number,
+            opened_at,
+            closed_at,
+            closed_by_uid,
+            closed_by_name,
+            initial_cash_cents,
+            sales_cash_cents,
+            credit_payments_cash_cents,
+            expected_cash_cents,
+            counted_cash_cents,
+            difference_cents,
+            status,
+            breakdown_json,
+            notes,
+            total_sales_count,
+            created_at: new Date().toISOString(),
+          });
         }
 
         if (q.includes('UPDATE negocios') && q.includes('cuota_ia_usada = cuota_ia_usada + 1')) {
@@ -1313,5 +1389,112 @@ describe('Cloudflare Pages Functions API (/api/*)', () => {
     const webData = await webRes.json();
     expect(webData.success).toBe(true);
     expect(webData.reply).toContain('Arroz');
+  });
+
+  it('calcula resumen de turno, registra arqueo físico COP y lista actas de cierre', async () => {
+    const db = new MockD1Database();
+
+    // 1. Simular una venta en efectivo en la base de datos
+    db.tables.sales.push({
+      id: 'sale-test-cash',
+      negocio_id: 'surtifacil',
+      total_cents: 3500000, // $ 35.000 COP
+      payment_method: 'cash',
+      created_at: new Date().toISOString(),
+    });
+
+    // 2. GET /api/cash-closings/summary
+    const summaryCtx = createMockContext(
+      'GET',
+      'http://localhost/api/cash-closings/summary?initial_base_cents=10000000',
+      { Authorization: 'Bearer mock:admin-1:admin@surtifacil.com:admin' },
+      null,
+      db
+    );
+    const summaryRes = await onRequest(summaryCtx as any);
+    expect(summaryRes.status).toBe(200);
+    const summaryData = await summaryRes.json();
+    expect(summaryData.initial_cash_cents).toBe(10000000); // $ 100.000 COP
+    expect(summaryData.sales_cash_cents).toBe(3500000); // $ 35.000 COP
+    expect(summaryData.expected_cash_cents).toBe(13500000); // $ 135.000 COP
+
+    // 3. POST /api/cash-closings con denominaciones COP contadas exactamente (cuadrado)
+    // 1 billete de 100.000 ($100k = 10000000 cents) + 1 billete de 20.000 ($20k = 2000000 cents) + 15 monedas de 1.000 ($15k = 1500000 cents) = $ 135.000 COP
+    const closingCtx = createMockContext(
+      'POST',
+      'http://localhost/api/cash-closings',
+      { Authorization: 'Bearer mock:admin-1:admin@surtifacil.com:admin' },
+      {
+        initial_cash_cents: 10000000,
+        breakdown: {
+          bills: {
+            '100000': 1,
+            '20000': 1,
+          },
+          coins: {
+            '1000': 15,
+          },
+        },
+        notes: 'Arqueo de turno tarde sin novedades',
+      },
+      db
+    );
+    const closingRes = await onRequest(closingCtx as any);
+    expect(closingRes.status).toBe(201);
+    const closingData = await closingRes.json();
+    expect(closingData.counted_cash_cents).toBe(13500000);
+    expect(closingData.expected_cash_cents).toBe(13500000);
+    expect(closingData.difference_cents).toBe(0);
+    expect(closingData.status).toBe('balanced');
+    expect(closingData.closing_number).toBe(1);
+
+    // 4. GET /api/cash-closings
+    const listCtx = createMockContext(
+      'GET',
+      'http://localhost/api/cash-closings',
+      { Authorization: 'Bearer mock:admin-1:admin@surtifacil.com:admin' },
+      null,
+      db
+    );
+    const listRes = await onRequest(listCtx as any);
+    expect(listRes.status).toBe(200);
+    const listData = await listRes.json();
+    expect(Array.isArray(listData)).toBe(true);
+    expect(listData.length).toBe(1);
+    expect(listData[0].notes).toBe('Arqueo de turno tarde sin novedades');
+  });
+
+  it('obtiene una venta individual por ID para emisión de tirilla térmica', async () => {
+    const db = new MockD1Database();
+    db.tables.sales.push({
+      id: 'sale-single-1',
+      negocio_id: 'surtifacil',
+      total_cents: 1250000,
+      payment_method: 'cash',
+      created_at: new Date().toISOString(),
+    });
+    db.tables.sale_items.push({
+      id: 'item-1',
+      sale_id: 'sale-single-1',
+      product_id: 'p-1',
+      product_name: 'Arroz Diana 1kg',
+      quantity: 2,
+      price_cents: 420000,
+      subtotal_cents: 840000,
+    });
+
+    const ctx = createMockContext(
+      'GET',
+      'http://localhost/api/sales/sale-single-1',
+      { Authorization: 'Bearer mock:cashier-1:cajero@surtifacil.com:cashier' },
+      null,
+      db
+    );
+    const res = await onRequest(ctx as any);
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.id).toBe('sale-single-1');
+    expect(data.items.length).toBe(1);
+    expect(data.items[0].product_name).toBe('Arroz Diana 1kg');
   });
 });

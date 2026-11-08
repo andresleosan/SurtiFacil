@@ -151,7 +151,7 @@ export const apiClient = {
 // Bus de Eventos Reactivo en Cliente
 // Reemplaza los listeners de Firestore en vivo
 // ==========================================
-export type DataEntity = 'products' | 'sales' | 'credits' | 'suppliers' | 'orders' | 'users' | 'combos' | 'settings';
+export type DataEntity = 'products' | 'sales' | 'credits' | 'suppliers' | 'orders' | 'users' | 'combos' | 'settings' | 'cash-closings';
 
 const eventBus = new EventTarget();
 

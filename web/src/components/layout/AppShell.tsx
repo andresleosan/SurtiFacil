@@ -7,6 +7,7 @@ import { Icon } from '../ui/Icon';
 import { Modal } from '../ui/Modal';
 import { findNavItem, MOBILE_TAB_LABELS, MOBILE_TAB_PAGES, NAV_GROUPS, NAV_ITEMS } from './navItems';
 import { SarinBusinessCopilot } from '../SarinBusinessCopilot';
+import CashClosingModal from '../CashClosingModal';
 
 const SIDEBAR_STORAGE_KEY = 'surtifacil.sidebar.collapsed';
 
@@ -55,6 +56,7 @@ function initials(user: User): string {
 export function AppShell({ user, page, onNavigate, onLogout, children }: AppShellProps) {
   const isMobile = useIsMobile();
   const [copilotOpen, setCopilotOpen] = useState(false);
+  const [closingModalOpen, setClosingModalOpen] = useState(false);
   const visibleItems = useMemo(
     () => NAV_ITEMS.filter((item) => canAccessPage(user.role, item.page)),
     [user.role],
@@ -70,6 +72,7 @@ export function AppShell({ user, page, onNavigate, onLogout, children }: AppShel
           onNavigate={onNavigate}
           onLogout={onLogout}
           onOpenCopilot={() => setCopilotOpen(true)}
+          onOpenClosingModal={() => setClosingModalOpen(true)}
         />
       )}
       <div className="flex min-w-0 flex-1 flex-col">
@@ -82,6 +85,7 @@ export function AppShell({ user, page, onNavigate, onLogout, children }: AppShel
             onNavigate={onNavigate}
             onLogout={onLogout}
             onOpenCopilot={() => setCopilotOpen(true)}
+            onOpenClosingModal={() => setClosingModalOpen(true)}
           />
         )}
         <main className={`container mx-auto w-full flex-1 px-4 py-4 md:px-6 md:py-8 ${isMobile ? 'pb-tabbar' : ''}`}>
@@ -96,11 +100,15 @@ export function AppShell({ user, page, onNavigate, onLogout, children }: AppShel
           onNavigate={onNavigate}
           onLogout={onLogout}
           onOpenCopilot={() => setCopilotOpen(true)}
+          onOpenClosingModal={() => setClosingModalOpen(true)}
         />
       )}
 
       {/* Modal / Asesor Copiloto Gerencial Sarin */}
       <SarinBusinessCopilot isOpen={copilotOpen} onClose={() => setCopilotOpen(false)} />
+
+      {/* Modal Arqueo y Cierre de Caja COP */}
+      <CashClosingModal isOpen={closingModalOpen} onClose={() => setClosingModalOpen(false)} />
     </div>
   );
 }
@@ -112,9 +120,10 @@ interface NavProps {
   onNavigate: (page: Page) => void;
   onLogout: () => void;
   onOpenCopilot?: () => void;
+  onOpenClosingModal?: () => void;
 }
 
-function Sidebar({ user, page, items, onNavigate, onLogout, onOpenCopilot }: NavProps) {
+function Sidebar({ user, page, items, onNavigate, onLogout, onOpenCopilot, onOpenClosingModal }: NavProps) {
   const isWide = useIsWideScreen();
   const [storedCollapsed, setStoredCollapsed] = useState<boolean | null>(() => readStoredCollapsed());
   const collapsed = storedCollapsed ?? !isWide;
@@ -276,6 +285,18 @@ function Sidebar({ user, page, items, onNavigate, onLogout, onOpenCopilot }: Nav
                           </li>
                         );
                       })}
+                      {group.id === 'sales' && (
+                        <li key="cash-closing-launcher">
+                          <button
+                            type="button"
+                            onClick={onOpenClosingModal}
+                            className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm font-medium text-emerald-400 hover:bg-white/10 hover:text-emerald-300 transition"
+                          >
+                            <span className="text-base">🔒</span>
+                            <span className="truncate">Arqueo y Cierre COP</span>
+                          </button>
+                        </li>
+                      )}
                       {group.id === 'channels' && (
                         <>
                           <li key="storefront-mode-launcher">
@@ -353,9 +374,10 @@ interface DesktopTopBarProps {
   onNavigate: (page: Page) => void;
   onLogout: () => void;
   onOpenCopilot?: () => void;
+  onOpenClosingModal?: () => void;
 }
 
-function DesktopTopBar({ user, page, onNavigate, onLogout, onOpenCopilot }: DesktopTopBarProps) {
+function DesktopTopBar({ user, page, onNavigate, onLogout, onOpenCopilot, onOpenClosingModal }: DesktopTopBarProps) {
   const current = findNavItem(page);
   const [profileOpen, setProfileOpen] = useState(false);
   const isSuperAdmin = user.email.toLowerCase() === 'andres.san1404@gmail.com' || (user as any).isSuperAdmin;
@@ -490,6 +512,17 @@ function DesktopTopBar({ user, page, onNavigate, onLogout, onOpenCopilot }: Desk
                     type="button"
                     onClick={() => {
                       setProfileOpen(false);
+                      onOpenClosingModal?.();
+                    }}
+                    className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-xs font-semibold text-emerald-700 hover:bg-emerald-50"
+                  >
+                    <span className="text-sm">🔒</span>
+                    Arqueo y Cierre COP
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setProfileOpen(false);
                       onLogout();
                     }}
                     className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-xs font-medium text-red-600 hover:bg-red-50"
@@ -536,7 +569,7 @@ function MobileTopBar({ user, page, onOpenCopilot }: { user: User; page: Page; o
   );
 }
 
-function MobileTabBar({ user, page, items, onNavigate, onLogout, onOpenCopilot }: NavProps) {
+function MobileTabBar({ user, page, items, onNavigate, onLogout, onOpenCopilot, onOpenClosingModal }: NavProps) {
   const [moreOpen, setMoreOpen] = useState(false);
   const tabItems = items.filter((item) => MOBILE_TAB_PAGES.includes(item.page));
   const moreItems = items.filter((item) => !MOBILE_TAB_PAGES.includes(item.page));
@@ -631,6 +664,20 @@ function MobileTabBar({ user, page, items, onNavigate, onLogout, onOpenCopilot }
             >
               <span className="text-lg">🤖</span>
               <span className="flex-1">Sarin Copiloto Gerencial (IA)</span>
+              <Icon name="chevron-right" className="text-gray-400" size={18} />
+            </button>
+          </li>
+          <li key="cash-closing-mobile-launcher">
+            <button
+              type="button"
+              onClick={() => {
+                setMoreOpen(false);
+                onOpenClosingModal?.();
+              }}
+              className="flex min-h-[52px] w-full items-center gap-3 px-4 text-left text-sm font-semibold hover:bg-gray-50 transition text-emerald-700"
+            >
+              <span className="text-lg">🔒</span>
+              <span className="flex-1">Arqueo y Cierre de Caja (COP)</span>
               <Icon name="chevron-right" className="text-gray-400" size={18} />
             </button>
           </li>

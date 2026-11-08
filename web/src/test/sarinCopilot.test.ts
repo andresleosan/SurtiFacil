@@ -233,3 +233,4 @@ describe('Sarin Business Copilot - D1 Analytical Tools', () => {
     expect(res.quota.used).toBe(11); // Consumió 1 turno de IA
   });
 });
+

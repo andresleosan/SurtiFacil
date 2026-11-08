@@ -154,15 +154,25 @@ Para maximizar la eficiencia de tokens y la precisión de razonamiento en cada s
        - Chips de acceso rápido a 1 toque (*"Ventas y Ganancias de Hoy"*, *"Top Clientes en Fiados"*, *"Stock Crítico y Agotados"*, *"Lista Sugerida de Compra"*), chat interactivo con voz y texto, síntesis de voz (`🔊 Escuchar`) y tarjetas visuales ricas para cada herramienta ejecutada.
     4. **100% de Pruebas en Verde:** 42 suites de prueba en Vitest (343 tests aprobados), build de producción impecable (`tsc && vite build`) y 16/16 pruebas activas de Playwright aprobadas en navegadores desktop, mobile y tablet.
 
-- [ ] **Tarea 9 — Cierre de Caja con Arqueo Físico de Billetes/Monedas COP, Ticket Térmico (58mm/80mm) y Cobro Amigable de Fiados por WhatsApp:**
+- [x] **Tarea 9 — Cierre de Caja con Arqueo Físico de Billetes/Monedas COP, Ticket Térmico (58mm/80mm) y Cobro Amigable de Fiados por WhatsApp:**
   - **Nivel Recomendado:** `3.8 Flash (Medium)`
-  - **Objetivo:** Blindar el control del efectivo diario del tendero con arqueo físico en denominaciones colombianas, impresión de tirillas térmicas de mostrador y gestión de cobro de cartera de fiados a 1 clic.
-  - **Alcance Técnico:**
-    1. Crear módulo de **Cierre de Caja y Arqueo Físico COP** (`CashClosingModal.tsx` y tabla `cash_closings` en D1):
-       - Cuadrícula táctil con los 6 billetes (\$100.000, \$50.000, \$20.000, \$10.000, \$5.000, \$2.000) y 5 monedas (\$1.000, \$500, \$200, \$100, \$50) de Colombia.
-       - Comparador en tiempo real entre **Efectivo Esperado por Ventas/Abonos** vs **Efectivo Físico Contado**, badge semántico (`Cuadrado`, `Sobrante`, `Faltante`) y generación de Acta de Cierre inmutable.
-    2. Crear el modal de **Comprobante Térmico Digital (58mm / 80mm)** (`ThermalReceiptModal.tsx`) con estilos `@media print` en [`web/src/index.css`](../web/src/index.css), botón para enviar el recibo al WhatsApp del cliente a 1 toque y exportación de ventas/reportes a Excel (`.csv` UTF-8 BOM).
-    3. En [`Credits.tsx`](../web/src/components/Credits.tsx), agregar botón **"Enviar Recordatorio por WhatsApp"** que abre un mensaje cordial pre-formateado con el nombre del vecino, el saldo pendiente en `formatCOP`, los últimos movimientos y los datos de Nequi/Bancolombia de la tienda.
+  - **Estado:** ✅ Completada y Desplegada
+  - **Evidencia Técnica de Implementación:**
+    1. **Módulo de Arqueo Físico COP y Cierre de Caja (`CashClosingModal.tsx` y tabla `cash_closings` en Cloudflare D1):**
+       - Cuadrícula táctil con touch targets $\ge 44\times 44\text{ px}$ para las 11 denominaciones oficiales colombianas: 6 billetes (\$100k, \$50k, \$20k, \$10k, \$5k, \$2k) y 5 monedas (\$1k, \$500, \$200, \$100, \$50) con selectores rápidos y teclado numérico.
+       - Comparador en tiempo real entre Efectivo Esperado (Base inicial + Ventas efectivo del turno + Abonos a fiados en efectivo) vs Efectivo Físico Contado.
+       - Badges semánticos automáticos de estado: `Cuadrado` (diferencia $0), `Sobrante` (superávit) y `Faltante` (déficit).
+       - Persistencia inmutable en tabla `cash_closings` de D1 con endpoints serverless autoritativos (`/api/cash-closings/summary`, `POST /api/cash-closings`, `GET /api/cash-closings`, `GET /api/cash-closings/:id`), emisión de Acta Oficial numerada y fallback en memoria.
+       - Accesible desde la barra superior de `CreateSale.tsx` ("🔒 Arqueo / Cierre COP"), la vista `Sales.tsx`, el `Dashboard.tsx`, la barra lateral `Sidebar`, el menú de perfil desktop y la hoja móvil "Más".
+    2. **Comprobante Térmico Digital (58mm / 80mm) y Exportación Excel CSV (`ThermalReceiptModal.tsx`, `receiptGenerator.ts`, `csvExporter.ts`):**
+       - Modal de vista previa e impresión de tirilla térmica con selector de ancho (58 mm para impresoras portátiles bluetooth y 80 mm para impresoras de mostrador).
+       - Reglas `@media print` en `web/src/index.css` que aíslan únicamente la tirilla de compra o de cierre, forzando modo monocromático y ocultando barras, botones y menús.
+       - Botón directo para compartir el comprobante estructurado y estilizado con emojis por WhatsApp al cliente o al administrador.
+       - Exportador a Excel (`.csv`) con prefijo UTF-8 BOM (`\uFEFF`) para compatibilidad nativa con Microsoft Excel en español y sanitización de inyección de fórmulas CSV.
+    3. **Cobro Amigable de Fiados por WhatsApp (`Credits.tsx`):**
+       - Botón táctil `📲` de 1 clic en la tabla de clientes deudores y tarjeta de cobro destacado en el detalle del cliente.
+       - Generación automática de mensaje cordial y personalizado con el nombre del vecino, saldo total pendiente en `formatCOP`, lista de últimos movimientos (fiados y abonos) y datos bancarios para transferencias Nequi/Bancolombia.
+    4. **100% de Pruebas en Verde:** 45 suites de prueba en Vitest (360 tests aprobados), compilación de producción impecable (`tsc && vite build`) y 16/16 pruebas activas de Playwright aprobadas en navegadores desktop, mobile y tablet.
 
 - [ ] **Tarea 10 — Modo Offline Resiliente en Mostrador (IndexedDB + Cola de Sincronización Multi-Tenant) y Suite E2E Completa con Playwright:**
   - **Nivel Recomendado:** `Argon (High)`

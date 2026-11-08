@@ -3,6 +3,7 @@ import { getSalesSince, getSalesTotals } from '../services/saleService';
 import StockAlerts from './StockAlerts';
 import SubscriptionBanner from './SubscriptionBanner';
 import SarinBusinessCopilot from './SarinBusinessCopilot';
+import CashClosingModal from './CashClosingModal';
 import { Icon } from './ui/Icon';
 import { PageHeader } from './ui/PageHeader';
 
@@ -31,6 +32,7 @@ const Dashboard = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [copilotOpen, setCopilotOpen] = useState(false);
+  const [closingModalOpen, setClosingModalOpen] = useState(false);
 
   const loadDashboardData = useCallback(async () => {
     try {
@@ -98,10 +100,19 @@ const Dashboard = () => {
     <PageHeader
       title="Panel de Control"
       actions={
-        <button type="button" onClick={() => void loadDashboardData()} disabled={loading} className="btn-secondary">
-          <Icon name="refresh" size={18} />
-          Actualizar
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setClosingModalOpen(true)}
+            className="btn-secondary min-h-[44px] px-3 text-xs font-semibold text-slate-800"
+          >
+            <span>🔒 Arqueo / Cierre COP</span>
+          </button>
+          <button type="button" onClick={() => void loadDashboardData()} disabled={loading} className="btn-secondary min-h-[44px] px-3 text-xs font-semibold text-slate-800">
+            <Icon name="refresh" size={16} />
+            <span>Actualizar</span>
+          </button>
+        </div>
       }
     />
   );
@@ -183,6 +194,13 @@ const Dashboard = () => {
 
       {/* Modal Asesor Sarin Copiloto */}
       <SarinBusinessCopilot isOpen={copilotOpen} onClose={() => setCopilotOpen(false)} />
+
+      {/* Modal Arqueo y Cierre de Caja COP */}
+      <CashClosingModal
+        isOpen={closingModalOpen}
+        onClose={() => setClosingModalOpen(false)}
+        onClosedSuccess={() => void loadDashboardData()}
+      />
     </section>
   );
 };

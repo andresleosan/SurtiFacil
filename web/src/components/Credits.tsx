@@ -14,7 +14,65 @@ import { Icon } from './ui/Icon';
 import { Modal } from './ui/Modal';
 import { PageHeader } from './ui/PageHeader';
 
+import { formatCentsCOP } from '../utils/currency';
+import { getStoreSettings } from '../services/settingsService';
+
 const formatMoney = (cents: number) => `$${(cents / 100).toLocaleString('es-CO', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`;
+
+/**
+ * Genera el mensaje cordial de cobro/recordatorio de fiados para WhatsApp.
+ */
+export function generateDebtReminderWhatsAppText(
+  customer: CreditCustomer,
+  entries: CreditEntry[],
+  store: { nombre?: string; datos_pago_offline?: string }
+): string {
+  const storeName = store.nombre || 'SurtiFácil Abastos';
+  let text = `Hola *${customer.name}*, cordial saludo de parte de *${storeName}*. 👋\n\n`;
+  text += `Te compartimos el estado de tu cuenta de fiado al día de hoy:\n`;
+  text += `💰 *Saldo pendiente:* *${formatCentsCOP(customer.balance_cents)}*\n\n`;
+
+  if (entries.length > 0) {
+    text += `📋 *Últimos movimientos:*\n`;
+    const recent = entries.slice(0, 3);
+    for (const e of recent) {
+      const typeLabel = e.type === 'debt' ? 'Fiado' : 'Abono';
+      const sign = e.type === 'debt' ? '+' : '-';
+      const desc = e.description || (e.sale_id ? 'Venta en mostrador' : 'Movimiento');
+      text += `▪ ${typeLabel}: ${desc} (${sign}${formatCentsCOP(e.amount_cents)})\n`;
+    }
+    text += `\n`;
+  }
+
+  if (store.datos_pago_offline) {
+    text += `💳 *Para transferencias o abonos:* ${store.datos_pago_offline}\n\n`;
+  } else {
+    text += `💳 *Puedes abonar en efectivo en el mostrador o por transferencia Nequi/Bancolombia.*\n\n`;
+  }
+
+  text += `¡Muchas gracias por tu confianza y preferencia! 🛒✨`;
+  return text;
+}
+
+/**
+ * Abre WhatsApp con el recordatorio formateado.
+ */
+export function sendDebtReminderViaWhatsApp(
+  customer: CreditCustomer,
+  entries: CreditEntry[],
+  store: { nombre?: string; datos_pago_offline?: string },
+  customPhone?: string
+): void {
+  const phone = (customPhone || customer.phone || '').replace(/\D/g, '');
+  let finalPhone = phone;
+  if (finalPhone.length === 10 && finalPhone.startsWith('3')) {
+    finalPhone = `57${finalPhone}`;
+  }
+  const text = generateDebtReminderWhatsAppText(customer, entries, store);
+  const encoded = encodeURIComponent(text);
+  const url = finalPhone ? `https://wa.me/${finalPhone}?text=${encoded}` : `https://wa.me/?text=${encoded}`;
+  window.open(url, '_blank', 'noopener,noreferrer');
+}
 
 const formatDate = (value: any) => {
   if (!value) return '';
@@ -49,6 +107,11 @@ const Credits = () => {
   const [formError, setFormError] = useState('');
   const [saving, setSaving] = useState(false);
   const [actionError, setActionError] = useState('');
+  const [storeSettings, setStoreSettings] = useState<{ nombre?: string; datos_pago_offline?: string }>({});
+
+  useEffect(() => {
+    void getStoreSettings().then(setStoreSettings);
+  }, []);
 
   const selected = customers.find((customer) => customer.id === selectedId) ?? null;
 
@@ -215,7 +278,18 @@ const Credits = () => {
                     {formatMoney(customer.balance_cents)}
                   </td>
                   <td className="px-4 py-2 text-center">
-                    <div className="flex justify-center gap-1">
+                    <div className="flex justify-center items-center gap-1">
+                      {customer.balance_cents > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => sendDebtReminderViaWhatsApp(customer, [], storeSettings)}
+                          aria-label={`Enviar recordatorio por WhatsApp a ${customer.name}`}
+                          title="Enviar recordatorio por WhatsApp"
+                          className="icon-btn h-10 w-10 text-emerald-600 hover:bg-emerald-50"
+                        >
+                          <span className="text-base">📲</span>
+                        </button>
+                      )}
                       <button type="button" onClick={() => setSelectedId(customer.id)} className="btn-secondary min-h-[40px] px-3 text-xs">
                         Ver movimientos
                       </button>
@@ -254,6 +328,7 @@ const Credits = () => {
           customer={selected}
           actor={{ uid: currentUser.id, role: currentUser.role }}
           canManage={canManage}
+          storeSettings={storeSettings}
           onClose={() => setSelectedId(null)}
           onEdit={() => openForm(selected)}
           onError={setActionError}
@@ -312,12 +387,13 @@ interface CustomerDetailProps {
   customer: CreditCustomer;
   actor: { uid: string; role: CreditCustomer extends never ? never : import('../firebase/db').UserRole };
   canManage: boolean;
+  storeSettings?: { nombre?: string; datos_pago_offline?: string };
   onClose: () => void;
   onEdit: () => void;
   onError: (message: string) => void;
 }
 
-function CustomerDetail({ customer, actor, canManage, onClose, onEdit, onError }: CustomerDetailProps) {
+function CustomerDetail({ customer, actor, canManage, storeSettings, onClose, onEdit, onError }: CustomerDetailProps) {
   const [entries, setEntries] = useState<CreditEntry[]>([]);
   const [loadingEntries, setLoadingEntries] = useState(true);
   const [entryType, setEntryType] = useState<CreditEntryType | null>(null);
@@ -390,6 +466,29 @@ function CustomerDetail({ customer, actor, canManage, onClose, onEdit, onError }
           </div>
           {!customer.active && <span className="chip bg-gray-200 text-gray-600">Inactivo</span>}
         </div>
+
+        {customer.balance_cents > 0 && (
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-xl border border-emerald-200 bg-emerald-50/70 p-3">
+            <div>
+              <p className="text-xs font-bold text-emerald-950 flex items-center gap-1.5">
+                <span>📲 Cobro Cordial por WhatsApp</span>
+                <span className="rounded bg-emerald-200/60 px-1.5 py-0.5 text-[10px] text-emerald-800 font-semibold">
+                  1-Clic
+                </span>
+              </p>
+              <p className="text-xs text-emerald-800">
+                Envía al vecino su saldo de {formatMoney(customer.balance_cents)} con sus últimos movimientos y datos de transferencia.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => sendDebtReminderViaWhatsApp(customer, entries, storeSettings || {})}
+              className="btn-success min-h-[40px] px-3 text-xs shrink-0 font-semibold flex items-center gap-1.5"
+            >
+              <span>📲 Enviar Recordatorio</span>
+            </button>
+          </div>
+        )}
 
         {customer.notes && <p className="text-sm text-gray-600">{customer.notes}</p>}
 

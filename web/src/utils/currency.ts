@@ -21,8 +21,11 @@ export function formatCOP(pesos: number): string {
     minimumFractionDigits: 0,
   }).format(rounded);
 
-  // Normalizar el prefijo a "$ " con espacio fijo
-  return formatted.replace(/^COP\s?/, '$ ').replace(/^\$(\S)/, '$ $1');
+  // Normalizar el prefijo a "$ " con espacio regular ASCII (evitar non-breaking space \u00a0 de Intl)
+  return formatted
+    .replace(/\u00a0/g, ' ')
+    .replace(/^COP\s?/, '$ ')
+    .replace(/^\$(\S)/, '$ $1');
 }
 
 /**
