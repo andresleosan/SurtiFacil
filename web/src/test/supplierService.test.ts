@@ -49,6 +49,7 @@ describe('supplierService - CRUD proveedores', () => {
 
   it('no usa proveedores mock cuando el flag explícito está desactivado', async () => {
     vi.stubEnv('VITE_USE_MOCK_DATA', 'false');
+    vi.spyOn(apiClient, 'get').mockRejectedValue(new Error('Backend error'));
     await expect(getSuppliers()).rejects.toThrow('Error al cargar proveedores');
   });
 

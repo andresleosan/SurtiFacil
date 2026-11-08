@@ -212,6 +212,19 @@ export const COLOMBIAN_PRODUCT_CATALOG: PresetColombianProduct[] = [
     en_oferta: false,
     description: 'Papas fritas crujientes con el inconfundible sabor a pollo.',
   },
+  {
+    id: 'prod-aguacate-hass',
+    name: 'Aguacate Hass Maduro',
+    brand: 'Fruver Campesino',
+    category: 'Frutas y Verduras',
+    price_cents: 350000,
+    last_cost_cents: 220000,
+    unit: 'unidad',
+    barcode: '7702010005555',
+    image_url: '/images/products/aguacate-hass.svg',
+    en_oferta: false,
+    description: 'Aguacate Hass maduro en su punto, cremoso para ensaladas y arepas.',
+  },
 ];
 
 /**
@@ -227,6 +240,9 @@ export function findColombianProductImage(name: string, barcode?: string): strin
   }
 
   // Coincidencias por palabras clave colombianas
+  if (normalizedName.includes('aguacate') || normalizedName.includes('hass') || normalizedName.includes('palta')) {
+    return '/images/products/aguacate-hass.svg';
+  }
   if (normalizedName.includes('alqueria') || (normalizedName.includes('leche') && normalizedName.includes('entera'))) {
     return '/images/products/leche-alqueria-1l.svg';
   }

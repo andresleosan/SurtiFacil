@@ -10,17 +10,82 @@ interface SampleItem {
   unit: string;
   category: string;
   emoji: string;
+  image_url?: string;
 }
 
 const SAMPLE_PRODUCTS: SampleItem[] = [
-  { id: '1', name: 'Arroz Diana 1kg', priceCOP: 4500, unit: 'Bolsa 1kg', category: 'Granos y Despensa', emoji: '🍚' },
-  { id: '2', name: 'Leche Colanta Entera 1L', priceCOP: 4200, unit: 'Bolsa 1L', category: 'Lácteos y Huevos', emoji: '🥛' },
-  { id: '3', name: 'Huevos AA Cubeta x30', priceCOP: 18500, unit: 'Cubeta x30', category: 'Lácteos y Huevos', emoji: '🥚' },
-  { id: '4', name: 'Panela Pastilla 500g', priceCOP: 3200, unit: 'Pastilla 500g', category: 'Granos y Despensa', emoji: '🟫' },
-  { id: '5', name: 'Arepas de Chócolo x5', priceCOP: 4000, unit: 'Paquete x5', category: 'Panadería y Arepas', emoji: '🌽' },
-  { id: '6', name: 'Café Sello Rojo 250g', priceCOP: 6800, unit: 'Bolsa 250g', category: 'Granos y Despensa', emoji: '☕' },
-  { id: '7', name: 'Aguacate Hass Maduro', priceCOP: 3500, unit: 'Unidad', category: 'Frutas y Verduras', emoji: '🥑' },
-  { id: '8', name: 'Quesito Antioqueño 250g', priceCOP: 5500, unit: 'Bloque 250g', category: 'Lácteos y Huevos', emoji: '🧀' },
+  {
+    id: '1',
+    name: 'Arroz Diana 1kg',
+    priceCOP: 4500,
+    unit: 'Bolsa 1kg',
+    category: 'Granos y Despensa',
+    emoji: '🍚',
+    image_url: '/images/products/arroz-diana-1lb.svg',
+  },
+  {
+    id: '2',
+    name: 'Leche Colanta Entera 1L',
+    priceCOP: 4200,
+    unit: 'Bolsa 1L',
+    category: 'Lácteos y Huevos',
+    emoji: '🥛',
+    image_url: '/images/products/leche-alqueria-1l.svg',
+  },
+  {
+    id: '3',
+    name: 'Huevos AA Cubeta x30',
+    priceCOP: 18500,
+    unit: 'Cubeta x30',
+    category: 'Lácteos y Huevos',
+    emoji: '🥚',
+    image_url: '/images/products/huevos-aa-x30.svg',
+  },
+  {
+    id: '4',
+    name: 'Panela Pastilla 500g',
+    priceCOP: 3200,
+    unit: 'Pastilla 500g',
+    category: 'Granos y Despensa',
+    emoji: '🟫',
+    image_url: '/images/products/panela-pastilla-unidad.svg',
+  },
+  {
+    id: '5',
+    name: 'Arepas de Chócolo x5',
+    priceCOP: 4000,
+    unit: 'Paquete x5',
+    category: 'Panadería y Arepas',
+    emoji: '🌽',
+    image_url: '/images/products/arepas-antioquenas-x10.svg',
+  },
+  {
+    id: '6',
+    name: 'Café Sello Rojo 250g',
+    priceCOP: 6800,
+    unit: 'Bolsa 250g',
+    category: 'Granos y Despensa',
+    emoji: '☕',
+    image_url: '/images/products/cafe-sello-rojo-500g.svg',
+  },
+  {
+    id: '7',
+    name: 'Aguacate Hass Maduro',
+    priceCOP: 3500,
+    unit: 'Unidad',
+    category: 'Frutas y Verduras',
+    emoji: '🥑',
+    image_url: '/images/products/aguacate-hass.svg',
+  },
+  {
+    id: '8',
+    name: 'Quesito Antioqueño 250g',
+    priceCOP: 5500,
+    unit: 'Bloque 250g',
+    category: 'Lácteos y Huevos',
+    emoji: '🧀',
+    image_url: '/images/products/quesito-antioqueno-400g.svg',
+  },
 ];
 
 const AISLES = [
@@ -251,12 +316,23 @@ export default function LandingPage() {
                     key={prod.id}
                     className="flex items-center justify-between rounded-xl border border-slate-200 bg-white p-3.5 shadow-2xs hover:shadow-xs transition"
                   >
-                    <div className="flex items-center gap-3">
-                      <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-slate-100 text-2xl shrink-0">
-                        {prod.emoji}
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div className="flex h-14 w-14 items-center justify-center rounded-xl bg-slate-50 p-1 border border-slate-200 shrink-0 overflow-hidden shadow-2xs">
+                        {prod.image_url ? (
+                          <img
+                            src={prod.image_url}
+                            alt={prod.name}
+                            className="h-full w-full object-contain"
+                            loading="lazy"
+                          />
+                        ) : (
+                          <span className="text-2xl">{prod.emoji}</span>
+                        )}
                       </div>
-                      <div>
-                        <h4 className="font-semibold text-sm text-slate-800">{prod.name}</h4>
+                      <div className="min-w-0">
+                        <h4 className="font-semibold text-sm text-slate-800 truncate" title={prod.name}>
+                          {prod.name}
+                        </h4>
                         <span className="text-[11px] text-slate-500 block">{prod.unit}</span>
                         <span className="text-sm font-bold text-sf-primary tabular-nums">
                           {formatCOP(prod.priceCOP)}
@@ -331,14 +407,23 @@ export default function LandingPage() {
                       const prod = SAMPLE_PRODUCTS.find((p) => p.id === id);
                       if (!prod) return null;
                       return (
-                        <div key={id} className="py-2 flex items-center justify-between text-xs">
-                          <div>
-                            <span className="font-medium text-slate-800">{prod.name}</span>
-                            <span className="text-slate-400 block text-[10px]">
-                              {qty} × {formatCOP(prod.priceCOP)}
-                            </span>
+                        <div key={id} className="py-2 flex items-center justify-between text-xs gap-2">
+                          <div className="flex items-center gap-2 min-w-0">
+                            {prod.image_url ? (
+                              <img
+                                src={prod.image_url}
+                                alt=""
+                                className="h-8 w-8 rounded-lg object-contain bg-slate-50 p-0.5 border border-slate-200 shrink-0"
+                              />
+                            ) : null}
+                            <div className="min-w-0">
+                              <span className="font-medium text-slate-800 truncate block">{prod.name}</span>
+                              <span className="text-slate-400 block text-[10px]">
+                                {qty} × {formatCOP(prod.priceCOP)}
+                              </span>
+                            </div>
                           </div>
-                          <span className="font-bold text-slate-900 tabular-nums">
+                          <span className="font-bold text-slate-900 tabular-nums shrink-0">
                             {formatCOP(prod.priceCOP * qty)}
                           </span>
                         </div>

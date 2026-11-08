@@ -1,7 +1,10 @@
 import { test, expect } from '@playwright/test';
+import { mockPublicStoreApi } from './e2eStoreMocks';
 
 test.describe('Catálogo Web Vecinal (#/tienda/:slug) y Rastreo de Pedido (#/pedido/:token)', () => {
   test('navega por la tienda vecinal, agrega a la canasta, hace pedido y rastrea en vivo', async ({ page }) => {
+    await mockPublicStoreApi(page);
+
     // 1. Acceder a la tienda pública vecinal
     await page.goto('/#/tienda/surtifacil');
 

@@ -701,6 +701,20 @@ export async function ensureDatabaseSchema(db: D1Database, force = false): Promi
       precio_oferta_cents: null,
       last_cost_cents: 270000,
     },
+    {
+      id: 'prod-aguacate-hass',
+      name: 'Aguacate Hass Maduro',
+      price_cents: 350000,
+      stock: 30,
+      min_stock: 8,
+      unit: 'unidad',
+      category: 'Frutas y Verduras',
+      barcode: '7702010005555',
+      image_url: '/images/products/aguacate-hass.svg',
+      en_oferta: 0,
+      precio_oferta_cents: null,
+      last_cost_cents: 220000,
+    },
   ];
 
   for (const p of seedProducts) {
@@ -793,6 +807,10 @@ export async function ensureDatabaseSchema(db: D1Database, force = false): Promi
   await safeRun(
     db,
     "UPDATE products SET image_url = '/images/products/papas-margarita-pollo.svg' WHERE lower(name) LIKE '%margarita%' AND (image_url IS NULL OR image_url = '')"
+  );
+  await safeRun(
+    db,
+    "UPDATE products SET image_url = '/images/products/aguacate-hass.svg' WHERE (lower(name) LIKE '%aguacate%' OR lower(name) LIKE '%hass%') AND (image_url IS NULL OR image_url = '')"
   );
 
   // 6. Semilla de Combo Desayuno Paisa con Imagen

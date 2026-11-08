@@ -448,7 +448,7 @@ async function setupProductionE2EHarness(page: Page) {
           created_at: new Date().toISOString(),
         });
       }
-      return jsonResponse({ ok: true, sale_id: saleId, order_code: found?.order_code || '#K-01' });
+      return jsonResponse({ success: true, ok: true, sale_id: saleId, order_code: found?.order_code || '#K-01' });
     }
 
     // Ventas POS

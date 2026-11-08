@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { mockPublicStoreApi } from './e2eStoreMocks';
 
 test.describe('Bot Sarin Vecino e Integración WhatsApp', () => {
   test('la landing comercial promociona el Copiloto Sarin con IA para WhatsApp', async ({ page }) => {
@@ -11,6 +12,7 @@ test.describe('Bot Sarin Vecino e Integración WhatsApp', () => {
   });
 
   test('el catálogo vecinal (#/tienda/:slug) enlaza al canal de WhatsApp del tendero', async ({ page }) => {
+    await mockPublicStoreApi(page);
     await page.goto('/#/tienda/surtifacil');
 
     // Verificar enlace directo a WhatsApp en la cabecera
@@ -21,6 +23,7 @@ test.describe('Bot Sarin Vecino e Integración WhatsApp', () => {
   });
 
   test('al completar un pedido vecinal, la vista de rastreo ofrece contacto directo a WhatsApp', async ({ page }) => {
+    await mockPublicStoreApi(page);
     await page.goto('/#/tienda/surtifacil');
 
     // 1. Agregar producto a la canasta

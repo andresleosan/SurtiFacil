@@ -1,7 +1,10 @@
 import { test, expect } from '@playwright/test';
+import { mockPublicStoreApi } from './e2eStoreMocks';
 
 test.describe('Modo Kiosco iPad y Bandeja de Pedidos en Vivo', () => {
   test('abre el Modo Kiosco en #/kiosco/surtifacil, muestra pasillos y emite turno', async ({ page }) => {
+    await mockPublicStoreApi(page);
+
     // 1. Acceder a la ruta pública del kiosco
     await page.goto('/#/kiosco/surtifacil');
 

@@ -114,10 +114,19 @@ export async function apiFetch<T>(endpoint: string, options: RequestInit = {}): 
     headers['X-Negocio-Id'] = activeNegocio;
   }
 
-  const response = await fetch(url, {
-    ...options,
-    headers,
-  });
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 6000);
+
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      ...options,
+      headers,
+      signal: options.signal || controller.signal,
+    });
+  } finally {
+    clearTimeout(timeoutId);
+  }
 
   if (!response.ok) {
     let errorMessage = `Error HTTP ${response.status}: ${response.statusText}`;

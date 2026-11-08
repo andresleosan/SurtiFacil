@@ -115,23 +115,25 @@ export async function getPublicStore(slug: string): Promise<PublicStoreData> {
         combos: any[];
       }>(`/public/store/${cleanSlug}`);
 
-      return {
-        id: response.store.id,
-        slug: response.store.slug,
-        nombre: response.store.nombre,
-        barrio: response.store.barrio,
-        ciudad: response.store.ciudad,
-        telefono_whatsapp: response.store.telefono_whatsapp,
-        direccion: response.store.direccion,
-        horario: response.store.horario,
-        logo_url: response.store.logo_url,
-        estado: response.store.estado,
-        costo_domicilio_cents: response.store.costo_domicilio_cents || 0,
-        datos_pago_offline: response.store.datos_pago_offline,
-        config: response.store.config || {},
-        products: response.products || [],
-        combos: response.combos || [],
-      };
+      if (response && response.store && response.store.id) {
+        return {
+          id: response.store.id,
+          slug: response.store.slug,
+          nombre: response.store.nombre,
+          barrio: response.store.barrio,
+          ciudad: response.store.ciudad,
+          telefono_whatsapp: response.store.telefono_whatsapp,
+          direccion: response.store.direccion,
+          horario: response.store.horario,
+          logo_url: response.store.logo_url,
+          estado: response.store.estado,
+          costo_domicilio_cents: response.store.costo_domicilio_cents || 0,
+          datos_pago_offline: response.store.datos_pago_offline,
+          config: response.store.config || {},
+          products: response.products || [],
+          combos: response.combos || [],
+        };
+      }
     } catch (error) {
       console.warn(`Error al consultar tienda pública ${slug} desde API, usando mock fallback:`, error);
     }
@@ -203,8 +205,10 @@ export async function createCustomerOrder(
         success: boolean;
         order: CustomerOrder;
       }>('/customer-orders', input);
-      emitDataChange('sales');
-      return response;
+      if (response && response.success && response.order) {
+        emitDataChange('sales');
+        return response;
+      }
     } catch (error) {
       console.warn('Error enviando customer-order a D1, usando mock fallback:', error);
     }
@@ -270,17 +274,19 @@ export async function getCustomerOrders(status?: string): Promise<CustomerOrder[
     try {
       const url = status ? `/customer-orders?status=${encodeURIComponent(status)}` : '/customer-orders';
       const orders = await apiClient.get<CustomerOrder[]>(url);
-      return orders.map((o) => {
-        let items = o.items;
-        if (!items && o.items_json) {
-          try {
-            items = JSON.parse(o.items_json);
-          } catch {
-            items = [];
+      if (Array.isArray(orders)) {
+        return orders.map((o) => {
+          let items = o.items;
+          if (!items && o.items_json) {
+            try {
+              items = JSON.parse(o.items_json);
+            } catch {
+              items = [];
+            }
           }
-        }
-        return { ...o, items };
-      });
+          return { ...o, items };
+        });
+      }
     } catch (error) {
       console.warn('Error al consultar customer-orders desde API, usando mock:', error);
     }
@@ -312,8 +318,10 @@ export async function updateCustomerOrderStatus(
   if (!isMockMode()) {
     try {
       const updated = await apiClient.put<CustomerOrder>(`/customer-orders/${orderId}/status`, { status });
-      emitDataChange('sales');
-      return updated;
+      if (updated && updated.id) {
+        emitDataChange('sales');
+        return updated;
+      }
     } catch (error) {
       console.warn('Error actualizando estado en API, usando mock:', error);
     }
@@ -348,8 +356,10 @@ export async function convertOrderToSale(
         credit_customer_id: creditCustomerId,
         credit_customer_name: creditCustomerName,
       });
-      emitDataChange('sales');
-      return result;
+      if (result && (result.success || (result as any).ok) && result.sale_id) {
+        emitDataChange('sales');
+        return result;
+      }
     } catch (error) {
       console.warn('Error facturando orden en D1, usando mock fallback:', error);
     }
@@ -377,9 +387,12 @@ export async function convertOrderToSale(
 export async function trackCustomerOrder(token: string): Promise<{ order: CustomerOrder; store: any }> {
   if (!isMockMode()) {
     try {
-      return await apiClient.get<{ order: CustomerOrder; store: any }>(
+      const result = await apiClient.get<{ order: CustomerOrder; store: any }>(
         `/customer-orders/track/${encodeURIComponent(token)}`
       );
+      if (result && result.order && result.order.id) {
+        return result;
+      }
     } catch (error) {
       console.warn('Error rastreando orden en API:', error);
     }
