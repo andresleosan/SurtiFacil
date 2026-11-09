@@ -348,9 +348,28 @@ Para maximizar la eficiencia de tokens y la precisión de razonamiento en cada s
        - Compilación de producción impecable (`npm run build:web` en 5.23s) con Service Worker y precaché PWA generados.
        - Suite E2E de Playwright ejecutada con 27/27 pruebas activas en verde en navegadores desktop, mobile y tablet (certificando el teclado y vueltas en el Escenario 5 de `qa/e2e/saas-production.spec.ts`).
 
-- [ ] **Tarea 21 — Módulo de Cobranza Vecinal de Fiados por WhatsApp con Link Nequi/Bancolombia (`Credits.tsx`):**
+- [x] **Tarea 21 — Módulo de Cobranza Vecinal de Fiados por WhatsApp con Link Nequi/Bancolombia (`Credits.tsx`):**
   - **Nivel Recomendado:** `3.8 Flash (Medium)`
-  - **Objetivo:** Botón táctil `"📲 Cobrar por WhatsApp"` en cada cliente moroso del Libro de Fiados que genera un enlace click-to-chat con mensaje respetuoso paisa, saldo actualizado, fecha de vencimiento y datos de transferencia Nequi/Bancolombia de la tienda.
+  - **Estado:** ✅ Completada y Desplegada
+  - **Evidencia Técnica de Implementación:**
+    1. **Motor de Mensajería y Cobranza Vecinal (`web/src/utils/debtReminder.ts`):**
+       - Generador de mensajes con modismos respetuosos y cordiales propios de Medellín, saldo actualizado en pesos colombianos con `formatCentsCOP`, y desglose de últimos movimientos (fiados y abonos).
+       - Selector de tono paisa: `Amigable y cercano` (día a día), `Corte de Quincena / Mes` (15 o 30) y `Recordatorio Formal` con compromiso o fecha acordada de pago.
+       - Parser de medios de pago (`parsePaymentDetails`) que detecta y estructura cuentas Nequi y Bancolombia a partir de los datos configurados en la tienda (`datos_pago_offline`).
+       - Generador de enlaces oficiales click-to-chat de WhatsApp (`buildWhatsAppClickToChatUrl`) con sanitización de números y código de país colombiano (+57).
+    2. **Modal Interactivo de Cobranza Vecinal (`DebtCollectionModal.tsx`):**
+       - Diálogo táctil accesible con touch targets $\ge 44\times 44\text{ px}$.
+       - Resumen visual destacado del cliente con saldo deudor en tipografía gigante (`text-2xl font-black text-red-600`).
+       - Selector de tonos con chips táctiles, selector de fecha de compromiso (presets: `Sin fecha`, `Esta semana`, `Quincena`, `Fin de mes`, `Personalizada`), edición de teléfono y vista previa en tiempo real dentro de una burbuja estilo WhatsApp.
+       - Acciones directas: botón primario `[ 📲 Abrir en WhatsApp ]` y botón `[ 📋 Copiar Mensaje ]` con confirmación visual.
+    3. **Integración Transversal en el Libro de Fiados (`Credits.tsx`):**
+       - **Tabla Desktop:** Botón táctil `"📲 Cobrar"` en cada fila con deuda activa.
+       - **Vista Móvil:** Botón táctil `"📲 Cobrar por WhatsApp"` en cada tarjeta de cliente moroso.
+       - **Detalle de Cliente (`CustomerDetail`):** Banner destacado con botón de 1 clic `[ ⚡ Envío Rápido ]` y botón `[ 📲 Personalizar y Enviar ]`.
+    4. **100% de Pruebas en Verde:**
+       - 55 suites de Vitest y 420 tests aprobados al 100% (incluyendo nuevas suites `debtReminder.test.ts` con 7 tests y `debtCollectionModal.test.tsx` con 3 tests).
+       - Compilación de producción impecable (`npm run build:web` en 12.21s) con Service Worker y precaché PWA generados.
+       - Suite E2E de Playwright ejecutada con 27/27 pruebas activas en verde en navegadores desktop, mobile y tablet.
 
 - [ ] **Tarea 22 — Tirilla Térmica de 58mm y 80mm para Impresoras POS y Código QR de Seguimiento:**
   - **Nivel Recomendado:** `3.8 Flash (Medium)`
