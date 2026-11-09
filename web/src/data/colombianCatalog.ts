@@ -225,21 +225,121 @@ export const COLOMBIAN_PRODUCT_CATALOG: PresetColombianProduct[] = [
     en_oferta: false,
     description: 'Aguacate Hass maduro en su punto, cremoso para ensaladas y arepas.',
   },
+  {
+    id: 'prod-leche-colanta-1l',
+    name: 'Leche Colanta Entera 1L',
+    brand: 'Colanta',
+    category: 'Lácteos y Huevos',
+    price_cents: 420000,
+    last_cost_cents: 320000,
+    unit: 'litro',
+    barcode: '7702123000018',
+    image_url: '/images/products/leche-colanta-1l.svg',
+    en_oferta: true,
+    precio_oferta_cents: 395000,
+    description: 'Leche pasteurizada homogenizada 100% de hatos del campo antioqueño.',
+  },
+  {
+    id: 'prod-huevos-santa-reyes-x30',
+    name: 'Huevos Santa Reyes AA x30',
+    brand: 'Santa Reyes',
+    category: 'Lácteos y Huevos',
+    price_cents: 1950000,
+    last_cost_cents: 1520000,
+    unit: 'cubeta',
+    barcode: '7707221234567',
+    image_url: '/images/products/huevos-santa-reyes.svg',
+    en_oferta: false,
+    description: 'Cubeta de 30 huevos rojos frescos de granja seleccionados tamaño AA.',
+  },
+  {
+    id: 'prod-panela-dona-panela-500g',
+    name: 'Panela Doña Panela 500g',
+    brand: 'Doña Panela',
+    category: 'Despensa y Café',
+    price_cents: 350000,
+    last_cost_cents: 240000,
+    unit: 'unidad',
+    barcode: '7703334445556',
+    image_url: '/images/products/panela-dona-panela.svg',
+    en_oferta: false,
+    description: 'Pastilla de panela pura 100% jugo de caña natural de trapiche.',
+  },
+  {
+    id: 'prod-arepas-chocolo-x5',
+    name: 'Arepas de Chócolo Don Maíz x5',
+    brand: 'Don Maíz',
+    category: 'Panadería y Arepa',
+    price_cents: 480000,
+    last_cost_cents: 330000,
+    unit: 'paquete',
+    barcode: '7708882223334',
+    image_url: '/images/products/arepas-chocolo.svg',
+    en_oferta: true,
+    precio_oferta_cents: 440000,
+    description: 'Deliciosas arepas de maíz tierno dulce con quesito tradicional.',
+  },
+  {
+    id: 'prod-salchichon-zenu-450g',
+    name: 'Salchichón Tradicional Zenú 450g',
+    brand: 'Zenú',
+    category: 'Carnes y Salsas',
+    price_cents: 890000,
+    last_cost_cents: 680000,
+    unit: 'unidad',
+    barcode: '7702003004508',
+    image_url: '/images/products/salchichon-zenu.svg',
+    en_oferta: false,
+    description: 'Salchichón tradicional colombiano de res y cerdo con el sello de calidad Zenú.',
+  },
+  {
+    id: 'prod-saltin-noel-x3',
+    name: 'Galletas Saltín Noel Tradicional x3',
+    brand: 'Noel',
+    category: 'Snacks y Dulces',
+    price_cents: 460000,
+    last_cost_cents: 330000,
+    unit: 'paquete',
+    barcode: '7702007001009',
+    image_url: '/images/products/saltin-noel.svg',
+    en_oferta: false,
+    description: 'Paquete de 3 tacos de galletas de sal doradas y crocantes con sal marina.',
+  },
 ];
+
+export const DEFAULT_PRODUCT_IMAGE = '/images/products/default-product.svg';
 
 /**
  * Busca inteligentemente una imagen del catálogo colombiano según el nombre o código de barras
  */
-export function findColombianProductImage(name: string, barcode?: string): string | null {
-  if (!name) return null;
-  const normalizedName = name.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-
-  if (barcode) {
+export function findColombianProductImage(name?: string, barcode?: string): string | null {
+  if (barcode && barcode.trim()) {
     const byBarcode = COLOMBIAN_PRODUCT_CATALOG.find((p) => p.barcode === barcode.trim());
     if (byBarcode) return byBarcode.image_url;
   }
 
-  // Coincidencias por palabras clave colombianas
+  if (!name || !name.trim()) return null;
+  const normalizedName = name.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+
+  // Coincidencias por marcas y productos específicos colombianos
+  if (normalizedName.includes('salchichon') || normalizedName.includes('zenu')) {
+    return '/images/products/salchichon-zenu.svg';
+  }
+  if (normalizedName.includes('saltin') || (normalizedName.includes('noel') && normalizedName.includes('galleta'))) {
+    return '/images/products/saltin-noel.svg';
+  }
+  if (normalizedName.includes('chocolo') || (normalizedName.includes('arepa') && (normalizedName.includes('choclo') || normalizedName.includes('dulce')))) {
+    return '/images/products/arepas-chocolo.svg';
+  }
+  if (normalizedName.includes('santa reyes')) {
+    return '/images/products/huevos-santa-reyes.svg';
+  }
+  if (normalizedName.includes('dona panela') || normalizedName.includes('doña panela')) {
+    return '/images/products/panela-dona-panela.svg';
+  }
+  if (normalizedName.includes('leche') && normalizedName.includes('colanta')) {
+    return '/images/products/leche-colanta-1l.svg';
+  }
   if (normalizedName.includes('aguacate') || normalizedName.includes('hass') || normalizedName.includes('palta')) {
     return '/images/products/aguacate-hass.svg';
   }

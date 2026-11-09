@@ -1,0 +1,66 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400" width="100%" height="100%">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#f8fafc"/>
+      <stop offset="100%" stop-color="#e2e8f0"/>
+    </linearGradient>
+    <linearGradient id="carton" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#fef08a"/>
+      <stop offset="50%" stop-color="#fde047"/>
+      <stop offset="100%" stop-color="#eab308"/>
+    </linearGradient>
+    <linearGradient id="egg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#fed7aa"/>
+      <stop offset="60%" stop-color="#fdba74"/>
+      <stop offset="100%" stop-color="#fb923c"/>
+    </linearGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="130%" height="130%">
+      <feDropShadow dx="0" dy="12" stdDeviation="12" flood-color="#0f172a" flood-opacity="0.18"/>
+    </filter>
+  </defs>
+
+  <rect width="400" height="400" rx="24" fill="url(#bg)"/>
+  <circle cx="200" cy="200" r="140" fill="#fef9c3" opacity="0.6"/>
+
+  <g filter="url(#shadow)">
+    <!-- Cubeta / Empaque Santa Reyes -->
+    <!-- Base de la caja -->
+    <path d="M70 200 L120 330 L280 330 L330 200 Z" fill="#d97706" opacity="0.4"/>
+    
+    <!-- Tapa frontal abatible -->
+    <rect x="75" y="165" width="250" height="150" rx="16" fill="url(#carton)" stroke="#ca8a04" stroke-width="2"/>
+
+    <!-- Huevos rojos asomándose en la cubeta -->
+    <g>
+      <ellipse cx="115" cy="160" rx="20" ry="26" fill="url(#egg)" stroke="#ea580c" stroke-width="1.5"/>
+      <ellipse cx="157" cy="155" rx="20" ry="27" fill="url(#egg)" stroke="#ea580c" stroke-width="1.5"/>
+      <ellipse cx="200" cy="153" rx="21" ry="28" fill="url(#egg)" stroke="#ea580c" stroke-width="1.5"/>
+      <ellipse cx="243" cy="155" rx="20" ry="27" fill="url(#egg)" stroke="#ea580c" stroke-width="1.5"/>
+      <ellipse cx="285" cy="160" rx="20" ry="26" fill="url(#egg)" stroke="#ea580c" stroke-width="1.5"/>
+      
+      <!-- Reflejos de cáscara limpia -->
+      <path d="M110 148 Q113 140 120 142" stroke="#ffffff" stroke-width="2.5" fill="none" stroke-linecap="round"/>
+      <path d="M195 140 Q199 133 207 135" stroke="#ffffff" stroke-width="2.5" fill="none" stroke-linecap="round"/>
+      <path d="M280 148 Q283 140 290 142" stroke="#ffffff" stroke-width="2.5" fill="none" stroke-linecap="round"/>
+    </g>
+
+    <!-- Faja Roja Central Santa Reyes -->
+    <rect x="75" y="195" width="250" height="75" fill="#dc2626"/>
+    
+    <!-- Corona dorada de Santa Reyes -->
+    <path d="M185 212 L192 202 L200 212 L208 202 L215 212 L213 218 L187 218 Z" fill="#fde047" stroke="#ca8a04" stroke-width="1"/>
+    <circle cx="185" cy="210" r="2" fill="#ffffff"/>
+    <circle cx="200" cy="200" r="2.5" fill="#ffffff"/>
+    <circle cx="215" cy="210" r="2" fill="#ffffff"/>
+
+    <text x="200" y="238" font-family="'Arial Black', sans-serif" font-size="20" font-weight="900" fill="#ffffff" text-anchor="middle" letter-spacing="1">SANTA REYES</text>
+    <text x="200" y="256" font-family="Arial, sans-serif" font-size="11" font-weight="bold" fill="#fef08a" text-anchor="middle">HUEVOS FRESCOS ROJOS AA</text>
+
+    <!-- Sellos inferiores de frescura y clasificación -->
+    <rect x="95" y="280" width="95" height="24" rx="6" fill="#ffffff" stroke="#ca8a04" stroke-width="1"/>
+    <text x="142" y="296" font-family="'Arial Black', sans-serif" font-size="11" font-weight="900" fill="#dc2626" text-anchor="middle">TAMAÑO AA</text>
+
+    <rect x="205" y="280" width="100" height="24" rx="6" fill="#15803d"/>
+    <text x="255" y="296" font-family="Arial, sans-serif" font-size="11" font-weight="bold" fill="#ffffff" text-anchor="middle">CUBETA x30</text>
+  </g>
+</svg>

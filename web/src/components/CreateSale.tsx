@@ -9,6 +9,7 @@ import BarcodeScanner from './BarcodeScanner';
 import { Icon } from './ui/Icon';
 import { Modal } from './ui/Modal';
 import { PageHeader } from './ui/PageHeader';
+import { ProductImage } from './ui/ProductImage';
 import { formatCentsCOP } from '../utils/currency';
 import { LiveOrdersTray } from './LiveOrdersTray';
 import type { CustomerOrder } from '../types/customerOrder';
@@ -469,20 +470,17 @@ const CreateSale = () => {
                 <ul className="card divide-y divide-gray-100" aria-label="Productos disponibles">
                   {availableProducts.map((product) => (
                     <li key={product.id} className="flex items-center gap-3 px-3 py-2">
-                      {product.image_url ? (
-                        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-slate-50 p-1 border border-slate-200 overflow-hidden">
-                          <img
-                            src={product.image_url}
-                            alt=""
-                            className="h-full w-full object-contain"
-                            loading="lazy"
-                          />
-                        </div>
-                      ) : (
-                        <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-lg border border-slate-200">
-                          🛒
-                        </span>
-                      )}
+                      <ProductImage
+                        src={product.image_url}
+                        alt={product.name}
+                        productName={product.name}
+                        barcode={product.barcode}
+                        category={product.category}
+                        showOfferBadge={false}
+                        containerClassName="h-11 w-11 shrink-0 rounded-xl bg-slate-50 p-1 border border-slate-200"
+                        className="h-full w-full object-contain"
+                        loading="lazy"
+                      />
                       <div className="min-w-0 flex-1">
                         <p className="truncate font-medium text-sf-text">{product.name}</p>
                         <p className="text-xs text-gray-500">
@@ -511,20 +509,17 @@ const CreateSale = () => {
                         className="card flex min-h-[96px] w-full flex-col justify-between p-3 text-left transition hover:border-sf-primary hover:shadow-md active:scale-[0.99]"
                       >
                         <div className="flex items-start gap-2.5">
-                          {product.image_url ? (
-                            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-slate-50 p-1 border border-slate-200 overflow-hidden">
-                              <img
-                                src={product.image_url}
-                                alt=""
-                                className="h-full w-full object-contain"
-                                loading="lazy"
-                              />
-                            </div>
-                          ) : (
-                            <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-lg border border-slate-200">
-                              🛒
-                            </span>
-                          )}
+                          <ProductImage
+                            src={product.image_url}
+                            alt={product.name}
+                            productName={product.name}
+                            barcode={product.barcode}
+                            category={product.category}
+                            showOfferBadge={false}
+                            containerClassName="h-11 w-11 shrink-0 rounded-lg bg-slate-50 p-1 border border-slate-200"
+                            className="h-full w-full object-contain"
+                            loading="lazy"
+                          />
                           <span className="line-clamp-2 font-medium text-sf-text text-xs sm:text-sm">{product.name}</span>
                         </div>
                         <span className="mt-2 flex items-center justify-between text-sm pt-2 border-t border-slate-100">

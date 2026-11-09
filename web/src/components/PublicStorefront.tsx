@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { Icon } from './ui/Icon';
+import { ProductImage } from './ui/ProductImage';
 import { getPublicStore, createCustomerOrder } from '../services/customerOrderService';
 import type {
   PublicStoreData,
@@ -446,16 +447,16 @@ export default function PublicStorefront({ slug = 'surtifacil', onExit }: Public
                     className="card p-4 flex flex-col justify-between border-2 border-amber-200/60 bg-gradient-to-br from-amber-50/40 via-white to-white"
                   >
                     <div>
-                      {combo.image_url && (
-                        <div className="relative mb-2.5 flex h-28 w-full items-center justify-center rounded-xl bg-amber-100/50 p-2 overflow-hidden border border-amber-200/50">
-                          <img
-                            src={combo.image_url}
-                            alt={combo.name}
-                            className="h-full w-full object-contain"
-                            loading="lazy"
-                          />
-                        </div>
-                      )}
+                      <ProductImage
+                        src={combo.image_url}
+                        alt={combo.name}
+                        productName={combo.name}
+                        isOffer={true}
+                        offerBadgeText="Combo Especial"
+                        containerClassName="relative mb-2.5 flex h-28 w-full items-center justify-center rounded-xl bg-amber-100/50 p-2 overflow-hidden border border-amber-200/50"
+                        className="h-full w-full object-contain"
+                        loading="lazy"
+                      />
 
                       <div className="flex items-center justify-between gap-2">
                         <span className="rounded-md bg-amber-100 px-2 py-0.5 text-[11px] font-bold text-amber-800">
@@ -532,24 +533,19 @@ export default function PublicStorefront({ slug = 'surtifacil', onExit }: Public
                     className="card flex flex-col justify-between p-3 transition hover:shadow-md border border-slate-200/90"
                   >
                     <div>
-                      {/* Imagen o Icono */}
+                      {/* Imagen o Icono Realista */}
                       <div className="relative mb-2 flex h-28 w-full items-center justify-center rounded-xl bg-gradient-to-b from-slate-50 to-slate-100 p-1.5 overflow-hidden border border-slate-100">
-                        {product.image_url ? (
-                          <img
-                            src={product.image_url}
-                            alt={product.name}
-                            className="h-full w-full object-contain transition-transform duration-200 hover:scale-105"
-                            loading="lazy"
-                          />
-                        ) : (
-                          <span className="text-4xl" aria-hidden="true">🛒</span>
-                        )}
-
-                        {hasOffer && (
-                          <span className="absolute top-1.5 left-1.5 rounded-md bg-amber-500 px-1.5 py-0.5 text-[10px] font-bold text-white shadow-xs">
-                            OFERTA
-                          </span>
-                        )}
+                        <ProductImage
+                          src={product.image_url}
+                          alt={product.name}
+                          productName={product.name}
+                          category={product.category}
+                          isOffer={hasOffer}
+                          offerBadgeText="OFERTA"
+                          containerClassName="h-full w-full"
+                          className="h-full w-full object-contain transition-transform duration-200 hover:scale-105"
+                          loading="lazy"
+                        />
 
                         <span className="absolute bottom-1.5 right-1.5 rounded-md bg-black/60 px-1.5 py-0.5 text-[10px] font-semibold text-white capitalize backdrop-blur-xs">
                           {product.unit || 'unidad'}
@@ -689,17 +685,14 @@ export default function PublicStorefront({ slug = 'surtifacil', onExit }: Public
                 <div className="divide-y divide-gray-100 rounded-xl border border-slate-200 bg-white">
                   {cart.map((item) => (
                     <div key={item.product_id} className="flex items-center justify-between p-3 gap-2.5">
-                      {item.image_url ? (
-                        <img
-                          src={item.image_url}
-                          alt=""
-                          className="h-10 w-10 shrink-0 rounded-lg object-contain bg-slate-50 p-1 border border-slate-200"
-                        />
-                      ) : (
-                        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-base">
-                          🛒
-                        </div>
-                      )}
+                      <ProductImage
+                        src={item.image_url}
+                        alt={item.product_name}
+                        productName={item.product_name}
+                        showOfferBadge={false}
+                        containerClassName="h-10 w-10 shrink-0 rounded-lg bg-slate-50 p-1 border border-slate-200"
+                        className="h-full w-full object-contain"
+                      />
                       <div className="min-w-0 flex-1">
                         <div className="text-xs font-semibold text-sf-text truncate">{item.product_name}</div>
                         <div className="text-[11px] text-gray-500 tabular-nums">

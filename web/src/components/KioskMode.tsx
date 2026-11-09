@@ -3,6 +3,7 @@ import { getPublicStore, createCustomerOrder } from '../services/customerOrderSe
 import type { PublicStoreData, CustomerOrderItem } from '../types/customerOrder';
 import { formatCentsCOP, formatCOP } from '../utils/currency';
 import { Icon } from './ui/Icon';
+import { ProductImage } from './ui/ProductImage';
 
 const AISLES = [
   { id: 'todos', label: 'Todos', emoji: '🌟' },
@@ -522,21 +523,16 @@ export default function KioskMode({ slug = 'surtifacil', onExit }: KioskModeProp
                     >
                       <div>
                         {/* Imagen del combo */}
-                        <div className="relative mb-3 flex h-36 w-full items-center justify-center rounded-2xl bg-gradient-to-b from-amber-100/60 to-amber-50 p-2 overflow-hidden border border-amber-200/60">
-                          {combo.image_url ? (
-                            <img
-                              src={combo.image_url}
-                              alt={combo.name}
-                              loading="lazy"
-                              className="h-full w-full object-contain transition-transform duration-300 group-hover:scale-105"
-                            />
-                          ) : (
-                            <span className="text-5xl" role="img" aria-label="Combo">🍱</span>
-                          )}
-                          <span className="absolute top-2 left-2 inline-flex items-center gap-1 rounded-full bg-amber-500 px-3 py-1 text-xs font-bold text-white uppercase tracking-wide shadow-xs">
-                            🔥 Combo Ahorro
-                          </span>
-                        </div>
+                        <ProductImage
+                          src={combo.image_url}
+                          alt={combo.name}
+                          productName={combo.name}
+                          isOffer={true}
+                          offerBadgeText="🔥 Combo Ahorro"
+                          containerClassName="relative mb-3 flex h-36 w-full items-center justify-center rounded-2xl bg-gradient-to-b from-amber-100/60 to-amber-50 p-2 overflow-hidden border border-amber-200/60"
+                          className="h-full w-full object-contain transition-transform duration-300 group-hover:scale-105"
+                          loading="lazy"
+                        />
 
                         <h3 className="text-lg font-bold text-slate-800 line-clamp-2 mb-1">{combo.name}</h3>
                         {combo.description && (
@@ -586,23 +582,18 @@ export default function KioskMode({ slug = 'surtifacil', onExit }: KioskModeProp
                       >
                         <div>
                           {/* Fotografía o Gráfico Realista del Producto */}
-                          <div className="relative mb-3 flex h-36 w-full items-center justify-center rounded-2xl bg-gradient-to-b from-slate-50 to-slate-100/70 p-2 overflow-hidden border border-slate-100">
-                            {prod.image_url ? (
-                              <img
-                                src={prod.image_url}
-                                alt={prod.name}
-                                loading="lazy"
-                                className="h-full w-full object-contain transition-transform duration-300 group-hover:scale-105"
-                              />
-                            ) : (
-                              <span className="text-5xl" role="img" aria-label="Producto">🛒</span>
-                            )}
-                            {isOffer && (
-                              <span className="absolute top-2 right-2 rounded-lg bg-red-500 px-2.5 py-1 text-[11px] font-black text-white shadow-xs uppercase tracking-wider">
-                                🔥 Oferta
-                              </span>
-                            )}
-                          </div>
+                          <ProductImage
+                            src={prod.image_url}
+                            alt={prod.name}
+                            productName={prod.name}
+                            barcode={prod.barcode}
+                            category={prod.category}
+                            isOffer={Boolean(isOffer)}
+                            offerBadgeText="🔥 Oferta"
+                            containerClassName="relative mb-3 flex h-36 w-full items-center justify-center rounded-2xl bg-gradient-to-b from-slate-50 to-slate-100/70 p-2 overflow-hidden border border-slate-100"
+                            className="h-full w-full object-contain transition-transform duration-300 group-hover:scale-105"
+                            loading="lazy"
+                          />
 
                           <div className="flex items-center justify-between gap-2 mb-1.5">
                             <span className="rounded-lg bg-slate-100 px-2.5 py-0.5 text-xs font-semibold text-slate-600 capitalize">
@@ -806,17 +797,14 @@ export default function KioskMode({ slug = 'surtifacil', onExit }: KioskModeProp
                   className="flex items-center justify-between gap-3 rounded-2xl border border-slate-100 bg-slate-50 p-3"
                 >
                   <div className="flex items-center gap-3 min-w-0 flex-1">
-                    {item.image_url ? (
-                      <img
-                        src={item.image_url}
-                        alt=""
-                        className="h-12 w-12 rounded-xl object-contain bg-white p-1 border border-slate-200 shrink-0"
-                      />
-                    ) : (
-                      <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-white border border-slate-200 text-xl shrink-0">
-                        🛒
-                      </div>
-                    )}
+                    <ProductImage
+                      src={item.image_url}
+                      alt={item.product_name}
+                      productName={item.product_name}
+                      showOfferBadge={false}
+                      containerClassName="h-12 w-12 rounded-xl bg-white p-1 border border-slate-200 shrink-0"
+                      className="h-full w-full object-contain"
+                    />
                     <div className="min-w-0 flex-1">
                       <p className="truncate font-semibold text-slate-800">{item.product_name}</p>
                       <p className="text-xs text-slate-500">{formatCentsCOP(item.unit_price_cents)} c/u</p>

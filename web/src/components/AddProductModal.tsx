@@ -5,6 +5,7 @@ import BarcodeScanner from './BarcodeScanner';
 import { useBarcode } from '../hooks/useBarcode';
 import { Icon } from './ui/Icon';
 import { Modal } from './ui/Modal';
+import { ProductImage } from './ui/ProductImage';
 import { COLOMBIAN_PRODUCT_CATALOG, findColombianProductImage } from '../data/colombianCatalog';
 
 interface AddProductModalProps {
@@ -346,15 +347,16 @@ const AddProductModal = ({ isOpen, onClose, onAddProduct }: AddProductModalProps
                   Foto o Ilustración de Empaque (URL)
                 </label>
                 <div className="flex items-center gap-2">
-                  {formData.image_url ? (
-                    <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-slate-50 p-1 border border-slate-200 overflow-hidden">
-                      <img src={formData.image_url} alt="Vista previa" className="h-full w-full object-contain" />
-                    </div>
-                  ) : (
-                    <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-xl border border-slate-200">
-                      🛒
-                    </div>
-                  )}
+                  <ProductImage
+                    src={formData.image_url}
+                    alt="Vista previa"
+                    productName={formData.name}
+                    barcode={formData.barcode}
+                    category={formData.category}
+                    showOfferBadge={false}
+                    containerClassName="h-12 w-12 shrink-0 rounded-xl bg-slate-50 p-1 border border-slate-200"
+                    className="h-full w-full object-contain"
+                  />
                   <input
                     id="add-image"
                     type="text"

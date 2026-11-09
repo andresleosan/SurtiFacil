@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { SAAS_PLANS } from '../types/tenant';
 import { formatCOP } from '../utils/currency';
 import { Icon } from './ui/Icon';
+import { ProductImage } from './ui/ProductImage';
 
 interface SampleItem {
   id: string;
@@ -11,6 +12,7 @@ interface SampleItem {
   category: string;
   emoji: string;
   image_url?: string;
+  isOffer?: boolean;
 }
 
 const SAMPLE_PRODUCTS: SampleItem[] = [
@@ -30,40 +32,42 @@ const SAMPLE_PRODUCTS: SampleItem[] = [
     unit: 'Bolsa 1L',
     category: 'Lácteos y Huevos',
     emoji: '🥛',
-    image_url: '/images/products/leche-alqueria-1l.svg',
+    image_url: '/images/products/leche-colanta-1l.svg',
+    isOffer: true,
   },
   {
     id: '3',
-    name: 'Huevos AA Cubeta x30',
-    priceCOP: 18500,
+    name: 'Huevos Santa Reyes AA x30',
+    priceCOP: 19500,
     unit: 'Cubeta x30',
     category: 'Lácteos y Huevos',
     emoji: '🥚',
-    image_url: '/images/products/huevos-aa-x30.svg',
+    image_url: '/images/products/huevos-santa-reyes.svg',
   },
   {
     id: '4',
-    name: 'Panela Pastilla 500g',
-    priceCOP: 3200,
+    name: 'Panela Doña Panela 500g',
+    priceCOP: 3500,
     unit: 'Pastilla 500g',
     category: 'Granos y Despensa',
     emoji: '🟫',
-    image_url: '/images/products/panela-pastilla-unidad.svg',
+    image_url: '/images/products/panela-dona-panela.svg',
   },
   {
     id: '5',
-    name: 'Arepas de Chócolo x5',
-    priceCOP: 4000,
+    name: 'Arepas de Chócolo Don Maíz x5',
+    priceCOP: 4800,
     unit: 'Paquete x5',
     category: 'Panadería y Arepas',
     emoji: '🌽',
-    image_url: '/images/products/arepas-antioquenas-x10.svg',
+    image_url: '/images/products/arepas-chocolo.svg',
+    isOffer: true,
   },
   {
     id: '6',
-    name: 'Café Sello Rojo 250g',
-    priceCOP: 6800,
-    unit: 'Bolsa 250g',
+    name: 'Café Sello Rojo 500g',
+    priceCOP: 14800,
+    unit: 'Bolsa 500g',
     category: 'Granos y Despensa',
     emoji: '☕',
     image_url: '/images/products/cafe-sello-rojo-500g.svg',
@@ -79,12 +83,48 @@ const SAMPLE_PRODUCTS: SampleItem[] = [
   },
   {
     id: '8',
-    name: 'Quesito Antioqueño 250g',
-    priceCOP: 5500,
-    unit: 'Bloque 250g',
+    name: 'Quesito Antioqueño Colanta 400g',
+    priceCOP: 9800,
+    unit: 'Bloque 400g',
     category: 'Lácteos y Huevos',
     emoji: '🧀',
     image_url: '/images/products/quesito-antioqueno-400g.svg',
+  },
+  {
+    id: '9',
+    name: 'Salchichón Tradicional Zenú 450g',
+    priceCOP: 8900,
+    unit: 'Barra 450g',
+    category: 'Granos y Despensa',
+    emoji: '🥩',
+    image_url: '/images/products/salchichon-zenu.svg',
+  },
+  {
+    id: '10',
+    name: 'Galletas Saltín Noel x3 Tacos',
+    priceCOP: 4600,
+    unit: 'Paquete x3',
+    category: 'Panadería y Arepas',
+    emoji: '🍪',
+    image_url: '/images/products/saltin-noel.svg',
+  },
+  {
+    id: '11',
+    name: 'Chocoramo Ramo 65g',
+    priceCOP: 2600,
+    unit: 'Unidad',
+    category: 'Panadería y Arepas',
+    emoji: '🍫',
+    image_url: '/images/products/chocoramo-unidad.svg',
+  },
+  {
+    id: '12',
+    name: 'Papas Margarita Pollo 105g',
+    priceCOP: 3900,
+    unit: 'Paquete',
+    category: 'Panadería y Arepas',
+    emoji: '🥔',
+    image_url: '/images/products/papas-margarita-pollo.svg',
   },
 ];
 
@@ -317,18 +357,16 @@ export default function LandingPage() {
                     className="flex items-center justify-between rounded-xl border border-slate-200 bg-white p-3.5 shadow-2xs hover:shadow-xs transition"
                   >
                     <div className="flex items-center gap-3 min-w-0">
-                      <div className="flex h-14 w-14 items-center justify-center rounded-xl bg-slate-50 p-1 border border-slate-200 shrink-0 overflow-hidden shadow-2xs">
-                        {prod.image_url ? (
-                          <img
-                            src={prod.image_url}
-                            alt={prod.name}
-                            className="h-full w-full object-contain"
-                            loading="lazy"
-                          />
-                        ) : (
-                          <span className="text-2xl">{prod.emoji}</span>
-                        )}
-                      </div>
+                      <ProductImage
+                        src={prod.image_url}
+                        alt={prod.name}
+                        productName={prod.name}
+                        category={prod.category}
+                        isOffer={prod.isOffer}
+                        containerClassName="h-14 w-14 rounded-xl bg-slate-50 p-1 border border-slate-200 shrink-0 shadow-2xs"
+                        className="h-full w-full object-contain"
+                        loading="lazy"
+                      />
                       <div className="min-w-0">
                         <h4 className="font-semibold text-sm text-slate-800 truncate" title={prod.name}>
                           {prod.name}

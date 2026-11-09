@@ -1,0 +1,65 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400" width="100%" height="100%">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#f8fafc"/>
+      <stop offset="100%" stop-color="#e2e8f0"/>
+    </linearGradient>
+    <linearGradient id="casing" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#991b1b"/>
+      <stop offset="35%" stop-color="#ef4444"/>
+      <stop offset="65%" stop-color="#b91c1c"/>
+      <stop offset="100%" stop-color="#7f1d1d"/>
+    </linearGradient>
+    <linearGradient id="goldSeal" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#fef08a"/>
+      <stop offset="50%" stop-color="#f59e0b"/>
+      <stop offset="100%" stop-color="#b45309"/>
+    </linearGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="130%" height="130%">
+      <feDropShadow dx="0" dy="12" stdDeviation="12" flood-color="#0f172a" flood-opacity="0.18"/>
+    </filter>
+  </defs>
+
+  <rect width="400" height="400" rx="24" fill="url(#bg)"/>
+  <circle cx="200" cy="200" r="140" fill="#fee2e2" opacity="0.6"/>
+
+  <g filter="url(#shadow)">
+    <!-- Barra Cilíndrica de Salchichón Zenú -->
+    <!-- Clip metálico superior -->
+    <rect x="188" y="55" width="24" height="14" rx="4" fill="#cbd5e1" stroke="#64748b" stroke-width="1.5"/>
+    <path d="M194 69 L206 69 L215 85 L185 85 Z" fill="#b91c1c"/>
+
+    <!-- Cuerpo del salchichón -->
+    <path d="M140 85 Q200 75 260 85 L260 315 Q200 330 140 315 Z" fill="url(#casing)" stroke="#7f1d1d" stroke-width="2"/>
+
+    <!-- Brillo curvo del empaque plástico -->
+    <path d="M165 95 L165 305" stroke="#ffffff" stroke-width="6" opacity="0.3" stroke-linecap="round"/>
+
+    <!-- Clip metálico inferior -->
+    <path d="M185 315 L215 315 L206 331 L194 331 Z" fill="#7f1d1d"/>
+    <rect x="188" y="331" width="24" height="14" rx="4" fill="#cbd5e1" stroke="#64748b" stroke-width="1.5"/>
+
+    <!-- Etiqueta central Zenú -->
+    <g transform="translate(145, 135)">
+      <!-- Ovalo central blanco y dorado -->
+      <rect x="0" y="0" width="110" height="135" rx="14" fill="#ffffff" stroke="url(#goldSeal)" stroke-width="3"/>
+      
+      <!-- Cinta superior Zenú -->
+      <rect x="10" y="12" width="90" height="32" rx="6" fill="#b91c1c"/>
+      <text x="55" y="35" font-family="'Arial Black', Impact, sans-serif" font-size="20" font-weight="900" fill="#ffffff" text-anchor="middle" letter-spacing="1">ZENÚ</text>
+
+      <!-- Nombre del producto -->
+      <text x="55" y="60" font-family="'Arial Black', sans-serif" font-size="10" font-weight="900" fill="#1e293b" text-anchor="middle">SALCHICHÓN</text>
+      <text x="55" y="73" font-family="Arial, sans-serif" font-size="8.5" font-weight="bold" fill="#dc2626" text-anchor="middle">TRADICIONAL</text>
+
+      <line x1="15" y1="80" x2="95" y2="80" stroke="#fecaca" stroke-width="1"/>
+
+      <!-- Medalla de calidad -->
+      <circle cx="55" cy="95" r="11" fill="url(#goldSeal)"/>
+      <text x="55" y="99" font-family="Arial, sans-serif" font-size="8" font-weight="bold" fill="#78350f" text-anchor="middle">100%</text>
+
+      <!-- Peso -->
+      <text x="55" y="122" font-family="'Arial Black', sans-serif" font-size="9" font-weight="900" fill="#0f172a" text-anchor="middle">PESO 450 g</text>
+    </g>
+  </g>
+</svg>

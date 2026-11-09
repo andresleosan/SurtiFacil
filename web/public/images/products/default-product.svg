@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400" width="100%" height="100%">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#f8fafc"/>
+      <stop offset="100%" stop-color="#e2e8f0"/>
+    </linearGradient>
+    <linearGradient id="bagGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="50%" stop-color="#f8fafc"/>
+      <stop offset="100%" stop-color="#f1f5f9"/>
+    </linearGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="130%" height="130%">
+      <feDropShadow dx="0" dy="10" stdDeviation="10" flood-color="#0f172a" flood-opacity="0.12"/>
+    </filter>
+  </defs>
+
+  <rect width="400" height="400" rx="24" fill="url(#bg)"/>
+  <circle cx="200" cy="200" r="140" fill="#e0f2fe" opacity="0.5"/>
+
+  <g filter="url(#shadow)">
+    <!-- Bolsa de compras de abastos SurtiFácil -->
+    <path d="M120 160 L280 160 L295 320 Q200 335 105 320 Z" fill="url(#bagGrad)" stroke="#cbd5e1" stroke-width="2"/>
+    
+    <!-- Manija de la bolsa -->
+    <path d="M160 160 C160 110 240 110 240 160" fill="none" stroke="#1565c0" stroke-width="6" stroke-linecap="round"/>
+
+    <!-- Ícono / Emblema SurtiFácil en la bolsa -->
+    <circle cx="200" cy="235" r="42" fill="#1565c0" opacity="0.9"/>
+    <text x="200" y="248" font-family="'Arial Black', sans-serif" font-size="34" font-weight="900" fill="#ffffff" text-anchor="middle">S</text>
+
+    <!-- Hojas / Frescura vecinal -->
+    <path d="M185 195 C175 180 190 170 195 180 C205 170 220 180 210 195 Z" fill="#10b981"/>
+
+    <!-- Etiqueta inferior -->
+    <rect x="135" y="288" width="130" height="20" rx="6" fill="#e2e8f0"/>
+    <text x="200" y="302" font-family="Arial, sans-serif" font-size="10" font-weight="bold" fill="#475569" text-anchor="middle" letter-spacing="0.5">VÍVERES Y ABASTOS</text>
+  </g>
+</svg>

@@ -1,0 +1,60 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400" width="100%" height="100%">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#f8fafc"/>
+      <stop offset="100%" stop-color="#e2e8f0"/>
+    </linearGradient>
+    <linearGradient id="panelaBlock" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#92400e"/>
+      <stop offset="40%" stop-color="#78350f"/>
+      <stop offset="100%" stop-color="#451a03"/>
+    </linearGradient>
+    <linearGradient id="panelaTop" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#b45309"/>
+      <stop offset="60%" stop-color="#92400e"/>
+      <stop offset="100%" stop-color="#78350f"/>
+    </linearGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="130%" height="130%">
+      <feDropShadow dx="0" dy="12" stdDeviation="12" flood-color="#0f172a" flood-opacity="0.18"/>
+    </filter>
+  </defs>
+
+  <rect width="400" height="400" rx="24" fill="url(#bg)"/>
+  <circle cx="200" cy="200" r="140" fill="#fef3c7" opacity="0.6"/>
+
+  <g filter="url(#shadow)">
+    <!-- Bloque 3D de Panela Colombiana -->
+    <!-- Cara Superior Isométrica -->
+    <path d="M200 95 L310 155 L200 215 L90 155 Z" fill="url(#panelaTop)" stroke="#451a03" stroke-width="2"/>
+    
+    <!-- Cara Lateral Izquierda -->
+    <path d="M90 155 L200 215 L200 305 L90 245 Z" fill="url(#panelaBlock)" stroke="#451a03" stroke-width="2"/>
+
+    <!-- Cara Lateral Derecha -->
+    <path d="M200 215 L310 155 L310 245 L200 305 Z" fill="#451a03" stroke="#291102" stroke-width="2"/>
+
+    <!-- Textura rugosa de panela de trapiche -->
+    <path d="M120 150 Q160 165 190 145" stroke="#d97706" stroke-width="1.5" opacity="0.5" fill="none"/>
+    <path d="M210 145 Q250 160 280 140" stroke="#d97706" stroke-width="1.5" opacity="0.5" fill="none"/>
+
+    <!-- Envoltura / Faja de Papel Ecológico Doña Panela -->
+    <g transform="translate(115, 160)">
+      <rect x="0" y="0" width="170" height="110" rx="10" fill="#ffffff" stroke="#15803d" stroke-width="2.5"/>
+      <rect x="5" y="5" width="160" height="100" rx="8" fill="#f0fdf4"/>
+
+      <!-- Corona vegetal / hojas de caña -->
+      <path d="M85 15 C75 10 70 20 85 24 C100 20 95 10 85 15 Z" fill="#16a34a"/>
+      <circle cx="85" cy="28" r="4" fill="#d97706"/>
+
+      <!-- Tipografía Doña Panela -->
+      <text x="85" y="50" font-family="'Georgia', serif" font-size="18" font-weight="bold" font-style="italic" fill="#15803d" text-anchor="middle">Doña Panela</text>
+      <text x="85" y="66" font-family="Arial, sans-serif" font-size="9" font-weight="bold" fill="#78350f" text-anchor="middle" letter-spacing="1">100% JUGO DE CAÑA</text>
+
+      <line x1="20" y1="72" x2="150" y2="72" stroke="#bbf7d0" stroke-width="1.5"/>
+
+      <!-- Peso y atributos -->
+      <text x="85" y="86" font-family="'Arial Black', sans-serif" font-size="12" font-weight="900" fill="#047857" text-anchor="middle">PASTILLA 500 g</text>
+      <text x="85" y="98" font-family="Arial, sans-serif" font-size="8" font-weight="bold" fill="#059669" text-anchor="middle">Sin Químicos ni Aditivos</text>
+    </g>
+  </g>
+</svg>

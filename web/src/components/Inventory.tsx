@@ -15,6 +15,7 @@ import { Modal } from './ui/Modal';
 import { PageHeader } from './ui/PageHeader';
 import { useConfirm } from './ui/ConfirmDialog';
 import { formatCOP, formatCentsCOP } from '../utils/currency';
+import { ProductImage } from './ui/ProductImage';
 
 const formatPrice = (cents: number) => `$${(cents / 100).toFixed(0)}`;
 
@@ -744,20 +745,17 @@ const Inventory = () => {
                       <tr key={product.id} className="transition hover:bg-sf-light">
                         <td className="px-4 py-3 text-sm font-medium text-sf-text">
                           <div className="flex items-center gap-3">
-                            {product.image_url ? (
-                              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-slate-50 p-1 border border-slate-200 overflow-hidden">
-                                <img
-                                  src={product.image_url}
-                                  alt=""
-                                  className="h-full w-full object-contain"
-                                  loading="lazy"
-                                />
-                              </div>
-                            ) : (
-                              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-base border border-slate-200">
-                                📦
-                              </span>
-                            )}
+                            <ProductImage
+                              src={product.image_url}
+                              alt={product.name}
+                              productName={product.name}
+                              barcode={product.barcode}
+                              category={product.category}
+                              showOfferBadge={false}
+                              containerClassName="h-10 w-10 shrink-0 rounded-lg bg-slate-50 p-1 border border-slate-200"
+                              className="h-full w-full object-contain"
+                              loading="lazy"
+                            />
                             <span className="truncate max-w-[220px]" title={product.name}>
                               {product.name}
                             </span>
@@ -975,20 +973,17 @@ const Inventory = () => {
                       >
                         <div>
                           <div className="flex items-start justify-between gap-2">
-                            {product.image_url ? (
-                              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-slate-50 p-1 border border-slate-200 overflow-hidden">
-                                <img
-                                  src={product.image_url}
-                                  alt=""
-                                  className="h-full w-full object-contain"
-                                  loading="lazy"
-                                />
-                              </div>
-                            ) : (
-                              <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-xl border border-slate-200">
-                                📦
-                              </span>
-                            )}
+                            <ProductImage
+                              src={product.image_url}
+                              alt={product.name}
+                              productName={product.name}
+                              barcode={product.barcode}
+                              category={product.category}
+                              showOfferBadge={false}
+                              containerClassName="h-12 w-12 shrink-0 rounded-xl bg-slate-50 p-1 border border-slate-200"
+                              className="h-full w-full object-contain"
+                              loading="lazy"
+                            />
                             <div className="flex flex-wrap items-center justify-end gap-1">
                               <span className="chip bg-slate-100 text-[10px] font-semibold text-slate-700 capitalize">
                                 {product.unit || 'unidad'}
@@ -1173,15 +1168,15 @@ const Inventory = () => {
                   >
                     <div>
                       <div className="flex items-start justify-between">
-                        {c.image_url ? (
-                          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-amber-50 p-1 border border-amber-200 overflow-hidden">
-                            <img src={c.image_url} alt="" className="h-full w-full object-contain" />
-                          </div>
-                        ) : (
-                          <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-100 text-xl">
-                            🎁
-                          </span>
-                        )}
+                        <ProductImage
+                          src={c.image_url}
+                          alt={c.name}
+                          productName={c.name}
+                          showOfferBadge={false}
+                          containerClassName="h-12 w-12 shrink-0 rounded-xl bg-amber-50 p-1 border border-amber-200"
+                          className="h-full w-full object-contain"
+                          loading="lazy"
+                        />
                         {ahorroCents > 0 && (
                           <span className="chip bg-emerald-100 text-xs font-bold text-emerald-800">
                             Ahorra {formatCentsCOP(ahorroCents)}
@@ -1399,15 +1394,14 @@ const Inventory = () => {
               Foto o Ilustración de Empaque (URL)
             </label>
             <div className="flex items-center gap-2">
-              {editDraft.image_url ? (
-                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-slate-50 p-1 border border-slate-200 overflow-hidden">
-                  <img src={editDraft.image_url} alt="Vista previa" className="h-full w-full object-contain" />
-                </div>
-              ) : (
-                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-xl border border-slate-200">
-                  📦
-                </div>
-              )}
+              <ProductImage
+                src={editDraft.image_url}
+                alt="Vista previa"
+                productName={editDraft.name}
+                showOfferBadge={false}
+                containerClassName="h-12 w-12 shrink-0 rounded-xl bg-slate-50 p-1 border border-slate-200"
+                className="h-full w-full object-contain"
+              />
               <input
                 id="edit-image"
                 type="text"
@@ -1533,15 +1527,14 @@ const Inventory = () => {
               Ilustración del Combo (URL)
             </label>
             <div className="flex items-center gap-2">
-              {comboImageUrl ? (
-                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-amber-50 p-1 border border-amber-200 overflow-hidden">
-                  <img src={comboImageUrl} alt="Vista previa" className="h-full w-full object-contain" />
-                </div>
-              ) : (
-                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-amber-100 text-xl border border-amber-200">
-                  🍱
-                </div>
-              )}
+              <ProductImage
+                src={comboImageUrl}
+                alt="Vista previa combo"
+                productName={comboName || 'Combo'}
+                showOfferBadge={false}
+                containerClassName="h-12 w-12 shrink-0 rounded-xl bg-amber-50 p-1 border border-amber-200"
+                className="h-full w-full object-contain"
+              />
               <input
                 id="combo-image"
                 type="text"
