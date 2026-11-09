@@ -76,6 +76,24 @@ describe('Generador de Tirillas Térmicas y Exportación Excel CSV', () => {
     expect(text58).toContain('¡Gracias por su compra!');
   });
 
+  it('incluye efectivo recibido y vueltas en la tirilla de venta cuando se paga en efectivo con cambio', () => {
+    const saleWithCash: Sale = {
+      ...mockSale,
+      payment_method: 'cash',
+      received_cash_cents: 2000000, // $ 20.000 COP
+      change_cents: 750000, // $ 7.500 COP
+    };
+    const receipt = generateSaleReceiptText(saleWithCash, mockStore, { width: '58mm' });
+    expect(receipt).toContain('Efectivo Recibido:');
+    expect(receipt).toContain('$ 20.000');
+    expect(receipt).toContain('Vueltas a Entregar:');
+    expect(receipt).toContain('$ 7.500');
+
+    const wa = generateSaleWhatsAppText(saleWithCash, mockStore);
+    expect(wa).toContain('💵 *Efectivo Recibido:* $ 20.000');
+    expect(wa).toContain('🪙 *Vueltas a Entregar:* $ 7.500');
+  });
+
   it('genera tirilla de venta formateada para impresora térmica de 80mm', () => {
     const text80 = generateSaleReceiptText(mockSale, mockStore, { width: '80mm' });
     expect(text80).toContain('SURTIFÁCIL ABASTOS BELÉN');

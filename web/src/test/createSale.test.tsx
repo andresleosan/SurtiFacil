@@ -178,4 +178,40 @@ describe('CreateSale', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('Demasiadas solicitudes');
     expect(within(screen.getByRole('list', { name: 'Artículos en el carrito' })).getByText('Leche Entera')).toBeInTheDocument();
   });
+
+  it('calculates change with quick COP bills and blocks sale if cash is insufficient', async () => {
+    stubViewport(false);
+    const user = userEvent.setup();
+    render(<CreateSale />);
+
+    const list = await screen.findByRole('list', { name: 'Productos disponibles' });
+    await user.click(within(list).getByRole('button', { name: 'Agregar Leche Entera' })); // 3500 cents = $35.00
+
+    // Por defecto es efectivo (cash)
+    expect(screen.getByRole('region', { name: 'Calculadora de efectivo y vueltas COP' })).toBeInTheDocument();
+
+    // Digitar monto insuficiente (e.g. 20.00 < 35.00)
+    const input = screen.getByLabelText('Efectivo recibido en pesos');
+    await user.clear(input);
+    await user.type(input, '20');
+
+    // Debe mostrar alerta de dinero insuficiente y botón bloqueado
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent(/Dinero Insuficiente/i);
+    expect(alert).toHaveTextContent(/Faltan/i);
+    expect(screen.getByRole('button', { name: /Dinero insuficiente/ })).toBeDisabled();
+
+    // Seleccionar Pago Exacto
+    await user.click(screen.getByRole('button', { name: /Pago exacto de/ }));
+    expect(screen.getByRole('status')).toHaveTextContent('Vueltas a Entregar');
+    expect(screen.getByRole('status')).toHaveTextContent('$0.00');
+
+    // Confirmar venta
+    const confirmBtn = screen.getByRole('button', { name: /Confirmar venta/ });
+    expect(confirmBtn).toBeEnabled();
+    await user.click(confirmBtn);
+
+    await waitFor(() => expect(saleMock.createSale).toHaveBeenCalledOnce());
+    expect(saleMock.createSale.mock.calls[0][1]).toBe('cash');
+  });
 });

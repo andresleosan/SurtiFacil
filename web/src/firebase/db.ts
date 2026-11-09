@@ -76,6 +76,8 @@ export interface Sale {
   created_by_uid?: string;
   created_by_role?: UserRole;
   total_cost_cents?: number;
+  received_cash_cents?: number;
+  change_cents?: number;
 }
 
 export type OrderStatus = 'draft' | 'ordered' | 'partial' | 'received' | 'cancelled';

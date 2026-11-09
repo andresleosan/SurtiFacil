@@ -815,6 +815,12 @@ test.describe('Suite E2E de Certificación de Producción — SurtiFácil SaaS',
     await expect(confirmCard.getByText(/Vueltas a Entregar/i)).toBeVisible();
     await confirmCard.getByRole('button', { name: /Aplicar productos al carrito/i }).click();
 
+    // 5.1.1 Teclado Táctil de Billetes COP y Calculadora Visual de Vueltas en POS (Tarea 20)
+    const cashCalc = page.getByRole('region', { name: /Calculadora de efectivo y vueltas COP/i });
+    await expect(cashCalc).toBeVisible();
+    await expect(cashCalc.getByText(/Vueltas a Entregar/i)).toBeVisible();
+    await expect(cashCalc.getByRole('button', { name: /Pago exacto de/i })).toBeVisible();
+
     await page.getByRole('button', { name: /Confirmar venta/i }).click();
     await expect(page.getByRole('status')).toContainText('Venta registrada exitosamente');
 

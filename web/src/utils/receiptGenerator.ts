@@ -101,6 +101,14 @@ export function generateSaleReceiptText(
   const methodLabel = paymentMethodLabels[sale.payment_method] || sale.payment_method;
   lines.push(formatTwoColumns('Forma de Pago:', methodLabel, colWidth));
 
+  if (sale.payment_method === 'cash' && typeof sale.received_cash_cents === 'number') {
+    lines.push(formatTwoColumns('Efectivo Recibido:', formatCentsCOP(sale.received_cash_cents), colWidth));
+    const change = typeof sale.change_cents === 'number'
+      ? sale.change_cents
+      : Math.max(0, sale.received_cash_cents - sale.total);
+    lines.push(formatTwoColumns('Vueltas a Entregar:', formatCentsCOP(change), colWidth));
+  }
+
   lines.push(doubleDivider);
   lines.push(centerText('¡Gracias por su compra!', colWidth));
   lines.push(centerText('SurtiFácil SaaS - Medellín', colWidth));
@@ -142,6 +150,14 @@ export function generateSaleWhatsAppText(sale: Sale, store: Partial<StoreSetting
 
   text += `\n💰 *TOTAL A PAGAR:* *${formatCentsCOP(sale.total)}*\n`;
   text += `💳 *Medio de pago:* ${methodLabel}\n`;
+
+  if (sale.payment_method === 'cash' && typeof sale.received_cash_cents === 'number') {
+    text += `💵 *Efectivo Recibido:* ${formatCentsCOP(sale.received_cash_cents)}\n`;
+    const change = typeof sale.change_cents === 'number'
+      ? sale.change_cents
+      : Math.max(0, sale.received_cash_cents - sale.total);
+    text += `🪙 *Vueltas a Entregar:* ${formatCentsCOP(change)}\n`;
+  }
 
   if (store.datos_pago_offline) {
     text += `\n📌 *Datos de Pago:* ${store.datos_pago_offline}\n`;

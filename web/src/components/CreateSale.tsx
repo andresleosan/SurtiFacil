@@ -17,6 +17,7 @@ import { SarinVoicePOS } from './SarinVoicePOS';
 import type { VoiceSaleCommandResult } from '../utils/sarinVoiceParser';
 import ThermalReceiptModal from './ThermalReceiptModal';
 import CashClosingModal from './CashClosingModal';
+import { CashChangeCalculator } from './CashChangeCalculator';
 import {
   isNotificationSupported,
   getNotificationPermission,
@@ -57,6 +58,7 @@ const CreateSale = () => {
   const [receiptModalOpen, setReceiptModalOpen] = useState(false);
   const [closingModalOpen, setClosingModalOpen] = useState(false);
   const [notifPermission, setNotifPermission] = useState<NotificationPermission>(() => getNotificationPermission());
+  const [receivedCashCents, setReceivedCashCents] = useState<number | null>(null);
 
   const handleLoadOrderToCart = (order: CustomerOrder) => {
     const items = order.items || [];
@@ -89,6 +91,9 @@ const CreateSale = () => {
 
     // Actualizar método de pago
     setPaymentMethod(command.paymentMethod);
+    if (command.paymentMethod === 'cash' && command.receivedCashCents !== null) {
+      setReceivedCashCents(command.receivedCashCents);
+    }
 
     // Si es fiado y viene un nombre de cliente, buscar coincidencia en cartera
     if (command.paymentMethod === 'credit' && command.creditCustomerName) {
@@ -245,12 +250,22 @@ const CreateSale = () => {
       setError('Selecciona el cliente al que se le fía');
       return;
     }
+    if (paymentMethod === 'cash' && receivedCashCents !== null && receivedCashCents < total) {
+      setError(`Monto recibido insuficiente. Faltan ${formatPrice(total - receivedCashCents)}.`);
+      return;
+    }
     try {
       setSubmitting(true);
       setError('');
       const itemsSnapshot = [...cartItems];
       const methodSnapshot = paymentMethod;
       const creditCust = creditCustomers.find((c) => c.id === creditCustomerId);
+      const actualReceivedCents = methodSnapshot === 'cash'
+        ? (receivedCashCents !== null ? receivedCashCents : total)
+        : undefined;
+      const actualChangeCents = methodSnapshot === 'cash' && actualReceivedCents !== undefined
+        ? Math.max(0, actualReceivedCents - total)
+        : undefined;
       const saleId = await createSale(cartItems, paymentMethod, paymentMethod === 'credit' ? creditCustomerId : undefined);
       const createdSaleObj: Sale = {
         id: saleId,
@@ -261,12 +276,15 @@ const CreateSale = () => {
         credit_customer_name: creditCust?.name,
         items: itemsSnapshot,
         createdAt: new Date(),
+        received_cash_cents: actualReceivedCents,
+        change_cents: actualChangeCents,
       };
       setLastCreatedSale(createdSaleObj);
       setSuccess(true);
       setCartItems([]);
       setPaymentMethod('cash');
       setCreditCustomerId('');
+      setReceivedCashCents(null);
       setCartOpen(false);
       window.setTimeout(() => setSuccess(false), 8000);
     } catch (err: unknown) {
@@ -285,12 +303,19 @@ const CreateSale = () => {
       submitting={submitting}
       onChangeQuantity={changeQuantity}
       onRemove={removeFromCart}
-      onPaymentChange={setPaymentMethod}
+      onPaymentChange={(method) => {
+        setPaymentMethod(method);
+        if (method !== 'cash') {
+          setReceivedCashCents(null);
+        }
+      }}
       onConfirm={handleConfirmSale}
       compact={isMobile}
       creditCustomers={creditCustomers.filter((customer) => customer.active)}
       creditCustomerId={creditCustomerId}
       onCreditCustomerChange={setCreditCustomerId}
+      receivedCashCents={receivedCashCents}
+      onReceivedCashChange={setReceivedCashCents}
     />
   );
 
@@ -599,6 +624,8 @@ interface CartPanelProps {
   onRemove: (productId: string) => void;
   onPaymentChange: (method: PaymentMethod) => void;
   onConfirm: () => void;
+  receivedCashCents: number | null;
+  onReceivedCashChange: (cents: number | null) => void;
 }
 
 function CartPanel({
@@ -615,6 +642,8 @@ function CartPanel({
   onRemove,
   onPaymentChange,
   onConfirm,
+  receivedCashCents,
+  onReceivedCashChange,
 }: CartPanelProps) {
   return (
     <div className="space-y-4">
@@ -723,14 +752,35 @@ function CartPanel({
         </div>
       )}
 
-      <button
-        type="button"
-        onClick={onConfirm}
-        disabled={submitting || items.length === 0 || (paymentMethod === 'credit' && !creditCustomerId)}
-        className="btn-success w-full py-3 text-base"
-      >
-        {submitting ? 'Procesando...' : `Confirmar venta · ${formatPrice(total)}`}
-      </button>
+      {/* Teclado táctil de billetes COP y calculadora visual de vueltas */}
+      {paymentMethod === 'cash' && items.length > 0 && (
+        <CashChangeCalculator
+          totalCents={total}
+          receivedCashCents={receivedCashCents}
+          onReceivedCashChange={onReceivedCashChange}
+          formatPrice={formatPrice}
+        />
+      )}
+
+      {paymentMethod === 'cash' && receivedCashCents !== null && receivedCashCents < total ? (
+        <button
+          type="button"
+          disabled
+          aria-disabled="true"
+          className="btn-success w-full py-3 text-base opacity-75 cursor-not-allowed bg-rose-600 hover:bg-rose-600 border-rose-600"
+        >
+          Dinero insuficiente · Faltan {formatPrice(total - receivedCashCents)}
+        </button>
+      ) : (
+        <button
+          type="button"
+          onClick={onConfirm}
+          disabled={submitting || items.length === 0 || (paymentMethod === 'credit' && !creditCustomerId)}
+          className="btn-success w-full py-3 text-base"
+        >
+          {submitting ? 'Procesando...' : `Confirmar venta · ${formatPrice(total)}`}
+        </button>
+      )}
     </div>
   );
 }

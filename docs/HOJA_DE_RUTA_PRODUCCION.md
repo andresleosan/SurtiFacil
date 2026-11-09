@@ -329,9 +329,24 @@ Para maximizar la eficiencia de tokens y la precisión de razonamiento en cada s
 
 ## Fase 5 — Operaciones Avanzadas de Mostrador, Cobranza WhatsApp y Facturación Térmica
 
-- [ ] **Tarea 20 — Teclado Táctil de Billetes COP y Calculadora Visual de Vueltas en POS (`CreateSale.tsx`):**
+- [x] **Tarea 20 — Teclado Táctil de Billetes COP y Calculadora Visual de Vueltas en POS (`CreateSale.tsx`):**
   - **Nivel Recomendado:** `3.8 Flash (Medium)`
-  - **Objetivo:** Agilizar el cobro en efectivo durante horas pico mediante botones rápidos de denominaciones colombianas (`[Exacto]`, `[$10.000]`, `[$20.000]`, `[$50.000]`, `[$100.000]`) y cálculo instantáneo en verde gigante de las "Vueltas a entregar".
+  - **Estado:** ✅ Completada y Desplegada
+  - **Evidencia Técnica de Implementación:**
+    1. **Componente Reutilizable `<CashChangeCalculator />` (`web/src/components/CashChangeCalculator.tsx`):**
+       - Teclado táctil de billetes colombianos con objetivos táctiles ergonómicos $\ge 44\times 44\text{ px}$ (`min-h-[44px]`).
+       - Denominaciones rápidas de alta rotación en abastos: `[⚡ Exacto]`, `[$ 10.000]`, `[$ 20.000]`, `[$ 50.000]`, `[$ 100.000]` (junto a `$ 2.000` y `$ 5.000` para compras menores).
+       - Entrada personalizada con selector numérico y botón accesible de limpieza rápida (`[Limpiar]`).
+       - **Calculadora Visual de Vueltas en Verde Gigante:** Al recibir efectivo suficiente ($\ge \text{Total}$), muestra en tipografía gigante (`text-2xl sm:text-3xl font-black text-emerald-600`) el cambio exacto a entregar con desglose de recibo vs total.
+       - **Protección Financiera de Caja:** Si el cliente entrega menos dinero que el total oficial, muestra alerta de alto contraste (`text-rose-600`) indicando el faltante exacto y deshabilita el botón de confirmación (`Dinero insuficiente · Faltan ...`).
+    2. **Integración Transversal en Punto de Venta POS (`CreateSale.tsx`):**
+       - Integrado en `CartPanel` tanto para vista de escritorio como en el drawer móvil (`isMobile`).
+       - Enlazado con el Copiloto de Voz Sarin (`command.receivedCashCents` actualiza el teclado y calculadora automáticamente cuando se dictan ventas como *"pagan con 20 mil"*).
+       - Persistencia del monto recibido (`received_cash_cents`) y vueltas (`change_cents`) en el objeto oficial de venta `Sale` y tirilla térmica (`receiptGenerator.ts`).
+    3. **100% de Pruebas en Verde:**
+       - 53 suites de Vitest y 410 tests aprobados al 100% (incluyendo nueva suite `cashChangeCalculator.test.tsx` con 6 tests y tests de caja en `createSale.test.tsx` y `receiptAndExport.test.ts`).
+       - Compilación de producción impecable (`npm run build:web` en 5.23s) con Service Worker y precaché PWA generados.
+       - Suite E2E de Playwright ejecutada con 27/27 pruebas activas en verde en navegadores desktop, mobile y tablet (certificando el teclado y vueltas en el Escenario 5 de `qa/e2e/saas-production.spec.ts`).
 
 - [ ] **Tarea 21 — Módulo de Cobranza Vecinal de Fiados por WhatsApp con Link Nequi/Bancolombia (`Credits.tsx`):**
   - **Nivel Recomendado:** `3.8 Flash (Medium)`
