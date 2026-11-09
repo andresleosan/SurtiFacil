@@ -16,6 +16,7 @@ import { PageHeader } from './ui/PageHeader';
 import { useConfirm } from './ui/ConfirmDialog';
 import { formatCOP, formatCentsCOP } from '../utils/currency';
 import { ProductImage } from './ui/ProductImage';
+import { ProductPhotoUploader } from './ui/ProductPhotoUploader';
 
 const formatPrice = (cents: number) => `$${(cents / 100).toFixed(0)}`;
 
@@ -1389,29 +1390,15 @@ const Inventory = () => {
             />
           </div>
 
-          <div>
-            <label htmlFor="edit-image" className="mb-1 block text-sm font-medium text-gray-700">
-              Foto o Ilustración de Empaque (URL)
-            </label>
-            <div className="flex items-center gap-2">
-              <ProductImage
-                src={editDraft.image_url}
-                alt="Vista previa"
-                productName={editDraft.name}
-                showOfferBadge={false}
-                containerClassName="h-12 w-12 shrink-0 rounded-xl bg-slate-50 p-1 border border-slate-200"
-                className="h-full w-full object-contain"
-              />
-              <input
-                id="edit-image"
-                type="text"
-                value={editDraft.image_url}
-                onChange={(event) => setEditDraft({ ...editDraft, image_url: event.target.value })}
-                placeholder="/images/products/arroz-diana-1lb.svg o URL web"
-                className="input flex-1 text-xs"
-              />
-            </div>
-          </div>
+          {/* Carga Fotográfica desde Celular / Empaque */}
+          <ProductPhotoUploader
+            imageUrl={editDraft.image_url}
+            productName={editDraft.name}
+            barcode={editDraft.barcode}
+            category={editDraft.category}
+            onChange={(newUrl) => setEditDraft({ ...editDraft, image_url: newUrl })}
+            onRemove={() => setEditDraft({ ...editDraft, image_url: '' })}
+          />
 
           <div className="flex gap-4 border-t border-slate-100 pt-3">
             <label className="flex items-center gap-2 text-xs font-semibold text-slate-700">

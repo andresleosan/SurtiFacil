@@ -6,6 +6,7 @@ import { useBarcode } from '../hooks/useBarcode';
 import { Icon } from './ui/Icon';
 import { Modal } from './ui/Modal';
 import { ProductImage } from './ui/ProductImage';
+import { ProductPhotoUploader } from './ui/ProductPhotoUploader';
 import { COLOMBIAN_PRODUCT_CATALOG, findColombianProductImage } from '../data/colombianCatalog';
 
 interface AddProductModalProps {
@@ -96,12 +97,13 @@ const AddProductModal = ({ isOpen, onClose, onAddProduct }: AddProductModalProps
 
   const { isOpen: isScannerOpen, open: openScanner, close: closeScanner, handleScan } = useBarcode(handleBarcodeScan);
 
-  const handleImageData = (data: { nombre: string; precio_sugerido: number | null; categoria: string }) => {
+  const handleImageData = (data: { nombre: string; precio_sugerido: number | null; categoria: string; imageUrl?: string }) => {
     setFormData((prev) => ({
       ...prev,
       name: data.nombre,
       price: data.precio_sugerido ? data.precio_sugerido.toString() : '',
       category: data.categoria,
+      image_url: data.imageUrl || prev.image_url,
     }));
     setMode('manual');
   };
@@ -341,33 +343,15 @@ const AddProductModal = ({ isOpen, onClose, onAddProduct }: AddProductModalProps
                 </div>
               </div>
 
-              {/* Imagen / Empaque del Producto */}
-              <div>
-                <label htmlFor="add-image" className="mb-1 block text-sm font-medium text-sf-text">
-                  Foto o Ilustración de Empaque (URL)
-                </label>
-                <div className="flex items-center gap-2">
-                  <ProductImage
-                    src={formData.image_url}
-                    alt="Vista previa"
-                    productName={formData.name}
-                    barcode={formData.barcode}
-                    category={formData.category}
-                    showOfferBadge={false}
-                    containerClassName="h-12 w-12 shrink-0 rounded-xl bg-slate-50 p-1 border border-slate-200"
-                    className="h-full w-full object-contain"
-                  />
-                  <input
-                    id="add-image"
-                    type="text"
-                    name="image_url"
-                    value={formData.image_url}
-                    onChange={handleInputChange}
-                    placeholder="/images/products/arroz-diana-1lb.svg o URL web"
-                    className="input flex-1 text-xs"
-                  />
-                </div>
-              </div>
+              {/* Carga Fotográfica desde Celular / Empaque */}
+              <ProductPhotoUploader
+                imageUrl={formData.image_url}
+                productName={formData.name}
+                barcode={formData.barcode}
+                category={formData.category}
+                onChange={(newUrl) => setFormData((prev) => ({ ...prev, image_url: newUrl }))}
+                onRemove={() => setFormData((prev) => ({ ...prev, image_url: '' }))}
+              />
 
               <div>
                 <label htmlFor="add-barcode" className="mb-1 block text-sm font-medium text-sf-text">

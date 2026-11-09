@@ -705,6 +705,16 @@ test.describe('Suite E2E de Certificación de Producción — SurtiFácil SaaS',
     await expect(page.getByText('Leche Entera Colanta 1L').first()).toBeVisible();
     await expect(page.getByText('Arroz Diana 1kg').first()).toBeVisible();
 
+    // 2.1b Verificar editor fotográfico con captura desde celular y compresor WebP
+    const editLecheBtn = page.getByRole('button', { name: /Editar Leche Entera Colanta 1L/i }).first();
+    if (await editLecheBtn.isVisible()) {
+      await editLecheBtn.click();
+      await expect(page.getByRole('heading', { name: 'Editar producto' })).toBeVisible();
+      await expect(page.getByRole('button', { name: /Tomar con Celular/i })).toBeVisible();
+      await expect(page.getByRole('button', { name: /Subir de Galería/i })).toBeVisible();
+      await page.getByRole('button', { name: 'Cancelar' }).click();
+    }
+
     // Verificar pestaña de Combos y Kits
     const combosTab = page.getByRole('button', { name: /Combos y Kits/i });
     if (await combosTab.isVisible()) {

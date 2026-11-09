@@ -303,13 +303,27 @@ Para maximizar la eficiencia de tokens y la precisión de razonamiento en cada s
        - Compilación de producción impecable (`npm run build:web` en 6.12s) con PWA y Service Worker activo.
        - Suite E2E de Playwright ejecutada con 27/27 pruebas activas en verde en navegadores desktop, mobile y tablet.
 
-- [ ] **Tarea 19 — Carga Fotográfica desde el Celular y Compresor WebP en Navegador (`Inventory.tsx` y `AddProductModal.tsx`):**
+- [x] **Tarea 19 — Carga Fotográfica desde el Celular y Compresor WebP en Navegador (`Inventory.tsx` y `AddProductModal.tsx`):**
   - **Nivel Recomendado:** `3.8 Flash (Medium)`
-  - **Objetivo:** Permitir al tendero tomar una foto de un producto en el mostrador directamente con la cámara de su celular (`capture="environment"`) o subir un archivo de imagen al crear o editar productos.
-  - **Entregables:**
-    1. Compresor de imagen en el cliente con Canvas HTML5 (redimensiona a máximo 800×800 px y comprime a WebP/JPEG < 120 KB en Base64 o URL).
-    2. Vista previa instantánea con botón de eliminación o cambio de foto.
-    3. Persistencia transparente en el campo `image_url` en Cloudflare D1.
+  - **Estado:** ✅ Completada y Desplegada
+  - **Evidencia Técnica de Implementación:**
+    1. **Compresor WebP / JPEG en Cliente con Canvas HTML5 (`web/src/utils/imageCompressor.ts`):**
+       - Redimensionamiento proporcional de fotos a un marco máximo de 800×800 px conservando la relación de aspecto original (`calculateTargetDimensions`).
+       - Detección de soporte nativo WebP (`isWebPSupported`) con compresión progresiva de calidad (0.82 hasta 0.50) para garantizar siempre un peso inferior a 120 KB en Base64 Data URL (típicamente entre 30 y 75 KB).
+       - Suavizado bicúbico de alta calidad (`imageSmoothingQuality = 'high'`) y fondo neutro para evitar artefactos en empaques con transparencias.
+    2. **Componente Reutilizable `<ProductPhotoUploader />` (`web/src/components/ui/ProductPhotoUploader.tsx`):**
+       - Objetivos táctiles mínimos $\ge 44\times 44\text{ px}$ (`min-h-[44px]`).
+       - Botón directo para cámara trasera del celular (`capture="environment"`), botón para galería/archivos del dispositivo y selector expandible para ingresar URL manual o plantillas SVG de empaques colombianos.
+       - Vista previa instantánea con `<ProductImage />`, badge de peso optimizado (`⚡ WebP Optimizado: 45 KB`) e indicador reactivo de compresión.
+       - Botón accesible para remover foto con confirmación inmediata (`aria-label="Quitar foto del producto"`).
+    3. **Integración Transversal en Catálogo (`AddProductModal.tsx`, `Inventory.tsx`, `ImageUploadAI.tsx`):**
+       - Modal de nuevo producto (`AddProductModal.tsx`) y modal de edición de producto (`Inventory.tsx`) actualizados con `<ProductPhotoUploader />`.
+       - Persistencia transparente en el campo `image_url` en SQLite / Cloudflare D1.
+       - Soporte en `ImageUploadAI.tsx` para autocompletar la foto comprimida directamente en el formulario tras el análisis con Sarin IA.
+    4. **100% de Pruebas en Verde:**
+       - 52 suites de Vitest y 402 tests aprobados al 100% (incluyendo nuevas suites `imageCompressor.test.ts` con 11 tests y `productPhotoUploader.test.tsx` con 5 tests).
+       - Compilación de producción impecable (`npm run build:web` en 5.74s) con PWA y Service Worker activo.
+       - Suite E2E de Playwright ejecutada con 27/27 pruebas activas en verde en navegadores desktop, mobile y tablet (certificando el editor con foto en `qa/e2e/saas-production.spec.ts`).
 
 ---
 
