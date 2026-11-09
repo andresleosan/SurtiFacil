@@ -278,11 +278,43 @@ Para maximizar la eficiencia de tokens y la precisión de razonamiento en cada s
 
 ---
 
-## Fase 4 — Catálogo Fotográfico Real de Productos Colombianos (En Planificación)
+## Fase 4 — Catálogo Fotográfico Ultra-Realista de Productos Colombianos y Gestión Móvil
 
-- [ ] **Tarea 18 — Banco de Fotografías Reales de Productos de Abastos Colombianos y Subida a CDN / WebP:**
+- [ ] **Tarea 18 — Banco de Empaques y Fotografías de la Canasta Familiar Colombiana + Componente `<ProductImage>` Reutilizable con Fallback y Lazy Loading:**
   - **Nivel Recomendado:** `3.8 Flash (High)`
-  - **Objetivo:** Reemplazar los emojis/placeholders en Kiosco (`#/kiosco/:slug`), Tienda Vecinal (`#/tienda/:slug`) y POS (`#/create-sale`) por fotografías optimizadas en WebP de marcas y productos emblemáticos de la canasta familiar colombiana (Arroz Diana, Leche Colanta, Huevos Santa Reyes, Café Sello Rojo, Panela, Arepas de Chócolo, Aguacate Hass, Quesito Antioqueño, Galletas Saltín Noel, Aceite Premier, etc.) con fallback elegante y soporte para que el tendero suba sus propias fotos por cámara o archivo.
+  - **Objetivo:** Reemplazar de forma definitiva los emojis y placeholders en la Landing (`#/landing`), Kiosco iPad (`#/kiosco/:slug`), Tienda Vecinal (`#/tienda/:slug`), POS Mostrador (`#/create-sale`) e Inventario (`#/inventory`) por imágenes de alta fidelidad con empaques auténticos de marcas colombianas (Arroz Diana, Leche Colanta, Huevos Santa Reyes, Café Sello Rojo, Panela Doña Panela, Arepas de Chócolo, Aguacate Hass, Quesito Antioqueño, Salchichón Zenú, Galletas Saltín Noel, Papas Margarita, Chocoramo, Coca-Cola, etc.).
+  - **Entregables:**
+    1. Componente transversal `<ProductImage>` con `loading="lazy"`, detector de fallas `onError` para evitar iconos de imágenes rotas y badge ergonómico de oferta ("🔥 Oferta").
+    2. Actualización de `colombianCatalog.ts`, `LandingPage.tsx`, `KioskMode.tsx`, `PublicStorefront.tsx`, `CreateSale.tsx` e `Inventory.tsx`.
+    3. Pruebas unitarias de renderizado y fallback visual.
+
+- [ ] **Tarea 19 — Carga Fotográfica desde el Celular y Compresor WebP en Navegador (`Inventory.tsx` y `AddProductModal.tsx`):**
+  - **Nivel Recomendado:** `3.8 Flash (Medium)`
+  - **Objetivo:** Permitir al tendero tomar una foto de un producto en el mostrador directamente con la cámara de su celular (`capture="environment"`) o subir un archivo de imagen al crear o editar productos.
+  - **Entregables:**
+    1. Compresor de imagen en el cliente con Canvas HTML5 (redimensiona a máximo 800×800 px y comprime a WebP/JPEG < 120 KB en Base64 o URL).
+    2. Vista previa instantánea con botón de eliminación o cambio de foto.
+    3. Persistencia transparente en el campo `image_url` en Cloudflare D1.
+
+---
+
+## Fase 5 — Operaciones Avanzadas de Mostrador, Cobranza WhatsApp y Facturación Térmica
+
+- [ ] **Tarea 20 — Teclado Táctil de Billetes COP y Calculadora Visual de Vueltas en POS (`CreateSale.tsx`):**
+  - **Nivel Recomendado:** `3.8 Flash (Medium)`
+  - **Objetivo:** Agilizar el cobro en efectivo durante horas pico mediante botones rápidos de denominaciones colombianas (`[Exacto]`, `[$10.000]`, `[$20.000]`, `[$50.000]`, `[$100.000]`) y cálculo instantáneo en verde gigante de las "Vueltas a entregar".
+
+- [ ] **Tarea 21 — Módulo de Cobranza Vecinal de Fiados por WhatsApp con Link Nequi/Bancolombia (`Credits.tsx`):**
+  - **Nivel Recomendado:** `3.8 Flash (Medium)`
+  - **Objetivo:** Botón táctil `"📲 Cobrar por WhatsApp"` en cada cliente moroso del Libro de Fiados que genera un enlace click-to-chat con mensaje respetuoso paisa, saldo actualizado, fecha de vencimiento y datos de transferencia Nequi/Bancolombia de la tienda.
+
+- [ ] **Tarea 22 — Tirilla Térmica de 58mm y 80mm para Impresoras POS y Código QR de Seguimiento:**
+  - **Nivel Recomendado:** `3.8 Flash (Medium)`
+  - **Objetivo:** Formato CSS `@media print` de comprobante de venta y abono de fiado calibrado para impresoras térmicas de rollos de 58mm y 80mm (Bluetooth/USB) con QR de verificación vecinal y leyenda DIAN Art. 616-1.
+
+- [ ] **Tarea 23 — Suite E2E de Certificación Total (Fases 4 y 5) y Despliegue en Vivo:**
+  - **Nivel Recomendado:** `Argon (High)`
+  - **Objetivo:** Pruebas unitarias de compresión y utilidades, suite E2E completa en Playwright cubriendo catálogo fotográfico, billetes COP, cobranza WhatsApp y tirilla térmica, finalizando con commit y despliegue automático a producción.
 
 
 
