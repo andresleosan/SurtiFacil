@@ -92,10 +92,20 @@
    Estilos de Impresión Térmica de Mostrador (58mm / 80mm)
    ============================================================================== */
 @media print {
+  @page {
+    margin: 0;
+    size: auto;
+  }
+
+  html,
   body {
+    margin: 0 !important;
+    padding: 0 !important;
     background-color: #ffffff !important;
     color: #000000 !important;
-    font-size: 12px !important;
+    font-size: 11px !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
   }
 
   /* Ocultar elementos de navegación, modales exteriores y botones */
@@ -122,6 +132,8 @@
     color: #000000 !important;
     box-shadow: none !important;
     border: none !important;
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
   }
 
   .thermal-58mm {
@@ -130,8 +142,8 @@
     margin: 0 auto !important;
     padding: 2mm !important;
     font-family: monospace, "Courier New", Courier !important;
-    font-size: 11px !important;
-    line-height: 1.2 !important;
+    font-size: 10.5px !important;
+    line-height: 1.18 !important;
   }
 
   .thermal-80mm {
@@ -140,8 +152,29 @@
     margin: 0 auto !important;
     padding: 3mm !important;
     font-family: monospace, "Courier New", Courier !important;
-    font-size: 13px !important;
-    line-height: 1.25 !important;
+    font-size: 12.5px !important;
+    line-height: 1.22 !important;
+  }
+
+  .receipt-qr-section {
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+  }
+
+  .receipt-qr {
+    display: block !important;
+    margin: 1.5mm auto !important;
+    shape-rendering: crispEdges !important;
+  }
+
+  .thermal-58mm .receipt-qr {
+    width: 26mm !important;
+    height: 26mm !important;
+  }
+
+  .thermal-80mm .receipt-qr {
+    width: 34mm !important;
+    height: 34mm !important;
   }
 }
 

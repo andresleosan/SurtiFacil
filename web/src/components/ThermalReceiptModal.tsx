@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Sale } from '../firebase/db';
 import { StoreSettings } from '../types/storeSettings';
 import { CashClosing } from '../types/cashClosing';
@@ -8,20 +8,32 @@ import {
   generateSaleWhatsAppText,
   generateCashClosingReceiptText,
   generateCashClosingWhatsAppText,
+  generateCreditPaymentReceiptText,
+  generateCreditPaymentWhatsAppText,
+  CreditPaymentReceipt,
   ThermalWidth,
 } from '../utils/receiptGenerator';
+import { generateQRMatrix, qrMatrixToSVGPath } from '../utils/qrCode';
 import { Modal } from './ui/Modal';
 import { Icon } from './ui/Icon';
 
-interface ThermalReceiptModalProps {
+export interface ThermalReceiptModalProps {
   isOpen: boolean;
   onClose: () => void;
   sale?: Sale | null;
   closing?: CashClosing | null;
+  creditPayment?: CreditPaymentReceipt | null;
 }
 
-export function ThermalReceiptModal({ isOpen, onClose, sale, closing }: ThermalReceiptModalProps) {
+export function ThermalReceiptModal({
+  isOpen,
+  onClose,
+  sale,
+  closing,
+  creditPayment,
+}: ThermalReceiptModalProps) {
   const [width, setWidth] = useState<ThermalWidth>('58mm');
+  const [showQR, setShowQR] = useState(true);
   const [storeSettings, setStoreSettings] = useState<Partial<StoreSettings>>({});
   const [whatsappPhone, setWhatsappPhone] = useState('');
   const [copied, setCopied] = useState(false);
@@ -35,7 +47,8 @@ export function ThermalReceiptModal({ isOpen, onClose, sale, closing }: ThermalR
     }
   }, [isOpen]);
 
-  if (!isOpen || (!sale && !closing)) {
+  // Si no está abierto o no hay entidad activa, no renderizar
+  if (!isOpen || (!sale && !closing && !creditPayment)) {
     return null;
   }
 
@@ -43,13 +56,42 @@ export function ThermalReceiptModal({ isOpen, onClose, sale, closing }: ThermalR
     ? generateSaleReceiptText(sale, storeSettings, { width })
     : closing
     ? generateCashClosingReceiptText(closing, storeSettings, { width })
+    : creditPayment
+    ? generateCreditPaymentReceiptText(creditPayment, storeSettings, { width })
     : '';
 
   const whatsAppText = sale
     ? generateSaleWhatsAppText(sale, storeSettings)
     : closing
     ? generateCashClosingWhatsAppText(closing, storeSettings)
+    : creditPayment
+    ? generateCreditPaymentWhatsAppText(creditPayment, storeSettings)
     : '';
+
+  // Determinar la URL del código QR para verificación vecinal o catálogo
+  const qrUrl = (() => {
+    if (sale?.customer_order_token) {
+      return `https://surtifacil.pages.dev/#/pedido/${sale.customer_order_token}`;
+    }
+    const slug = storeSettings.slug || 'surtifacil';
+    if (sale || creditPayment) {
+      return `https://surtifacil.pages.dev/#/tienda/${slug}`;
+    }
+    if (closing) {
+      return 'https://surtifacil.pages.dev/#/sales';
+    }
+    return `https://surtifacil.pages.dev/#/tienda/${slug}`;
+  })();
+
+  const qrData = (() => {
+    if (!showQR) return null;
+    try {
+      const matrix = generateQRMatrix(qrUrl);
+      return qrMatrixToSVGPath(matrix, 4, 1);
+    } catch {
+      return null;
+    }
+  })();
 
   const handlePrint = () => {
     window.print();
@@ -83,7 +125,9 @@ export function ThermalReceiptModal({ isOpen, onClose, sale, closing }: ThermalR
 
   const title = sale
     ? `Tirilla de Venta #${(sale.id || '').slice(0, 8)}`
-    : `Acta de Cierre #${closing?.closing_number || ''}`;
+    : closing
+    ? `Acta de Cierre #${closing?.closing_number || ''}`
+    : `Comprobante de Abono #${(creditPayment?.receipt_number || '').slice(0, 8)}`;
 
   return (
     <Modal
@@ -112,6 +156,18 @@ export function ThermalReceiptModal({ isOpen, onClose, sale, closing }: ThermalR
             >
               80mm (Ancho)
             </button>
+            <button
+              type="button"
+              onClick={() => setShowQR((prev) => !prev)}
+              className={`min-h-[36px] px-2.5 text-xs font-semibold rounded-md transition ${
+                showQR ? 'bg-emerald-50 text-emerald-800 border border-emerald-300' : 'text-slate-500 hover:text-slate-900'
+              }`}
+              aria-pressed={showQR}
+              aria-label="Alternar código QR en la tirilla"
+              title="Alternar código QR en la tirilla"
+            >
+              <span>{showQR ? '📷 Con QR' : 'Sin QR'}</span>
+            </button>
           </div>
 
           <div className="flex items-center gap-2">
@@ -139,7 +195,7 @@ export function ThermalReceiptModal({ isOpen, onClose, sale, closing }: ThermalR
         {showPhonePrompt && (
           <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm no-print space-y-2">
             <p className="font-semibold text-emerald-900">
-              Enviar {sale ? 'tirilla al cliente' : 'reporte al administrador'} por WhatsApp
+              Enviar {sale ? 'tirilla al cliente' : creditPayment ? 'recibo de abono al cliente' : 'reporte al administrador'} por WhatsApp
             </p>
             <div className="flex gap-2">
               <input
@@ -165,7 +221,7 @@ export function ThermalReceiptModal({ isOpen, onClose, sale, closing }: ThermalR
         <div className="flex items-center justify-between text-xs text-slate-500 no-print">
           <span className="flex items-center gap-1">
             <span className="h-2 w-2 rounded-full bg-emerald-500"></span>
-            Vista previa térmica ({width})
+            Vista previa térmica ({width}) {showQR && '· QR Vecinal'}
           </span>
           <button
             type="button"
@@ -186,6 +242,28 @@ export function ThermalReceiptModal({ isOpen, onClose, sale, closing }: ThermalR
             <pre className="font-mono text-xs whitespace-pre-wrap leading-tight select-all">
               {receiptText}
             </pre>
+
+            {/* Código QR de Verificación y Pedido Vecinal */}
+            {showQR && qrData && (
+              <div className="receipt-qr-section flex flex-col items-center justify-center mt-3 pt-2 border-t border-dashed border-slate-300 text-center">
+                <svg
+                  viewBox={`0 0 ${qrData.fullSize} ${qrData.fullSize}`}
+                  className={`receipt-qr mx-auto transition-all ${
+                    width === '58mm' ? 'w-[96px] h-[96px]' : 'w-[124px] h-[124px]'
+                  }`}
+                  aria-label="Código QR de verificación vecinal y pedidos"
+                  shapeRendering="crispEdges"
+                >
+                  <path d={qrData.pathData} fill="#000000" />
+                </svg>
+                <p className="font-mono text-[9px] tracking-tight mt-1 text-slate-700 uppercase">
+                  [ Escanea para pedir o verificar ]
+                </p>
+                <p className="font-mono text-[8px] text-slate-500">
+                  surtifacil.pages.dev
+                </p>
+              </div>
+            )}
           </div>
         </div>
       </div>

@@ -5,14 +5,51 @@ import { formatCentsCOP } from './currency';
 
 export type ThermalWidth = '58mm' | '80mm';
 
+export interface CreditPaymentReceipt {
+  id?: string;
+  receipt_number: string;
+  customer_name: string;
+  customer_phone?: string;
+  amount_cents: number;
+  balance_before_cents?: number;
+  balance_after_cents?: number;
+  payment_method?: 'cash' | 'transfer' | string;
+  date: Date | string;
+  description?: string;
+  received_by_name?: string;
+}
+
 /**
  * Centra un texto dentro de un ancho determinado rellenando con espacios.
+ * Si el texto excede el ancho, lo envuelve en múltiples líneas centradas sin truncar palabras.
  */
 function centerText(text: string, width: number): string {
-  if (text.length >= width) return text.slice(0, width);
-  const leftPadding = Math.floor((width - text.length) / 2);
-  const rightPadding = width - text.length - leftPadding;
-  return ' '.repeat(leftPadding) + text + ' '.repeat(rightPadding);
+  if (text.length <= width) {
+    const leftPadding = Math.floor((width - text.length) / 2);
+    const rightPadding = width - text.length - leftPadding;
+    return ' '.repeat(leftPadding) + text + ' '.repeat(rightPadding);
+  }
+  const words = text.split(' ');
+  const wrappedLines: string[] = [];
+  let current = '';
+  for (const w of words) {
+    if (!current) {
+      current = w;
+    } else if (current.length + 1 + w.length <= width) {
+      current += ' ' + w;
+    } else {
+      const leftPad = Math.floor((width - current.length) / 2);
+      const rightPad = width - current.length - leftPad;
+      wrappedLines.push(' '.repeat(Math.max(0, leftPad)) + current + ' '.repeat(Math.max(0, rightPad)));
+      current = w;
+    }
+  }
+  if (current) {
+    const leftPad = Math.floor((width - current.length) / 2);
+    const rightPad = width - current.length - leftPad;
+    wrappedLines.push(' '.repeat(Math.max(0, leftPad)) + current + ' '.repeat(Math.max(0, rightPad)));
+  }
+  return wrappedLines.join('\n');
 }
 
 /**
@@ -110,6 +147,8 @@ export function generateSaleReceiptText(
   }
 
   lines.push(doubleDivider);
+  lines.push(centerText('SISTEMA POS - CONTROL INTERNO', colWidth));
+  lines.push(centerText('NO RESPONSABLE DE IVA (ART. 616-1 E.T.)', colWidth));
   lines.push(centerText('¡Gracias por su compra!', colWidth));
   lines.push(centerText('SurtiFácil SaaS - Medellín', colWidth));
 
@@ -163,6 +202,7 @@ export function generateSaleWhatsAppText(sale: Sale, store: Partial<StoreSetting
     text += `\n📌 *Datos de Pago:* ${store.datos_pago_offline}\n`;
   }
 
+  text += `\n📌 *Documento de Control Interno — Régimen No Responsable de IVA (Art. 616-1 E.T.)*\n`;
   text += `\n¡Muchas gracias por apoyar el comercio de tu barrio! 🙏✨`;
 
   return text;
@@ -283,6 +323,127 @@ export function generateCashClosingWhatsAppText(closing: CashClosing, store: Par
   }
 
   text += `\nReporte generado por *SurtiFácil SaaS*`;
+
+  return text;
+}
+
+/**
+ * Genera el texto plano para impresión térmica de un recibo de abono de fiados (58mm o 80mm).
+ */
+export function generateCreditPaymentReceiptText(
+  payment: CreditPaymentReceipt,
+  store: Partial<StoreSettings>,
+  options: { width: ThermalWidth } = { width: '58mm' }
+): string {
+  const colWidth = options.width === '58mm' ? 32 : 48;
+  const divider = '-'.repeat(colWidth);
+  const doubleDivider = '='.repeat(colWidth);
+
+  const lines: string[] = [];
+
+  // Cabecera de la tienda
+  lines.push(centerText((store.nombre || 'SURTIFÁCIL ABASTOS').toUpperCase(), colWidth));
+  if (store.barrio || store.ciudad) {
+    lines.push(centerText(`${store.barrio || ''} - ${store.ciudad || 'Medellín'}`, colWidth));
+  }
+  if (store.direccion) {
+    lines.push(centerText(store.direccion, colWidth));
+  }
+  if (store.telefono_whatsapp) {
+    lines.push(centerText(`Tel / WhatsApp: ${store.telefono_whatsapp}`, colWidth));
+  }
+  lines.push(doubleDivider);
+
+  // Título del comprobante
+  lines.push(centerText('COMPROBANTE DE ABONO A FIADOS', colWidth));
+  lines.push(centerText(`Recibo #${(payment.receipt_number || '').slice(0, 8)}`, colWidth));
+  lines.push(divider);
+
+  // Fecha y responsable
+  const payDate = payment.date instanceof Date ? payment.date : new Date(payment.date || Date.now());
+  lines.push(formatTwoColumns('Fecha:', payDate.toLocaleDateString('es-CO'), colWidth));
+  lines.push(formatTwoColumns('Hora:', payDate.toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' }), colWidth));
+  if (payment.received_by_name) {
+    lines.push(formatTwoColumns('Recibido por:', payment.received_by_name, colWidth));
+  }
+
+  // Datos del cliente
+  lines.push(divider);
+  lines.push(formatTwoColumns('Cliente:', payment.customer_name, colWidth));
+  if (payment.customer_phone) {
+    lines.push(formatTwoColumns('Teléfono:', payment.customer_phone, colWidth));
+  }
+  if (payment.description) {
+    lines.push(formatTwoColumns('Concepto:', payment.description.slice(0, colWidth - 10), colWidth));
+  }
+  lines.push(divider);
+
+  // Desglose contable
+  if (typeof payment.balance_before_cents === 'number') {
+    lines.push(formatTwoColumns('Saldo Anterior:', formatCentsCOP(payment.balance_before_cents), colWidth));
+  }
+
+  lines.push(formatTwoColumns('VALOR ABONADO:', formatCentsCOP(payment.amount_cents), colWidth));
+
+  if (typeof payment.balance_after_cents === 'number') {
+    lines.push(formatTwoColumns('NUEVO SALDO DEUDOR:', formatCentsCOP(payment.balance_after_cents), colWidth));
+  }
+
+  const paymentMethodLabel = payment.payment_method === 'transfer'
+    ? 'Transferencia Nequi / Bancolombia'
+    : payment.payment_method === 'card'
+    ? 'Tarjeta Débito/Crédito'
+    : 'Efectivo';
+  lines.push(formatTwoColumns('Medio de Pago:', paymentMethodLabel, colWidth));
+
+  lines.push(doubleDivider);
+  lines.push(centerText('RECIBO DE CAJA - CONTROL INTERNO', colWidth));
+  lines.push(centerText('NO RESPONSABLE DE IVA (ART. 616-1 E.T.)', colWidth));
+  lines.push(centerText('¡Gracias por su abono puntual!', colWidth));
+  lines.push(centerText('SurtiFácil SaaS - Medellín', colWidth));
+
+  return lines.join('\n');
+}
+
+/**
+ * Genera el mensaje formateado para enviar el comprobante de abono de fiados por WhatsApp.
+ */
+export function generateCreditPaymentWhatsAppText(
+  payment: CreditPaymentReceipt,
+  store: Partial<StoreSettings>
+): string {
+  const storeName = store.nombre || 'SurtiFácil Abastos';
+  const payDate = payment.date instanceof Date ? payment.date : new Date(payment.date || Date.now());
+  const dateStr = payDate.toLocaleDateString('es-CO');
+  const timeStr = payDate.toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' });
+
+  const methodLabel = payment.payment_method === 'transfer'
+    ? '📱 Transferencia Nequi / Bancolombia'
+    : payment.payment_method === 'card'
+    ? '💳 Tarjeta'
+    : '💵 Efectivo';
+
+  let text = `🧾 *COMPROBANTE DE ABONO A FIADOS — ${storeName.toUpperCase()}*\n`;
+  if (store.barrio) text += `📍 ${store.barrio}, Medellín\n`;
+  text += `📅 Fecha: ${dateStr} · ${timeStr}\n`;
+  text += `🔢 Recibo de Caja: #${(payment.receipt_number || '').slice(0, 8)}\n`;
+  text += `👤 Cliente: *${payment.customer_name}*\n\n`;
+
+  text += `💰 *DETALLE DEL PAGO:*\n`;
+  if (typeof payment.balance_before_cents === 'number') {
+    text += `▪ Saldo Anterior: ${formatCentsCOP(payment.balance_before_cents)}\n`;
+  }
+  text += `▪ *Valor Abonado:* *${formatCentsCOP(payment.amount_cents)}*\n`;
+  if (typeof payment.balance_after_cents === 'number') {
+    text += `▪ *Nuevo Saldo Pendiente:* *${formatCentsCOP(payment.balance_after_cents)}*\n`;
+  }
+  text += `💳 *Medio de pago:* ${methodLabel}\n`;
+  if (payment.description) {
+    text += `📝 Concepto: ${payment.description}\n`;
+  }
+
+  text += `\n📌 *Documento de Control Interno — Régimen No Responsable de IVA (Art. 616-1 E.T.)*\n`;
+  text += `\n¡Muchas gracias por su puntualidad y apoyo al comercio del barrio! 🙏✨`;
 
   return text;
 }

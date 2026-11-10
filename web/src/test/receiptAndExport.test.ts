@@ -7,6 +7,9 @@ import {
   generateSaleWhatsAppText,
   generateCashClosingReceiptText,
   generateCashClosingWhatsAppText,
+  generateCreditPaymentReceiptText,
+  generateCreditPaymentWhatsAppText,
+  CreditPaymentReceipt,
 } from '../utils/receiptGenerator';
 import { exportSalesToCSV, exportClosingsToCSV, downloadCSV } from '../utils/csvExporter';
 
@@ -73,6 +76,8 @@ describe('Generador de Tirillas Térmicas y Exportación Excel CSV', () => {
     expect(text58).toContain('SURTIFÁCIL ABASTOS BELÉN');
     expect(text58).toContain('Arroz Diana 1kg');
     expect(text58).toContain('$ 12.500');
+    expect(text58).toContain('NO RESPONSABLE DE IVA');
+    expect(text58).toContain('616-1 E.T.');
     expect(text58).toContain('¡Gracias por su compra!');
   });
 
@@ -108,6 +113,48 @@ describe('Generador de Tirillas Térmicas y Exportación Excel CSV', () => {
     expect(waText).toContain('Arroz Diana 1kg');
     expect(waText).toContain('*$ 12.500*');
     expect(waText).toContain('Nequi / Bancolombia: 300 123 4567');
+    expect(waText).toContain('Art. 616-1 E.T.');
+  });
+
+  it('genera tirilla térmica de comprobante de abono a fiados para 58mm y 80mm con leyenda DIAN Art. 616-1', () => {
+    const mockPayment: CreditPaymentReceipt = {
+      id: 'pay-test-101',
+      receipt_number: 'pay-test-101',
+      customer_name: 'Don Carlos Restrepo',
+      customer_phone: '3109876543',
+      amount_cents: 2000000, // $ 20.000 COP
+      balance_before_cents: 5500000, // $ 55.000 COP
+      balance_after_cents: 3500000, // $ 35.000 COP
+      payment_method: 'cash',
+      date: new Date('2026-11-08T10:15:00Z'),
+      description: 'Abono en efectivo de quincena',
+      received_by_name: 'Cajero Andrés',
+    };
+
+    const text58 = generateCreditPaymentReceiptText(mockPayment, mockStore, { width: '58mm' });
+    expect(text58).toContain('COMPROBANTE DE ABONO A FIADOS');
+    expect(text58).toContain('Don Carlos Restrepo');
+    expect(text58).toContain('Saldo Anterior:');
+    expect(text58).toContain('$ 55.000');
+    expect(text58).toContain('VALOR ABONADO:');
+    expect(text58).toContain('$ 20.000');
+    expect(text58).toContain('NUEVO SALDO DEUDOR:');
+    expect(text58).toContain('$ 35.000');
+    expect(text58).toContain('NO RESPONSABLE DE IVA');
+    expect(text58).toContain('616-1 E.T.');
+
+    const text80 = generateCreditPaymentReceiptText(mockPayment, mockStore, { width: '80mm' });
+    expect(text80).toContain('COMPROBANTE DE ABONO A FIADOS');
+    expect(text80).toContain('Don Carlos Restrepo');
+    expect(text80).toContain('$ 20.000');
+    expect(text80).toContain('NO RESPONSABLE DE IVA (ART. 616-1 E.T.)');
+
+    const waText = generateCreditPaymentWhatsAppText(mockPayment, mockStore);
+    expect(waText).toContain('🧾 *COMPROBANTE DE ABONO A FIADOS');
+    expect(waText).toContain('Don Carlos Restrepo');
+    expect(waText).toContain('$ 20.000');
+    expect(waText).toContain('$ 35.000');
+    expect(waText).toContain('Art. 616-1 E.T.');
   });
 
   it('genera tirilla térmica del Acta de Cierre de Caja con desglose de billetes y monedas', () => {

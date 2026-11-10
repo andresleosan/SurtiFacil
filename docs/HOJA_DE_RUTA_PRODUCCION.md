@@ -371,9 +371,26 @@ Para maximizar la eficiencia de tokens y la precisión de razonamiento en cada s
        - Compilación de producción impecable (`npm run build:web` en 12.21s) con Service Worker y precaché PWA generados.
        - Suite E2E de Playwright ejecutada con 27/27 pruebas activas en verde en navegadores desktop, mobile y tablet.
 
-- [ ] **Tarea 22 — Tirilla Térmica de 58mm y 80mm para Impresoras POS y Código QR de Seguimiento:**
+- [x] **Tarea 22 — Tirilla Térmica de 58mm y 80mm para Impresoras POS y Código QR de Seguimiento:**
   - **Nivel Recomendado:** `3.8 Flash (Medium)`
-  - **Objetivo:** Formato CSS `@media print` de comprobante de venta y abono de fiado calibrado para impresoras térmicas de rollos de 58mm y 80mm (Bluetooth/USB) con QR de verificación vecinal y leyenda DIAN Art. 616-1.
+  - **Estado:** ✅ Completada y Desplegada
+  - **Evidencia Técnica de Implementación:**
+    1. **Formato y Calibración Térmica 58mm y 80mm (`web/src/utils/receiptGenerator.ts` e `index.css`):**
+       - Algoritmo de centrado y partición de líneas (`centerText`) que respeta anchos de columna estrictos (32 columnas para 58mm y 48 columnas para 80mm) con envoltura de texto por palabras sin cortes abruptos.
+       - Reglas `@media print` perfeccionadas con `@page { margin: 0; size: auto; }`, desactivación de fondos, aislamiento absoluto de `.thermal-receipt-printable`, prevención de cortes accidentales (`page-break-inside: avoid`), renderizado vectorial nítido con `shape-rendering: crispEdges` y anchos exactos en milímetros (`58mm` y `80mm`) para impresoras Bluetooth y USB de 203 DPI.
+    2. **Comprobante de Abono a Fiados y Leyenda DIAN Art. 616-1 (`CreditPaymentReceipt`):**
+       - Soporte completo para recibos de abono (`generateCreditPaymentReceiptText` y `generateCreditPaymentWhatsAppText`) con desglose contable (Saldo Anterior, Valor Abonado, Nuevo Saldo Deudor en COP, Fecha, Hora, Cajero y Medio de Pago).
+       - Inclusión obligatoria de la **Leyenda DIAN Art. 616-1** (*"SISTEMA POS - CONTROL INTERNO · NO RESPONSABLE DE IVA (ART. 616-1 E.T.)"* / *"RECIBO DE CAJA - CONTROL INTERNO"*) tanto en venta como en abono y en los comprobantes compartidos por WhatsApp.
+    3. **Código QR Vectorial de Seguimiento Vecinal Integrado (`ThermalReceiptModal.tsx`):**
+       - Generación autónoma de QR en SVG vectorial con `generateQRMatrix` y `qrMatrixToSVGPath` (cero librerías externas), apuntando al rastreo del pedido (`#/pedido/:token`) o al catálogo vecinal de la tienda (`#/tienda/:slug`).
+       - Selector en cabecera para alternar dinámicamente entre `58mm (Estándar)` y `80mm (Ancho)`, y switch táctil `[ 📷 Con QR / Sin QR ]`.
+    4. **Integración Transversal en el Libro de Fiados (`Credits.tsx`):**
+       - Emisión automática de la tirilla térmica tras registrar exitosamente cualquier abono en `CustomerDetail`.
+       - Botón accesible `[ 🧾 Tirilla ]` en cada abono del historial de movimientos para reimpresión o envío por WhatsApp en cualquier momento.
+    5. **100% de Pruebas en Verde:**
+       - 56 suites de Vitest y 427 tests aprobados al 100% (incluyendo nueva suite `thermalReceiptModal.test.tsx` con 6 tests y tests extendidos en `receiptAndExport.test.ts`).
+       - Compilación de producción impecable (`npm run build:web` en 5.84s) con Service Worker y precaché PWA generados.
+       - Suite E2E de Playwright ejecutada con 27/27 pruebas activas en verde en navegadores desktop, mobile y tablet.
 
 - [ ] **Tarea 23 — Suite E2E de Certificación Total (Fases 4 y 5) y Despliegue en Vivo:**
   - **Nivel Recomendado:** `Argon (High)`

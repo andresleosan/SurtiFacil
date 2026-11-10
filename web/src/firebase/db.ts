@@ -71,6 +71,8 @@ export interface Sale {
   items: SaleItem[];
   credit_customer_id?: string;
   credit_customer_name?: string;
+  customer_order_id?: string;
+  customer_order_token?: string;
   createdAt?: any;
   schema_version?: 2;
   created_by_uid?: string;

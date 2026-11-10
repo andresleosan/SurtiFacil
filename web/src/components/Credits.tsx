@@ -23,6 +23,8 @@ import {
   buildWhatsAppClickToChatUrl,
 } from '../utils/debtReminder';
 import { DebtCollectionModal } from './DebtCollectionModal';
+import { ThermalReceiptModal } from './ThermalReceiptModal';
+import { CreditPaymentReceipt } from '../utils/receiptGenerator';
 
 export {
   generateDebtReminderWhatsAppText,
@@ -404,6 +406,7 @@ function CustomerDetail({ customer, actor, canManage, storeSettings, onClose, on
   const [description, setDescription] = useState('');
   const [entryError, setEntryError] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [receiptPayment, setReceiptPayment] = useState<CreditPaymentReceipt | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -439,6 +442,24 @@ function CustomerDetail({ customer, actor, canManage, storeSettings, onClose, on
       const created = await addCreditEntry(customer.id, { type: entryType, amount_cents: cents, description }, actor);
       setEntries((current) => [created, ...current]);
       setEntryType(null);
+
+      // Si fue un abono exitoso, preparar y abrir automáticamente la tirilla térmica
+      if (entryType === 'payment') {
+        const paymentReceipt: CreditPaymentReceipt = {
+          id: created.id,
+          receipt_number: created.id,
+          customer_name: customer.name,
+          customer_phone: customer.phone,
+          amount_cents: cents,
+          balance_before_cents: customer.balance_cents,
+          balance_after_cents: Math.max(0, customer.balance_cents - cents),
+          payment_method: 'cash',
+          date: created.createdAt ? (created.createdAt.toDate ? created.createdAt.toDate() : new Date(created.createdAt)) : new Date(),
+          description: description || 'Abono a cuenta de fiados',
+          received_by_name: actor.role === 'admin' ? 'Administrador' : actor.role === 'manager' ? 'Gerente' : 'Cajero',
+        };
+        setReceiptPayment(paymentReceipt);
+      }
     } catch (err) {
       setEntryError(err instanceof Error ? err.message : 'Error al registrar el movimiento');
     } finally {
@@ -578,15 +599,47 @@ function CustomerDetail({ customer, actor, canManage, storeSettings, onClose, on
                     <p className="truncate text-sm text-sf-text">{entry.description || (entry.sale_id ? 'Venta fiada' : 'Sin descripción')}</p>
                     <p className="text-xs text-gray-500">{formatDate(entry.createdAt)}{entry.sale_id ? ` · venta ${entry.sale_id.slice(0, 8)}` : ''}</p>
                   </div>
-                  <span className={`text-sm font-semibold ${entry.type === 'debt' ? 'text-red-600' : 'text-green-600'}`}>
-                    {entry.type === 'debt' ? '+' : '-'}{formatMoney(entry.amount_cents)}
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <span className={`text-sm font-semibold ${entry.type === 'debt' ? 'text-red-600' : 'text-green-600'}`}>
+                      {entry.type === 'debt' ? '+' : '-'}{formatMoney(entry.amount_cents)}
+                    </span>
+                    {entry.type === 'payment' && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setReceiptPayment({
+                            id: entry.id,
+                            receipt_number: entry.id,
+                            customer_name: customer.name,
+                            customer_phone: customer.phone,
+                            amount_cents: entry.amount_cents,
+                            date: entry.createdAt ? (entry.createdAt.toDate ? entry.createdAt.toDate() : new Date(entry.createdAt)) : new Date(),
+                            description: entry.description || 'Abono a cuenta de fiados',
+                            received_by_name: actor.role === 'admin' ? 'Administrador' : actor.role === 'manager' ? 'Gerente' : 'Cajero',
+                          });
+                        }}
+                        className="btn-secondary min-h-[32px] h-8 px-2 text-xs flex items-center gap-1 rounded-md text-slate-700 hover:text-sf-primary hover:bg-slate-50"
+                        aria-label={`Ver tirilla térmica del abono de ${formatMoney(entry.amount_cents)}`}
+                        title="Imprimir o compartir tirilla de este abono"
+                      >
+                        <span>🧾 Tirilla</span>
+                      </button>
+                    )}
+                  </div>
                 </li>
               ))}
             </ul>
           )}
         </div>
       </div>
+
+      {receiptPayment && (
+        <ThermalReceiptModal
+          isOpen={Boolean(receiptPayment)}
+          onClose={() => setReceiptPayment(null)}
+          creditPayment={receiptPayment}
+        />
+      )}
     </Modal>
   );
 }
