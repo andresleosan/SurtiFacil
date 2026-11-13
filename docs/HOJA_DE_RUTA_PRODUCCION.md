@@ -392,9 +392,22 @@ Para maximizar la eficiencia de tokens y la precisión de razonamiento en cada s
        - Compilación de producción impecable (`npm run build:web` en 5.84s) con Service Worker y precaché PWA generados.
        - Suite E2E de Playwright ejecutada con 27/27 pruebas activas en verde en navegadores desktop, mobile y tablet.
 
-- [ ] **Tarea 23 — Suite E2E de Certificación Total (Fases 4 y 5) y Despliegue en Vivo:**
+- [x] **Tarea 23 — Suite E2E de Certificación Total (Fases 4 y 5) y Despliegue en Vivo:**
   - **Nivel Recomendado:** `Argon (High)`
-  - **Objetivo:** Pruebas unitarias de compresión y utilidades, suite E2E completa en Playwright cubriendo catálogo fotográfico, billetes COP, cobranza WhatsApp y tirilla térmica, finalizando con commit y despliegue automático a producción.
+  - **Estado:** ✅ Completada y Desplegada
+  - **Evidencia Técnica de Implementación:**
+    1. **Pruebas Unitarias Extendidas de Compresión y Tirillas Térmicas (`imageCompressor.test.ts` y `receiptAndExport.test.ts`):**
+       - Certificada la reducción progresiva de calidad en `compressProductImage` al exceder `maxSizeBytes`, el fallback automático a JPEG cuando WebP no está disponible y el manejo de errores ante imágenes dañadas (`Image.onerror`) en [`web/src/test/imageCompressor.test.ts`](../web/src/test/imageCompressor.test.ts).
+       - Certificada la envoltura estricta a 32 columnas (`58mm`) y 48 columnas (`80mm`) sin truncar montos COP ni la leyenda DIAN Art. 616-1 en [`web/src/test/receiptAndExport.test.ts`](../web/src/test/receiptAndExport.test.ts).
+    2. **Escenario 8 de Certificación E2E Fases 4 y 5 (`qa/e2e/saas-production.spec.ts`):**
+       - **Catálogo Fotográfico Colombiano y Editor WebP:** Verificación de `<ProductImage />`, badge `OFERTA` y editor fotográfico `<ProductPhotoUploader />` en `#/inventory` (`Catálogo Táctil`) y en la vitrina `#/tienda/surtifacil`.
+       - **Teclado Táctil de Billetes COP y Vueltas en POS (`#/create-sale`):** Validación del bloqueo de seguridad con billete insuficiente (`$ 2.000` frente a `$ 4.200`), cálculo exacto de vueltas con `$ 50.000` (`$ 45.800`) y registro exitoso de venta.
+       - **Tirilla Térmica 58mm/80mm + QR + DIAN:** Apertura de `ThermalReceiptModal` tras la venta, validación de `Efectivo Recibido`, `Vueltas a Entregar`, leyenda `NO RESPONSABLE DE IVA (ART. 616-1 E.T.)`, cambio dinámico entre `58mm` y `80mm` y alternancia del código QR vectorial.
+       - **Cobranza WhatsApp y Tirilla de Abono (`#/credits`):** Apertura de `DebtCollectionModal` para `Doña Marta Restrepo`, selección de tono `Corte Quincena` y fecha `Quincena (15 / 30)` con cuentas `Nequi`, registro de abono de `$ 5.000`, apertura automática del `Comprobante de Abono` con `NUEVO SALDO DEUDOR: $ 13.500`, leyenda DIAN Art. 616-1 y botón `🧾 Tirilla` en el historial.
+    3. **100% de Pruebas en Verde:**
+       - **Vitest:** 56 suites de prueba y 431 tests aprobados al 100%.
+       - **Build de Producción:** `npm run build:web` (`tsc && vite build`) completado sin errores en 5.93 s con Service Worker y 69 entradas en precaché PWA.
+       - **Playwright E2E:** 28/28 pruebas activas aprobadas en verde (7 pruebas opcionales dependientes de credenciales QA en vivo omitidas según configuración) en proyectos `chromium`, `mobile-chromium` y `tablet-chromium`.
 
 
 

@@ -203,4 +203,47 @@ describe('Generador de Tirillas Térmicas y Exportación Excel CSV', () => {
     appendChildSpy.mockRestore();
     removeChildSpy.mockRestore();
   });
+
+  it('respeta estrictamente el ancho de 32 columnas (58mm) y 48 columnas (80mm) al envolver textos largos sin truncar montos ni leyenda DIAN', () => {
+    const longStore: Partial<StoreSettings> = {
+      nombre: 'Supermercado Comunitario La Prosperidad del Valle de Aburra Medellín',
+      barrio: 'Santo Domingo Savio',
+      ciudad: 'Medellín',
+      direccion: 'Carrera 38 # 105-24 Local Principal',
+    };
+
+    const longSale: Sale = {
+      ...mockSale,
+      total: 14560000, // $ 145.600 COP
+      received_cash_cents: 15000000,
+      change_cents: 440000,
+      items: [
+        {
+          product_id: 'p-long',
+          product_name: 'Aceite Vegetal Girasol Gourmet Premium Extra Virgen x 3000ml',
+          quantity: 2,
+          price_cents: 7280000,
+          subtotal: 14560000,
+        },
+      ],
+    };
+
+    const text58 = generateSaleReceiptText(longSale, longStore, { width: '58mm' });
+    const lines58 = text58.split('\n');
+    for (const line of lines58) {
+      expect(line.length).toBeLessThanOrEqual(32);
+    }
+    expect(text58).toContain('$ 145.600');
+    expect(text58).toContain('$ 4.400');
+    expect(text58).toContain('NO RESPONSABLE DE IVA');
+    expect(text58).toContain('616-1 E.T.');
+
+    const text80 = generateSaleReceiptText(longSale, longStore, { width: '80mm' });
+    const lines80 = text80.split('\n');
+    for (const line of lines80) {
+      expect(line.length).toBeLessThanOrEqual(48);
+    }
+    expect(text80).toContain('$ 145.600');
+    expect(text80).toContain('NO RESPONSABLE DE IVA (ART. 616-1 E.T.)');
+  });
 });

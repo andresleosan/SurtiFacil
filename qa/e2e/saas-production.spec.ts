@@ -931,4 +931,146 @@ test.describe('Suite E2E de Certificación de Producción — SurtiFácil SaaS',
     await testDeepSeekBtn.click();
     await expect(page.getByText(/Conexión exitosa/i).first()).toBeVisible();
   });
+
+  test('8. Suite Fases 4 y 5: Catálogo Fotográfico Colombiano, Billetes COP, Cobranza WhatsApp y Tirilla Térmica (58mm/80mm + QR + DIAN)', async ({
+    page,
+  }) => {
+    await setupProductionE2EHarness(page);
+    await loginAsStaffAdmin(page);
+
+    // 8.1 Catálogo Fotográfico Colombiano y Editor con Compresor WebP (#/inventory)
+    await page.goto('/#/inventory');
+    await page.getByRole('button', { name: /Catálogo Táctil/i }).click();
+
+    await expect(page.getByRole('img', { name: 'Leche Entera Colanta 1L' })).toBeVisible();
+    await expect(page.getByText('OFERTA', { exact: true }).first()).toBeVisible();
+
+    await page.getByRole('button', { name: /Editar Leche Entera Colanta 1L/i }).first().click();
+    const editDialog = page.getByRole('dialog', { name: 'Editar producto' });
+    await expect(editDialog).toBeVisible();
+    await expect(editDialog.getByRole('button', { name: /Tomar con Celular/i })).toBeVisible();
+    await expect(editDialog.getByRole('button', { name: /Subir de Galería/i })).toBeVisible();
+
+    await editDialog.getByRole('button', { name: /escribir \/ pegar URL web de la foto/i }).click();
+    await editDialog.getByLabel(/URL directa de imagen/i).fill('/images/products/leche-colanta-1l.svg');
+    await editDialog.getByRole('button', { name: 'Guardar', exact: true }).click();
+    await expect(editDialog).not.toBeVisible();
+
+    // Verificar también el badge accesible de <ProductImage /> en la vitrina vecinal
+    await page.goto('/#/tienda/surtifacil');
+    await expect(page.getByRole('img', { name: 'Arroz Diana 1kg' })).toBeVisible();
+    await expect(page.getByLabel('Producto en oferta').first()).toBeVisible();
+
+    // 8.2 Teclado Táctil de Billetes COP y Calculadora Visual de Vueltas en POS (#/create-sale)
+    await page.goto('/#/create-sale');
+    await page
+      .getByRole('list', { name: 'Productos disponibles' })
+      .getByRole('button', { name: /Agregar Leche Entera Colanta 1L/i })
+      .click();
+
+    const mobileCartBtn = page.getByRole('button', { name: /Ver carrito,/i });
+    if (await mobileCartBtn.isVisible()) {
+      await mobileCartBtn.click();
+    }
+
+    const cashCalc = page.getByRole('region', { name: /Calculadora de efectivo y vueltas COP/i });
+    await expect(cashCalc).toBeVisible();
+
+    // Billete insuficiente ($ 2.000 para compra de $ 4.200) -> bloquea la venta
+    await cashCalc.getByRole('button', { name: /Paga con billete de \$ 2\.000/i }).click();
+    await expect(cashCalc.getByRole('alert')).toContainText('Dinero Insuficiente');
+    await expect(cashCalc.getByRole('alert')).toContainText('Faltan $2200.00');
+    await expect(page.getByRole('button', { name: /Dinero insuficiente/i })).toBeDisabled();
+
+    // Billete suficiente ($ 50.000 para compra de $ 4.200) -> vueltas $ 45.800
+    await cashCalc.getByRole('button', { name: /Paga con billete de \$ 50\.000/i }).click();
+    await expect(cashCalc.getByRole('status')).toContainText('Vueltas a Entregar');
+    await expect(cashCalc.getByRole('status')).toContainText('$45800.00');
+
+    const confirmSaleBtn = page.getByRole('button', { name: /Confirmar venta/i });
+    await expect(confirmSaleBtn).toBeEnabled();
+    await confirmSaleBtn.click();
+    await expect(
+      page.getByRole('status').filter({ hasText: 'Venta registrada exitosamente' }),
+    ).toBeVisible();
+
+    // 8.3 Tirilla Térmica de 58mm y 80mm con Código QR Vecinal y Leyenda DIAN Art. 616-1
+    await page.getByRole('button', { name: /Tirilla Térmica/i }).click();
+    const receiptDialog = page.getByRole('dialog').filter({ hasText: /Tirilla de Venta/i });
+    await expect(receiptDialog).toBeVisible();
+
+    await expect(receiptDialog.getByText(/SURTIFÁCIL ABASTOS CENTRAL/i)).toBeVisible();
+    await expect(receiptDialog.getByText(/Efectivo Recibido:/i)).toBeVisible();
+    await expect(receiptDialog.getByText(/\$ 50\.000/)).toBeVisible();
+    await expect(receiptDialog.getByText(/Vueltas a Entregar:/i)).toBeVisible();
+    await expect(receiptDialog.getByText(/\$ 45\.800/)).toBeVisible();
+    await expect(receiptDialog.getByText(/NO RESPONSABLE DE IVA/i)).toBeVisible();
+    await expect(receiptDialog.getByText(/616-1 E\.T\./i)).toBeVisible();
+    await expect(receiptDialog.getByLabel(/Código QR de verificación vecinal y pedidos/i)).toBeVisible();
+
+    // Alternar entre 80mm y 58mm
+    await receiptDialog.getByRole('button', { name: /80mm \(Ancho\)/i }).click();
+    await expect(receiptDialog.getByText(/Vista previa térmica \(80mm\)/i)).toBeVisible();
+    await expect(receiptDialog.getByText(/NO RESPONSABLE DE IVA \(ART\. 616-1 E\.T\.\)/i)).toBeVisible();
+    await receiptDialog.getByRole('button', { name: /58mm \(Estándar\)/i }).click();
+    await expect(receiptDialog.getByText(/Vista previa térmica \(58mm\)/i)).toBeVisible();
+
+    // Alternar visualización de QR
+    const toggleQrBtn = receiptDialog.getByRole('button', { name: /Alternar código QR en la tirilla/i });
+    await toggleQrBtn.click();
+    await expect(receiptDialog.getByLabel(/Código QR de verificación vecinal y pedidos/i)).not.toBeVisible();
+    await toggleQrBtn.click();
+    await expect(receiptDialog.getByLabel(/Código QR de verificación vecinal y pedidos/i)).toBeVisible();
+
+    await receiptDialog.getByRole('button', { name: 'Cerrar', exact: true }).click();
+    await expect(receiptDialog).not.toBeVisible();
+
+    // 8.4 Cobranza Vecinal de Fiados por WhatsApp con Link Nequi/Bancolombia y Tirilla Térmica de Abono (#/credits)
+    await page.goto('/#/credits');
+    await expect(page.getByText('Doña Marta Restrepo')).toBeVisible();
+
+    await page.getByRole('button', { name: 'Cobrar por WhatsApp a Doña Marta Restrepo' }).click();
+    const debtDialog = page.getByRole('dialog', { name: /Cobranza de Fiados por WhatsApp/i });
+    await expect(debtDialog).toBeVisible();
+    await expect(debtDialog.getByText('$ 18.500', { exact: true })).toBeVisible();
+
+    await debtDialog.getByRole('radio', { name: /Corte Quincena/i }).click();
+    await debtDialog.getByRole('button', { name: /Quincena \(15 \/ 30\)/i }).click();
+    await expect(debtDialog.getByText(/Se acerca el corte de quincena/i)).toBeVisible();
+    await expect(debtDialog.getByText(/Nequi: 300 123 4567/i)).toBeVisible();
+
+    await debtDialog.getByRole('button', { name: 'Cerrar', exact: true }).last().click();
+    await expect(debtDialog).not.toBeVisible();
+
+    // Registrar abono a Doña Marta Restrepo y verificar tirilla automática de abono
+    const desktopDetailBtn = page.getByRole('button', { name: 'Ver movimientos' }).first();
+    if (await desktopDetailBtn.isVisible()) {
+      await desktopDetailBtn.click();
+    } else {
+      await page.getByRole('button', { name: 'Ver Doña Marta Restrepo' }).click();
+    }
+
+    const detailDialog = page.getByRole('dialog', { name: 'Doña Marta Restrepo' });
+    await expect(detailDialog).toBeVisible();
+    await detailDialog.getByRole('button', { name: /Registrar abono/i }).click();
+    await detailDialog.getByLabel(/Monto \(\$\)/i).fill('5000');
+    await detailDialog.getByLabel(/Descripción/i).fill('Abono quincena Nequi');
+    await detailDialog.getByRole('button', { name: /Guardar abono/i }).click();
+
+    const paymentReceiptDialog = page.getByRole('dialog').filter({ hasText: /COMPROBANTE DE ABONO A FIADOS/i });
+    await expect(paymentReceiptDialog).toBeVisible();
+    await expect(paymentReceiptDialog.getByText(/VALOR ABONADO:/i)).toBeVisible();
+    await expect(paymentReceiptDialog.getByText(/\$ 5\.000/)).toBeVisible();
+    await expect(paymentReceiptDialog.getByText(/NUEVO SALDO DEUDOR:/i)).toBeVisible();
+    await expect(paymentReceiptDialog.getByText(/\$ 13\.500/)).toBeVisible();
+    await expect(paymentReceiptDialog.getByText(/616-1 E\.T\./i)).toBeVisible();
+    await expect(paymentReceiptDialog.getByLabel(/Código QR de verificación vecinal y pedidos/i)).toBeVisible();
+
+    await paymentReceiptDialog.getByRole('button', { name: 'Cerrar', exact: true }).click();
+    await expect(paymentReceiptDialog).not.toBeVisible();
+
+    await expect(
+      detailDialog.getByRole('button', { name: /Ver tirilla térmica del abono de \$5\.000/i }),
+    ).toBeVisible();
+  });
 });
