@@ -1,5 +1,6 @@
-import { apiClient, emitDataChange, getStoredAuthToken } from './apiClient';
+import { apiClient, emitDataChange, hasAuthSession } from './apiClient';
 import { getLocalSales } from './mockData';
+import { getMockShiftCashExpenses } from './cashExpenseService';
 import {
   CashClosing,
   CashClosingInput,
@@ -44,7 +45,7 @@ export function calculateCountedCents(breakdown: {
  * Consulta el resumen financiero del turno actual desde Cloudflare D1 o Mock.
  */
 export async function getCashShiftSummary(initialBaseCents = 10000000): Promise<CashShiftSummary> {
-  if (isMockMode() || !getStoredAuthToken()) {
+  if (isMockMode() || !hasAuthSession()) {
     const localSales = getLocalSales();
     const lastClosing = mockClosingsStorage[0];
     const openedAt = lastClosing ? lastClosing.closed_at : new Date(new Date().setHours(0, 0, 0, 0)).toISOString();
@@ -61,6 +62,8 @@ export async function getCashShiftSummary(initialBaseCents = 10000000): Promise<
 
     const creditPaymentsCashCents = 0; // En mock por defecto
     const creditPaymentsCashCount = 0;
+
+    const shiftExpenses = getMockShiftCashExpenses(openedAt);
 
     const otherMethods: Record<string, { count: number; total_cents: number }> = {};
     for (const s of currentShiftSales) {
@@ -85,7 +88,9 @@ export async function getCashShiftSummary(initialBaseCents = 10000000): Promise<
       sales_cash_count: salesCashCount,
       credit_payments_cash_cents: creditPaymentsCashCents,
       credit_payments_cash_count: creditPaymentsCashCount,
-      expected_cash_cents: initialBaseCents + salesCashCents + creditPaymentsCashCents,
+      expenses_cash_cents: shiftExpenses.total_cents,
+      expenses_cash_count: shiftExpenses.count,
+      expected_cash_cents: initialBaseCents + salesCashCents + creditPaymentsCashCents - shiftExpenses.total_cents,
       other_sales: otherSales,
     };
   }
@@ -101,6 +106,8 @@ export async function getCashShiftSummary(initialBaseCents = 10000000): Promise<
       sales_cash_count: 0,
       credit_payments_cash_cents: 0,
       credit_payments_cash_count: 0,
+      expenses_cash_cents: 0,
+      expenses_cash_count: 0,
       expected_cash_cents: initialBaseCents,
       other_sales: [],
     };
@@ -113,7 +120,7 @@ export async function getCashShiftSummary(initialBaseCents = 10000000): Promise<
 export async function recordCashClosing(input: CashClosingInput): Promise<CashClosing> {
   const countedCents = calculateCountedCents(input.breakdown);
 
-  if (!isMockMode() && getStoredAuthToken()) {
+  if (!isMockMode() && hasAuthSession()) {
     try {
       const result = await apiClient.post<CashClosing>('/cash-closings', input);
       emitDataChange('cash-closings');
@@ -147,6 +154,7 @@ export async function recordCashClosing(input: CashClosingInput): Promise<CashCl
     breakdown: input.breakdown,
     notes: input.notes?.trim() || null,
     total_sales_count: summary.sales_cash_count,
+    expenses_cash_cents: summary.expenses_cash_cents || 0,
     created_at: new Date().toISOString(),
   };
 

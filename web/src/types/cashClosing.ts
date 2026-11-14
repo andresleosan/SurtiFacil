@@ -23,6 +23,7 @@ export interface CashClosing {
   breakdown: CashDenominationBreakdown;
   notes?: string | null;
   total_sales_count: number;
+  expenses_cash_cents?: number;
   created_at?: string;
 }
 
@@ -33,6 +34,8 @@ export interface CashShiftSummary {
   sales_cash_count: number;
   credit_payments_cash_cents: number;
   credit_payments_cash_count: number;
+  expenses_cash_cents?: number;
+  expenses_cash_count?: number;
   expected_cash_cents: number;
   other_sales: Array<{ payment_method: string; count: number; total_cents: number }>;
 }

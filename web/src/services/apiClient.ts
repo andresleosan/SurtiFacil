@@ -73,6 +73,15 @@ async function getAuthToken(): Promise<string | null> {
   return getStoredAuthToken();
 }
 
+export function hasAuthSession(): boolean {
+  if (getStoredAuthToken()) return true;
+  try {
+    return Boolean(getAuth().currentUser);
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Cliente HTTP unificado para Cloudflare Pages Functions (/api/*)
  * - Inyecta Authorization: Bearer <idToken> automáticamente
@@ -180,7 +189,17 @@ export const apiClient = {
 // Bus de Eventos Reactivo en Cliente
 // Reemplaza los listeners de Firestore en vivo
 // ==========================================
-export type DataEntity = 'products' | 'sales' | 'credits' | 'suppliers' | 'orders' | 'users' | 'combos' | 'settings' | 'cash-closings';
+export type DataEntity =
+  | 'products'
+  | 'sales'
+  | 'credits'
+  | 'suppliers'
+  | 'orders'
+  | 'users'
+  | 'combos'
+  | 'settings'
+  | 'cash-closings'
+  | 'cash-expenses';
 
 const eventBus = new EventTarget();
 

@@ -409,6 +409,42 @@ Para maximizar la eficiencia de tokens y la precisión de razonamiento en cada s
        - **Build de Producción:** `npm run build:web` (`tsc && vite build`) completado sin errores en 5.93 s con Service Worker y 69 entradas en precaché PWA.
        - **Playwright E2E:** 28/28 pruebas activas aprobadas en verde (7 pruebas opcionales dependientes de credenciales QA en vivo omitidas según configuración) en proyectos `chromium`, `mobile-chromium` y `tablet-chromium`.
 
+---
+
+## Fase 6 — Rentabilidad Real del Tendero: Caja Menor y Gastos del Día, Control de Mermas/Vencimientos, Fidelización Vecinal y Promociones por Volumen
+
+- [x] **Tarea 24 — Caja Menor, Gastos Operativos del Turno y Descuento Automático en Arqueo de Caja COP (`PettyCashModal.tsx`, `CashClosingModal.tsx`, `CreateSale.tsx`, `Sales.tsx` y `/api/cash-expenses`):**
+  - **Nivel Recomendado:** `3.8 Flash (High)`
+  - **Estado:** ✅ Completada y Desplegada
+  - **Evidencia Técnica de Implementación:**
+    1. **Esquema Multi-Tenant en Cloudflare D1 (`docs/schema-d1.sql` y `web/functions/_lib/dbSchema.ts`):**
+       - Creada tabla `cash_expenses` con índice `idx_cash_expenses_negocio_date(negocio_id, created_at DESC)` para registrar salidas operativas aisladas por `negocio_id`.
+       - Añadida columna `expenses_cash_cents INTEGER NOT NULL DEFAULT 0` a `cash_closings` mediante migración automática idempotente en frío.
+    2. **Endpoints Serverless y Descuento Autoritativo en Servidor (`web/functions/api/[[route]].ts`):**
+       - Implementados `GET /api/cash-expenses` (soporte `shift_only=true` y filtro `since`), `POST /api/cash-expenses` (validación de concepto no vacío y monto entero positivo en centavos) y `DELETE /api/cash-expenses/:id` aislados por `negocio_id`.
+       - Integrado el descuento automático de los gastos de caja menor pagados en efectivo (`payment_method = 'cash'`) dentro de `GET /api/cash-closings/summary` y `POST /api/cash-closings` (`expected_cash_cents = initial + sales_cash + credit_payments_cash - expenses_cash`).
+    3. **Interfaz Táctil de Caja Menor y Actualización de Arqueo / Tirilla (`PettyCashModal.tsx`, `CashClosingModal.tsx`, `CreateSale.tsx`, `Sales.tsx`, `Dashboard.tsx`, `receiptGenerator.ts`):**
+       - Nuevo modal accesible `<PettyCashModal />` con resumen de egresos (efectivo vs transferencia), selector táctil de 6 categorías paisas (`Proveedor Contado`, `Bolsas e Insumos`, `Domicilios / Transporte`, `Aseo y Servicios`, `Almuerzo / Turno`, `Otro Gasto`), botones rápidos COP (`$ 5.000`, `$ 10.000`, `$ 20.000`, `$ 50.000`) e historial con anulación segura en 2 toques sin `window.confirm`.
+       - Integración directa en `CreateSale.tsx`, `Sales.tsx`, `Dashboard.tsx` y dentro del propio `CashClosingModal.tsx` (`💸 Registrar Gasto`), además de reflejar `Gastos Caja Menor (-)` en el resumen del turno, acta guardada, tirilla térmica (58mm/80mm) y reporte WhatsApp de cierre.
+       - Actualizado `apiClient.ts` (`hasAuthSession` y bus `'cash-expenses'`) y `cashClosingService.ts` / `cashExpenseService.ts` para soportar sesión Firebase Auth, D1 nativo y modo mock de pruebas.
+    4. **100% de Pruebas en Verde:**
+       - **Vitest:** 57 suites de prueba y 436 tests aprobados al 100% (incluyendo nueva suite [`web/src/test/cashExpense.test.tsx`](../web/src/test/cashExpense.test.tsx) y pruebas de API en [`web/src/test/apiFunctions.test.ts`](../web/src/test/apiFunctions.test.ts)).
+       - **Build de Producción:** `npm run build:web` (`tsc && vite build`) completado sin errores en 5.80 s con Service Worker y 69 entradas en precaché PWA.
+       - **Playwright E2E:** 28/28 pruebas activas aprobadas en verde (7 opcionales dependientes de credenciales QA omitidas según configuración), validando en [`qa/e2e/saas-production.spec.ts`](../qa/e2e/saas-production.spec.ts) el registro de un gasto de `$ 20.000` en Caja Menor y su descuento automático en el Arqueo de Caja COP.
+
+- [ ] **Tarea 25 — Control de Mermas, Averías y Alertas de Vencimiento en Bodega y Fruver (`ShrinkageModal.tsx`, `Inventory.tsx` y `/api/shrinkage`):**
+  - **Nivel Recomendado:** `3.8 Flash (Medium)`
+  - **Objetivo:** Permitir al tendero y gerente dar de baja mercancía dañada, vencida o consumida internamente con descuento atómico de stock en D1, registro de pérdida al costo (`last_cost_cents`) y alertas de vencimiento próximo en Fruver y Lácteos.
+
+- [ ] **Tarea 26 — Promociones Mayoristas / Descuentos por Volumen ("Lleva 3+ a Precio Especial") en POS, Kiosco iPad y Tienda Vecinal:**
+  - **Nivel Recomendado:** `Argon (Low)`
+  - **Objetivo:** Habilitar precios escalonados por cantidad (ej. desde 3 o 6 unidades) validados autoritativamente en el servidor D1 y visibles en POS (`CreateSale.tsx`), `KioskMode.tsx` y `PublicStorefront.tsx`.
+
+- [ ] **Tarea 27 — Suite E2E de Certificación de Fase 6 (Rentabilidad Real: Caja Menor, Mermas y Mayoristas) y Despliegue en Vivo:**
+  - **Nivel Recomendado:** `Argon (High)`
+  - **Objetivo:** Certificar de extremo a extremo con Vitest y Playwright multi-dispositivo todos los flujos de rentabilidad real, mermas y precios por volumen de la Fase 6.
+
+
 
 
 

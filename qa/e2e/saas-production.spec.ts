@@ -130,6 +130,7 @@ async function setupProductionE2EHarness(page: Page) {
   const customerOrders: Array<Record<string, any>> = [];
   const sales: Array<Record<string, any>> = [];
   const cashClosings: Array<Record<string, any>> = [];
+  let cashExpenses: Array<Record<string, any>> = [];
 
   let storeSettings = {
     id: 'surtifacil',
@@ -527,42 +528,84 @@ async function setupProductionE2EHarness(page: Page) {
       return jsonResponse(createdEntry, 201);
     }
 
+    // Caja Menor y Gastos del Turno
+    if (pathname === '/cash-expenses' && method === 'GET') {
+      return jsonResponse(cashExpenses);
+    }
+    if (pathname === '/cash-expenses' && method === 'POST') {
+      const createdExpense = {
+        id: `cexp-e2e-${Date.now()}`,
+        negocio_id: 'surtifacil',
+        category: body.category || 'otro',
+        description: body.description,
+        beneficiary: body.beneficiary || null,
+        amount_cents: Number(body.amount_cents || 0),
+        payment_method: body.payment_method === 'transfer' ? 'transfer' : 'cash',
+        created_by_uid: adminUid,
+        created_by_name: 'Andrés Sánchez',
+        created_at: new Date().toISOString(),
+      };
+      cashExpenses.unshift(createdExpense);
+      return jsonResponse(createdExpense, 201);
+    }
+    if (pathname.startsWith('/cash-expenses/') && method === 'DELETE') {
+      const expenseId = decodeURIComponent(pathname.replace('/cash-expenses/', ''));
+      cashExpenses = cashExpenses.filter((e) => e.id !== expenseId);
+      return jsonResponse({ success: true, deletedId: expenseId });
+    }
+
     // Arqueo y Cierre de Caja COP
     if (pathname === '/cash-closings/summary' && method === 'GET') {
-      const initialCashCents = Number(urlObj.searchParams.get('initial_cash_cents') || 10000000);
+      const initialCashCents = Number(
+        urlObj.searchParams.get('initial_base_cents') ||
+          urlObj.searchParams.get('initial_cash_cents') ||
+          10000000,
+      );
       const salesCashCents = 5000000; // $50.000 COP
+      const cashExpList = cashExpenses.filter((e) => e.payment_method === 'cash');
+      const expensesCashCents = cashExpList.reduce((sum, e) => sum + (e.amount_cents || 0), 0);
       return jsonResponse({
         negocio_id: 'surtifacil',
-        shift_start: new Date(Date.now() - 3600000 * 6).toISOString(),
-        current_time: new Date().toISOString(),
+        opened_at: new Date(Date.now() - 3600000 * 6).toISOString(),
         initial_cash_cents: initialCashCents,
         sales_cash_cents: salesCashCents,
-        sales_transfer_cents: 2000000,
-        sales_credit_cents: 1850000,
-        sales_total_cents: 8850000,
-        sales_count: 8,
+        sales_cash_count: 8,
         credit_payments_cash_cents: 0,
-        expected_cash_cents: initialCashCents + salesCashCents,
+        credit_payments_cash_count: 0,
+        expenses_cash_cents: expensesCashCents,
+        expenses_cash_count: cashExpList.length,
+        expected_cash_cents: initialCashCents + salesCashCents - expensesCashCents,
+        other_sales: [],
       });
     }
     if (pathname === '/cash-closings' && method === 'POST') {
+      const initialCashCents = Number(body.initial_cash_cents || 10000000);
+      const salesCashCents = 5000000;
+      const expensesCashCents = cashExpenses
+        .filter((e) => e.payment_method === 'cash')
+        .reduce((sum, e) => sum + (e.amount_cents || 0), 0);
+      const expectedCashCents = initialCashCents + salesCashCents - expensesCashCents;
+      const countedCashCents = Number(body.counted_cash_cents ?? expectedCashCents);
       const closing = {
         id: `ACTA-E2E-${cashClosings.length + 1}`,
         negocio_id: 'surtifacil',
+        closing_number: cashClosings.length + 1,
+        opened_at: new Date(Date.now() - 3600000 * 6).toISOString(),
+        closed_at: new Date().toISOString(),
         created_at: new Date().toISOString(),
         closed_by_uid: adminUid,
         closed_by_name: 'Andrés Sánchez',
-        initial_cash_cents: body.initial_cash_cents || 10000000,
-        sales_cash_cents: 5000000,
-        sales_transfer_cents: 2000000,
-        sales_credit_cents: 1850000,
+        initial_cash_cents: initialCashCents,
+        sales_cash_cents: salesCashCents,
         credit_payments_cash_cents: 0,
-        expected_cash_cents: 15000000,
-        counted_cash_cents: body.counted_cash_cents || 15000000,
-        difference_cents: (body.counted_cash_cents || 15000000) - 15000000,
-        status: 'balanced',
+        expenses_cash_cents: expensesCashCents,
+        expected_cash_cents: expectedCashCents,
+        counted_cash_cents: countedCashCents,
+        difference_cents: countedCashCents - expectedCashCents,
+        status: countedCashCents === expectedCashCents ? 'balanced' : countedCashCents > expectedCashCents ? 'surplus' : 'shortage',
         breakdown: body.breakdown || { bills: {}, coins: {} },
         notes: body.notes || '',
+        total_sales_count: 8,
       };
       cashClosings.unshift(closing);
       return jsonResponse(closing, 201);
@@ -838,14 +881,32 @@ test.describe('Suite E2E de Certificación de Producción — SurtiFácil SaaS',
     await expect(page).toHaveURL(/#\/credits$/);
     await expect(page.getByText('Doña Marta Restrepo')).toBeVisible();
 
-    // 5.4 Arqueo y Cierre de Caja COP
+    // 5.4 Caja Menor del Turno y Arqueo/Cierre de Caja COP
     await page.getByRole('button', { name: 'Menú de usuario' }).click();
     await page.getByRole('button', { name: /Arqueo y Cierre COP/i }).last().click();
-    const closingDialog = page.getByRole('dialog');
+    const closingDialog = page.getByRole('dialog', { name: /Arqueo y Cierre de Caja/i });
     await expect(closingDialog.getByText(/Resumen del Turno Actual/i)).toBeVisible();
+
+    // Registrar gasto de caja menor desde el arqueo y verificar descuento automático
+    await closingDialog.getByRole('button', { name: /Registrar Gasto/i }).click();
+    const pettyDialog = page.getByRole('dialog', { name: /Caja Menor y Gastos del Turno/i });
+    await expect(pettyDialog).toBeVisible();
+    await pettyDialog.getByRole('button', { name: '$ 20.000' }).click();
+    await pettyDialog.getByLabel(/Concepto \/ Descripción/i).fill('Pago panadería del turno');
+    await pettyDialog.getByRole('button', { name: /Registrar Salida de Caja/i }).click();
+    await expect(pettyDialog.getByRole('status')).toContainText('Salida registrada: $ 20.000');
+    await pettyDialog.getByRole('button', { name: 'Listo' }).click();
+    await expect(pettyDialog).not.toBeVisible();
+
+    await expect(closingDialog.getByText(/Gastos Caja Menor \(1\)/i)).toBeVisible();
+    await expect(closingDialog.getByText('-$ 20.000')).toBeVisible();
+
     await closingDialog.getByRole('button', { name: /Cerrar Caja y Generar Acta/i }).click();
-    await expect(closingDialog.getByText(/Cierre de Caja Guardado con Éxito/i)).toBeVisible();
-    await closingDialog.getByRole('button', { name: 'Listo' }).click();
+    const savedDialog = page.getByRole('dialog', { name: /Acta de Cierre/i });
+    await expect(savedDialog.getByText(/Cierre de Caja Guardado con Éxito/i)).toBeVisible();
+    await expect(savedDialog.getByText(/Salidas de Caja Menor descontadas del esperado/i)).toBeVisible();
+    await expect(savedDialog.getByText('-$ 20.000')).toBeVisible();
+    await savedDialog.getByRole('button', { name: 'Listo' }).click();
 
     // 5.5 Centro de Control SuperAdmin (#/super-admin)
     await page.getByRole('button', { name: 'SuperAdmin' }).first().click();

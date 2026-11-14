@@ -20,6 +20,7 @@ class MockD1Database implements D1Database {
     whatsapp_conversations: any[];
     whatsapp_messages: any[];
     cash_closings: any[];
+    cash_expenses: any[];
   };
 
   constructor() {
@@ -128,6 +129,7 @@ class MockD1Database implements D1Database {
       ],
       whatsapp_messages: [],
       cash_closings: [],
+      cash_expenses: [],
     };
   }
 
@@ -385,6 +387,36 @@ class MockD1Database implements D1Database {
           const closings = db.tables.cash_closings.filter((c) => c.negocio_id === boundValues[0]);
           const maxNum = closings.reduce((max, c) => Math.max(max, c.closing_number || 0), 0);
           return { results: [{ next_number: maxNum + 1 } as unknown as T], success: true };
+        }
+
+        if (q.includes('FROM cash_expenses') && q.includes('total_expenses_cash_cents')) {
+          const expenses = db.tables.cash_expenses.filter(
+            (e) =>
+              e.negocio_id === boundValues[0] &&
+              e.payment_method === 'cash' &&
+              (!boundValues[1] || e.created_at >= boundValues[1])
+          );
+          const totalExpensesCashCents = expenses.reduce((acc, e) => acc + (e.amount_cents || 0), 0);
+          return {
+            results: [{ count: expenses.length, total_expenses_cash_cents: totalExpensesCashCents } as unknown as T],
+            success: true,
+          };
+        }
+
+        if (q.includes('FROM cash_expenses WHERE id = ? AND negocio_id = ?')) {
+          const e = db.tables.cash_expenses.find(
+            (exp) => exp.id === boundValues[0] && exp.negocio_id === boundValues[1]
+          );
+          return { results: e ? [e as T] : [], success: true };
+        }
+
+        if (q.includes('FROM cash_expenses WHERE negocio_id = ?')) {
+          let list = db.tables.cash_expenses.filter((exp) => exp.negocio_id === boundValues[0]);
+          if (boundValues[1]) {
+            list = list.filter((exp) => exp.created_at >= boundValues[1]);
+          }
+          list = list.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+          return { results: list as T[], success: true };
         }
 
         return { results: [], success: true };
@@ -714,7 +746,7 @@ class MockD1Database implements D1Database {
         }
 
         if (q.startsWith('INSERT INTO cash_closings')) {
-          const [id, negocio_id, closing_number, opened_at, closed_at, closed_by_uid, closed_by_name, initial_cash_cents, sales_cash_cents, credit_payments_cash_cents, expected_cash_cents, counted_cash_cents, difference_cents, status, breakdown_json, notes, total_sales_count] = boundValues;
+          const [id, negocio_id, closing_number, opened_at, closed_at, closed_by_uid, closed_by_name, initial_cash_cents, sales_cash_cents, credit_payments_cash_cents, expected_cash_cents, counted_cash_cents, difference_cents, status, breakdown_json, notes, total_sales_count, expenses_cash_cents] = boundValues;
           db.tables.cash_closings.push({
             id,
             negocio_id,
@@ -733,8 +765,32 @@ class MockD1Database implements D1Database {
             breakdown_json,
             notes,
             total_sales_count,
+            expenses_cash_cents: expenses_cash_cents ?? 0,
             created_at: new Date().toISOString(),
           });
+        }
+
+        if (q.startsWith('INSERT INTO cash_expenses')) {
+          const [id, negocio_id, category, description, beneficiary, amount_cents, payment_method, created_by_uid, created_by_name, created_at] = boundValues;
+          db.tables.cash_expenses.push({
+            id,
+            negocio_id,
+            category,
+            description,
+            beneficiary,
+            amount_cents,
+            payment_method,
+            created_by_uid,
+            created_by_name,
+            created_at,
+          });
+        }
+
+        if (q.startsWith('DELETE FROM cash_expenses WHERE id = ? AND negocio_id = ?')) {
+          const [expenseId, negId] = boundValues;
+          db.tables.cash_expenses = db.tables.cash_expenses.filter(
+            (e) => !(e.id === expenseId && e.negocio_id === negId)
+          );
         }
 
         if (q.includes('UPDATE negocios') && q.includes('cuota_ia_usada = cuota_ia_usada + 1')) {
@@ -1528,5 +1584,114 @@ describe('Cloudflare Pages Functions API (/api/*)', () => {
     const data = await res.json();
     expect(data.success).toBe(true);
     expect(data.mode).toBe('simulated_heuristic');
+  });
+
+  it('registra gastos de caja menor, los descuenta del arqueo COP y permite anularlos con aislamiento multi-tenant', async () => {
+    const db = new MockD1Database();
+
+    // 1. Registrar venta en efectivo de $ 40.000 COP
+    db.tables.sales.push({
+      id: 'sale-exp-1',
+      negocio_id: 'surtifacil',
+      total_cents: 4000000,
+      payment_method: 'cash',
+      created_at: new Date().toISOString(),
+    });
+
+    // 2. Registrar un gasto en efectivo de $ 15.000 COP vía POST /api/cash-expenses
+    const createExpenseCtx = createMockContext(
+      'POST',
+      'http://localhost/api/cash-expenses',
+      { Authorization: 'Bearer mock:cashier-1:cajero@surtifacil.com:cashier' },
+      {
+        category: 'proveedor_contado',
+        description: 'Pago de arepas y panadería del día',
+        beneficiary: 'Panadería El Trigo',
+        amount_cents: 1500000,
+        payment_method: 'cash',
+      },
+      db
+    );
+    const createRes = await onRequest(createExpenseCtx as any);
+    expect(createRes.status).toBe(201);
+    const createdExpense = await createRes.json();
+    expect(createdExpense.amount_cents).toBe(1500000);
+    expect(createdExpense.negocio_id).toBe('surtifacil');
+
+    // 3. Registrar un gasto por transferencia (NO debe descontar del efectivo de caja)
+    const createTransferExpenseCtx = createMockContext(
+      'POST',
+      'http://localhost/api/cash-expenses',
+      { Authorization: 'Bearer mock:cashier-1:cajero@surtifacil.com:cashier' },
+      {
+        category: 'servicios_aseo',
+        description: 'Pago factura internet Nequi',
+        amount_cents: 5000000,
+        payment_method: 'transfer',
+      },
+      db
+    );
+    const transferRes = await onRequest(createTransferExpenseCtx as any);
+    expect(transferRes.status).toBe(201);
+
+    // 4. GET /api/cash-closings/summary debe descontar únicamente los $ 15.000 en efectivo:
+    // Base $ 100.000 + Ventas $ 40.000 - Gastos Efectivo $ 15.000 = $ 125.000 (12500000 cents)
+    const summaryCtx = createMockContext(
+      'GET',
+      'http://localhost/api/cash-closings/summary?initial_base_cents=10000000',
+      { Authorization: 'Bearer mock:admin-1:admin@surtifacil.com:admin' },
+      null,
+      db
+    );
+    const summaryRes = await onRequest(summaryCtx as any);
+    expect(summaryRes.status).toBe(200);
+    const summaryData = await summaryRes.json();
+    expect(summaryData.expenses_cash_cents).toBe(1500000);
+    expect(summaryData.expenses_cash_count).toBe(1);
+    expect(summaryData.expected_cash_cents).toBe(12500000);
+
+    // 5. POST /api/cash-closings con $ 125.000 contados debe dar Cuadrado ($ 0) y guardar expenses_cash_cents
+    const closingCtx = createMockContext(
+      'POST',
+      'http://localhost/api/cash-closings',
+      { Authorization: 'Bearer mock:admin-1:admin@surtifacil.com:admin' },
+      {
+        initial_cash_cents: 10000000,
+        breakdown: {
+          bills: { '100000': 1, '20000': 1, '5000': 1 },
+          coins: {},
+        },
+      },
+      db
+    );
+    const closingRes = await onRequest(closingCtx as any);
+    expect(closingRes.status).toBe(201);
+    const closingData = await closingRes.json();
+    expect(closingData.expected_cash_cents).toBe(12500000);
+    expect(closingData.expenses_cash_cents).toBe(1500000);
+    expect(closingData.status).toBe('balanced');
+
+    // 6. DELETE /api/cash-expenses/:id elimina el gasto
+    const deleteCtx = createMockContext(
+      'DELETE',
+      `http://localhost/api/cash-expenses/${createdExpense.id}`,
+      { Authorization: 'Bearer mock:admin-1:admin@surtifacil.com:admin' },
+      null,
+      db
+    );
+    const deleteRes = await onRequest(deleteCtx as any);
+    expect(deleteRes.status).toBe(200);
+
+    const listCtx = createMockContext(
+      'GET',
+      'http://localhost/api/cash-expenses',
+      { Authorization: 'Bearer mock:admin-1:admin@surtifacil.com:admin' },
+      null,
+      db
+    );
+    const listRes = await onRequest(listCtx as any);
+    const listData = await listRes.json();
+    expect(listData.length).toBe(1);
+    expect(listData[0].payment_method).toBe('transfer');
   });
 });

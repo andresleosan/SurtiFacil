@@ -1278,6 +1278,26 @@ export const onRequest: PagesFunction<Env> = async (context) => {
           breakdown_json TEXT NOT NULL DEFAULT '{}',
           notes TEXT,
           total_sales_count INTEGER NOT NULL DEFAULT 0,
+          expenses_cash_cents INTEGER NOT NULL DEFAULT 0,
+          created_at TEXT DEFAULT (datetime('now'))
+        )`
+      ).run().catch(() => {});
+
+      await env.DB.prepare(
+        'ALTER TABLE cash_closings ADD COLUMN expenses_cash_cents INTEGER NOT NULL DEFAULT 0'
+      ).run().catch(() => {});
+
+      await env.DB.prepare(
+        `CREATE TABLE IF NOT EXISTS cash_expenses (
+          id TEXT PRIMARY KEY,
+          negocio_id TEXT NOT NULL DEFAULT 'surtifacil' REFERENCES negocios(id) ON DELETE CASCADE,
+          category TEXT NOT NULL DEFAULT 'otro',
+          description TEXT NOT NULL,
+          beneficiary TEXT,
+          amount_cents INTEGER NOT NULL,
+          payment_method TEXT NOT NULL DEFAULT 'cash',
+          created_by_uid TEXT NOT NULL DEFAULT 'system',
+          created_by_name TEXT,
           created_at TEXT DEFAULT (datetime('now'))
         )`
       ).run().catch(() => {});
@@ -1311,12 +1331,20 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         const creditPaymentsCashCents = creditPaymentsRow?.total_credit_cash_cents || 0;
         const creditPaymentsCashCount = creditPaymentsRow?.count || 0;
 
-        // 3. Ventas por otros medios (tarjeta, otros, fiado) para visibilidad gerencial
+        // 3. Salidas de caja menor en efectivo desde el último cierre
+        const expensesCashRow = await env.DB.prepare(
+          "SELECT COUNT(*) as count, COALESCE(SUM(amount_cents), 0) as total_expenses_cash_cents FROM cash_expenses WHERE negocio_id = ? AND payment_method = 'cash' AND created_at >= ?"
+        ).bind(auth.negocioId, openedAt).first<{ count: number; total_expenses_cash_cents: number }>();
+
+        const expensesCashCents = expensesCashRow?.total_expenses_cash_cents || 0;
+        const expensesCashCount = expensesCashRow?.count || 0;
+
+        // 4. Ventas por otros medios (tarjeta, otros, fiado) para visibilidad gerencial
         const otherSalesRows = await env.DB.prepare(
           "SELECT payment_method, COUNT(*) as count, COALESCE(SUM(total_cents), 0) as total_cents FROM sales WHERE negocio_id = ? AND payment_method != 'cash' AND created_at >= ? GROUP BY payment_method"
         ).bind(auth.negocioId, openedAt).all<{ payment_method: string; count: number; total_cents: number }>();
 
-        const expectedCashCents = initialCashCents + salesCashCents + creditPaymentsCashCents;
+        const expectedCashCents = initialCashCents + salesCashCents + creditPaymentsCashCents - expensesCashCents;
 
         return jsonResponse({
           opened_at: openedAt,
@@ -1325,6 +1353,8 @@ export const onRequest: PagesFunction<Env> = async (context) => {
           sales_cash_count: salesCashCount,
           credit_payments_cash_cents: creditPaymentsCashCents,
           credit_payments_cash_count: creditPaymentsCashCount,
+          expenses_cash_cents: expensesCashCents,
+          expenses_cash_count: expensesCashCount,
           expected_cash_cents: expectedCashCents,
           other_sales: otherSalesRows.results || [],
         });
@@ -1403,7 +1433,13 @@ export const onRequest: PagesFunction<Env> = async (context) => {
 
         const creditPaymentsCashCents = creditPaymentsRow?.total_credit_cash_cents || 0;
 
-        const expectedCashCents = initialCashCents + salesCashCents + creditPaymentsCashCents;
+        const expensesCashRow = await env.DB.prepare(
+          "SELECT COUNT(*) as count, COALESCE(SUM(amount_cents), 0) as total_expenses_cash_cents FROM cash_expenses WHERE negocio_id = ? AND payment_method = 'cash' AND created_at >= ?"
+        ).bind(auth.negocioId, openedAt).first<{ count: number; total_expenses_cash_cents: number }>();
+
+        const expensesCashCents = expensesCashRow?.total_expenses_cash_cents || 0;
+
+        const expectedCashCents = initialCashCents + salesCashCents + creditPaymentsCashCents - expensesCashCents;
         const differenceCents = countedCashCents - expectedCashCents;
 
         let status: 'balanced' | 'surplus' | 'shortage' = 'balanced';
@@ -1422,8 +1458,8 @@ export const onRequest: PagesFunction<Env> = async (context) => {
           `INSERT INTO cash_closings (
             id, negocio_id, closing_number, opened_at, closed_at, closed_by_uid, closed_by_name,
             initial_cash_cents, sales_cash_cents, credit_payments_cash_cents, expected_cash_cents,
-            counted_cash_cents, difference_cents, status, breakdown_json, notes, total_sales_count, created_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`
+            counted_cash_cents, difference_cents, status, breakdown_json, notes, total_sales_count, expenses_cash_cents, created_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`
         ).bind(
           closingId,
           auth.negocioId,
@@ -1441,7 +1477,8 @@ export const onRequest: PagesFunction<Env> = async (context) => {
           status,
           JSON.stringify({ bills: billsBreakdown, coins: coinsBreakdown }),
           body.notes?.trim() || null,
-          totalSalesCount
+          totalSalesCount,
+          expensesCashCents
         ).run();
 
         const createdRecord = await env.DB.prepare(
@@ -1494,6 +1531,157 @@ export const onRequest: PagesFunction<Env> = async (context) => {
           ...record,
           breakdown,
         });
+      }
+    }
+
+    // 5.2 Caja Menor y Gastos Operativos del Turno (/cash-expenses)
+    if (path === '/cash-expenses' || path.startsWith('/cash-expenses/')) {
+      const auth = await authenticateRequest(request, env);
+
+      await env.DB.prepare(
+        `CREATE TABLE IF NOT EXISTS cash_expenses (
+          id TEXT PRIMARY KEY,
+          negocio_id TEXT NOT NULL DEFAULT 'surtifacil' REFERENCES negocios(id) ON DELETE CASCADE,
+          category TEXT NOT NULL DEFAULT 'otro',
+          description TEXT NOT NULL,
+          beneficiary TEXT,
+          amount_cents INTEGER NOT NULL,
+          payment_method TEXT NOT NULL DEFAULT 'cash',
+          created_by_uid TEXT NOT NULL DEFAULT 'system',
+          created_by_name TEXT,
+          created_at TEXT DEFAULT (datetime('now'))
+        )`
+      ).run().catch(() => {});
+
+      if (method === 'GET' && path === '/cash-expenses') {
+        const sinceParam = url.searchParams.get('since');
+        const shiftOnly = url.searchParams.get('shift_only') === 'true';
+
+        let sinceFilter = sinceParam || '';
+        if (!sinceFilter && shiftOnly) {
+          const lastClosing = await env.DB.prepare(
+            'SELECT closed_at FROM cash_closings WHERE negocio_id = ? ORDER BY closed_at DESC LIMIT 1'
+          )
+            .bind(auth.negocioId)
+            .first<{ closed_at: string }>();
+          const now = new Date();
+          const startOfTodayIso = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
+          sinceFilter = lastClosing?.closed_at || startOfTodayIso;
+        }
+
+        let query = 'SELECT * FROM cash_expenses WHERE negocio_id = ?';
+        const params: unknown[] = [auth.negocioId];
+        if (sinceFilter) {
+          query += ' AND created_at >= ?';
+          params.push(sinceFilter);
+        }
+        query += ' ORDER BY created_at DESC LIMIT 100';
+
+        const rows = await env.DB.prepare(query).bind(...params).all<any>();
+        return jsonResponse(rows.results || []);
+      }
+
+      if (method === 'POST' && path === '/cash-expenses') {
+        const body = (await request.json()) as {
+          category?: string;
+          description?: string;
+          beneficiary?: string;
+          amount_cents?: number;
+          payment_method?: string;
+        };
+
+        const VALID_CATEGORIES = new Set([
+          'proveedor_contado',
+          'insumos_bolsas',
+          'domicilios_transporte',
+          'servicios_aseo',
+          'alimentacion_turno',
+          'otro',
+        ]);
+
+        const description = typeof body.description === 'string' ? body.description.trim() : '';
+        if (!description) {
+          return errorResponse('La descripción o concepto del gasto es obligatoria.', 400);
+        }
+
+        const amountCents = Math.floor(Number(body.amount_cents));
+        if (!Number.isFinite(amountCents) || amountCents <= 0) {
+          return errorResponse('El monto del gasto debe ser un valor mayor a 0.', 400);
+        }
+
+        const category = body.category && VALID_CATEGORIES.has(body.category) ? body.category : 'otro';
+        const paymentMethod = body.payment_method === 'transfer' ? 'transfer' : 'cash';
+        const beneficiary = typeof body.beneficiary === 'string' && body.beneficiary.trim()
+          ? body.beneficiary.trim()
+          : null;
+        const expenseId = `cexp-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+        const createdAt = new Date().toISOString();
+        const createdByName = auth.user.displayName || auth.user.email;
+
+        await env.DB.prepare(
+          `INSERT INTO cash_expenses (
+            id, negocio_id, category, description, beneficiary, amount_cents,
+            payment_method, created_by_uid, created_by_name, created_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        )
+          .bind(
+            expenseId,
+            auth.negocioId,
+            category,
+            description,
+            beneficiary,
+            amountCents,
+            paymentMethod,
+            auth.user.id,
+            createdByName,
+            createdAt
+          )
+          .run();
+
+        const created = await env.DB.prepare(
+          'SELECT * FROM cash_expenses WHERE id = ? AND negocio_id = ?'
+        )
+          .bind(expenseId, auth.negocioId)
+          .first<any>();
+
+        return jsonResponse(
+          created || {
+            id: expenseId,
+            negocio_id: auth.negocioId,
+            category,
+            description,
+            beneficiary,
+            amount_cents: amountCents,
+            payment_method: paymentMethod,
+            created_by_uid: auth.user.id,
+            created_by_name: createdByName,
+            created_at: createdAt,
+          },
+          201
+        );
+      }
+
+      if (method === 'DELETE' && path.startsWith('/cash-expenses/')) {
+        const expenseId = decodeURIComponent(path.replace(/^\/cash-expenses\//, ''));
+        if (!expenseId) {
+          return errorResponse('ID de gasto inválido.', 400);
+        }
+
+        const existing = await env.DB.prepare(
+          'SELECT id FROM cash_expenses WHERE id = ? AND negocio_id = ?'
+        )
+          .bind(expenseId, auth.negocioId)
+          .first<{ id: string }>();
+
+        if (!existing) {
+          return errorResponse('Gasto de caja menor no encontrado.', 404);
+        }
+
+        await env.DB.prepare('DELETE FROM cash_expenses WHERE id = ? AND negocio_id = ?')
+          .bind(expenseId, auth.negocioId)
+          .run();
+
+        return jsonResponse({ success: true, deletedId: expenseId });
       }
     }
 

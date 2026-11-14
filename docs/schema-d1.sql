@@ -263,10 +263,27 @@ CREATE TABLE IF NOT EXISTS cash_closings (
   breakdown_json TEXT NOT NULL DEFAULT '{}',
   notes TEXT,
   total_sales_count INTEGER NOT NULL DEFAULT 0,
+  expenses_cash_cents INTEGER NOT NULL DEFAULT 0,
   created_at TEXT DEFAULT (datetime('now'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_cash_closings_negocio ON cash_closings(negocio_id, closed_at);
+
+-- 10.2 Tabla de Caja Menor y Gastos Operativos del Turno
+CREATE TABLE IF NOT EXISTS cash_expenses (
+  id TEXT PRIMARY KEY,
+  negocio_id TEXT NOT NULL DEFAULT 'surtifacil' REFERENCES negocios(id) ON DELETE CASCADE,
+  category TEXT NOT NULL DEFAULT 'otro',
+  description TEXT NOT NULL,
+  beneficiary TEXT,
+  amount_cents INTEGER NOT NULL,
+  payment_method TEXT NOT NULL DEFAULT 'cash',
+  created_by_uid TEXT NOT NULL DEFAULT 'system',
+  created_by_name TEXT,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_cash_expenses_negocio_date ON cash_expenses(negocio_id, created_at DESC);
 
 -- ==============================================================================
 -- 11. Semillas Iniciales (Negocio Insignia y SuperAdmin de la Plataforma)

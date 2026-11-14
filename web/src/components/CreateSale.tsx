@@ -17,6 +17,7 @@ import { SarinVoicePOS } from './SarinVoicePOS';
 import type { VoiceSaleCommandResult } from '../utils/sarinVoiceParser';
 import ThermalReceiptModal from './ThermalReceiptModal';
 import CashClosingModal from './CashClosingModal';
+import PettyCashModal from './PettyCashModal';
 import { CashChangeCalculator } from './CashChangeCalculator';
 import {
   isNotificationSupported,
@@ -57,6 +58,7 @@ const CreateSale = () => {
   const [lastCreatedSale, setLastCreatedSale] = useState<Sale | null>(null);
   const [receiptModalOpen, setReceiptModalOpen] = useState(false);
   const [closingModalOpen, setClosingModalOpen] = useState(false);
+  const [pettyCashModalOpen, setPettyCashModalOpen] = useState(false);
   const [notifPermission, setNotifPermission] = useState<NotificationPermission>(() => getNotificationPermission());
   const [receivedCashCents, setReceivedCashCents] = useState<number | null>(null);
 
@@ -354,6 +356,13 @@ const CreateSale = () => {
             )}
             <button
               type="button"
+              onClick={() => setPettyCashModalOpen(true)}
+              className="btn-secondary min-h-[44px] px-3 text-xs font-bold text-slate-700 hover:text-slate-900 flex items-center gap-2"
+            >
+              <span>💸 Caja Menor</span>
+            </button>
+            <button
+              type="button"
               onClick={() => setClosingModalOpen(true)}
               className="btn-secondary min-h-[44px] px-3 text-xs font-bold text-slate-700 hover:text-slate-900 flex items-center gap-2"
             >
@@ -604,6 +613,13 @@ const CreateSale = () => {
         <CashClosingModal
           isOpen={closingModalOpen}
           onClose={() => setClosingModalOpen(false)}
+        />
+      )}
+
+      {pettyCashModalOpen && (
+        <PettyCashModal
+          isOpen={pettyCashModalOpen}
+          onClose={() => setPettyCashModalOpen(false)}
         />
       )}
     </section>

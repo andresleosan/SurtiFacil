@@ -8,6 +8,7 @@ import { formatCentsCOP } from '../utils/currency';
 import { exportSalesToCSV } from '../utils/csvExporter';
 import ThermalReceiptModal from './ThermalReceiptModal';
 import CashClosingModal from './CashClosingModal';
+import PettyCashModal from './PettyCashModal';
 
 const PAGE_SIZE = 50;
 
@@ -49,6 +50,7 @@ const Sales = () => {
   const [expandedSaleId, setExpandedSaleId] = useState<string | null>(null);
   const [selectedSaleForReceipt, setSelectedSaleForReceipt] = useState<Sale | null>(null);
   const [closingModalOpen, setClosingModalOpen] = useState(false);
+  const [pettyCashModalOpen, setPettyCashModalOpen] = useState(false);
 
   const loadFirstPage = useCallback(async () => {
     try {
@@ -100,6 +102,13 @@ const Sales = () => {
       title="Historial de ventas"
       actions={
         <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setPettyCashModalOpen(true)}
+            className="btn-secondary min-h-[44px] px-3 text-xs font-semibold text-slate-800"
+          >
+            <span>💸 Caja Menor</span>
+          </button>
           <button
             type="button"
             onClick={() => setClosingModalOpen(true)}
@@ -257,6 +266,13 @@ const Sales = () => {
           isOpen={closingModalOpen}
           onClose={() => setClosingModalOpen(false)}
           onClosedSuccess={() => void loadFirstPage()}
+        />
+      )}
+
+      {pettyCashModalOpen && (
+        <PettyCashModal
+          isOpen={pettyCashModalOpen}
+          onClose={() => setPettyCashModalOpen(false)}
         />
       )}
     </section>

@@ -18,6 +18,7 @@ import { StoreSettings } from '../types/storeSettings';
 import { Modal } from './ui/Modal';
 import { Icon } from './ui/Icon';
 import ThermalReceiptModal from './ThermalReceiptModal';
+import PettyCashModal from './PettyCashModal';
 
 interface CashClosingModalProps {
   isOpen: boolean;
@@ -43,6 +44,27 @@ export function CashClosingModal({ isOpen, onClose, onClosedSuccess }: CashClosi
   // Resultado tras guardar el acta
   const [savedClosing, setSavedClosing] = useState<CashClosing | null>(null);
   const [thermalModalOpen, setThermalModalOpen] = useState(false);
+  const [pettyCashModalOpen, setPettyCashModalOpen] = useState(false);
+
+  const loadShiftSummary = (basePesosStr = initialBasePesos) => {
+    const baseCents = parseCOP(basePesosStr) * 100;
+    setLoadingSummary(true);
+    void Promise.all([
+      getCashShiftSummary(baseCents),
+      getStoreSettings(),
+    ])
+      .then(([summary, settings]) => {
+        setShiftSummary(summary);
+        setStoreSettings(settings);
+      })
+      .catch((err) => {
+        console.error('Error cargando turno de caja:', err);
+        setError('No se pudo cargar el resumen de ventas del turno.');
+      })
+      .finally(() => {
+        setLoadingSummary(false);
+      });
+  };
 
   // Cargar resumen de turno al abrir
   useEffect(() => {
@@ -52,25 +74,7 @@ export function CashClosingModal({ isOpen, onClose, onClosedSuccess }: CashClosi
       setBillsCount({});
       setCoinsCount({});
       setNotes('');
-
-      const baseCents = parseCOP(initialBasePesos) * 100;
-      setLoadingSummary(true);
-
-      void Promise.all([
-        getCashShiftSummary(baseCents),
-        getStoreSettings(),
-      ])
-        .then(([summary, settings]) => {
-          setShiftSummary(summary);
-          setStoreSettings(settings);
-        })
-        .catch((err) => {
-          console.error('Error cargando turno de caja:', err);
-          setError('No se pudo cargar el resumen de ventas del turno.');
-        })
-        .finally(() => {
-          setLoadingSummary(false);
-        });
+      loadShiftSummary(initialBasePesos);
     }
   }, [isOpen]);
 
@@ -82,7 +86,11 @@ export function CashClosingModal({ isOpen, onClose, onClosedSuccess }: CashClosi
       setShiftSummary({
         ...shiftSummary,
         initial_cash_cents: baseCents,
-        expected_cash_cents: baseCents + shiftSummary.sales_cash_cents + shiftSummary.credit_payments_cash_cents,
+        expected_cash_cents:
+          baseCents +
+          shiftSummary.sales_cash_cents +
+          shiftSummary.credit_payments_cash_cents -
+          (shiftSummary.expenses_cash_cents || 0),
       });
     }
   };
@@ -284,6 +292,13 @@ export function CashClosingModal({ isOpen, onClose, onClosedSuccess }: CashClosi
               </div>
             </div>
 
+            {(savedClosing.expenses_cash_cents || 0) > 0 && (
+              <div className="rounded-xl border border-rose-200 bg-rose-50 px-3.5 py-2.5 text-xs text-rose-900 flex items-center justify-between">
+                <span className="font-semibold">💸 Salidas de Caja Menor descontadas del esperado:</span>
+                <span className="font-black tabular-nums">-{formatCentsCOP(savedClosing.expenses_cash_cents || 0)}</span>
+              </div>
+            )}
+
             {savedClosing.notes && (
               <div className="card p-3 bg-slate-50 text-xs text-slate-700">
                 <strong className="block text-slate-900 mb-0.5">Observaciones:</strong>
@@ -317,24 +332,33 @@ export function CashClosingModal({ isOpen, onClose, onClosedSuccess }: CashClosi
                   </p>
                 </div>
 
-                {/* Base inicial editable */}
-                <div className="flex items-center gap-2 bg-slate-800/80 px-3 py-1.5 rounded-xl border border-slate-700">
-                  <label htmlFor="base-cash" className="text-xs text-slate-300 font-medium">
-                    Base Inicial ($):
-                  </label>
-                  <input
-                    id="base-cash"
-                    type="text"
-                    inputMode="numeric"
-                    value={initialBasePesos}
-                    onChange={(e) => handleBaseChange(e.target.value)}
-                    className="w-24 bg-slate-900 text-right text-xs font-bold text-emerald-400 px-2 py-1 rounded border border-slate-600 focus:outline-none focus:ring-1 focus:ring-sf-primary"
-                  />
+                {/* Base inicial editable y acceso a Caja Menor */}
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setPettyCashModalOpen(true)}
+                    className="min-h-[44px] rounded-xl border border-rose-400/50 bg-rose-500/20 px-3 text-xs font-bold text-rose-200 transition hover:bg-rose-500/30"
+                  >
+                    💸 Registrar Gasto
+                  </button>
+                  <div className="flex items-center gap-2 bg-slate-800/80 px-3 py-1.5 rounded-xl border border-slate-700">
+                    <label htmlFor="base-cash" className="text-xs text-slate-300 font-medium">
+                      Base Inicial ($):
+                    </label>
+                    <input
+                      id="base-cash"
+                      type="text"
+                      inputMode="numeric"
+                      value={initialBasePesos}
+                      onChange={(e) => handleBaseChange(e.target.value)}
+                      className="w-24 bg-slate-900 text-right text-xs font-bold text-emerald-400 px-2 py-1 rounded border border-slate-600 focus:outline-none focus:ring-1 focus:ring-sf-primary"
+                    />
+                  </div>
                 </div>
               </div>
 
               {/* Métricas clave */}
-              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 text-xs">
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-5 text-xs">
                 <div className="bg-slate-800/60 p-2.5 rounded-xl">
                   <span className="text-slate-400 block">Base Caja</span>
                   <span className="text-sm font-bold text-white tabular-nums">
@@ -353,7 +377,13 @@ export function CashClosingModal({ isOpen, onClose, onClosedSuccess }: CashClosi
                     {formatCentsCOP(shiftSummary?.credit_payments_cash_cents || 0)}
                   </span>
                 </div>
-                <div className="bg-slate-800/90 p-2.5 rounded-xl border border-slate-700">
+                <div className="bg-slate-800/60 p-2.5 rounded-xl">
+                  <span className="text-slate-400 block">Gastos Caja Menor ({shiftSummary?.expenses_cash_count || 0})</span>
+                  <span className="text-sm font-bold text-rose-400 tabular-nums">
+                    -{formatCentsCOP(shiftSummary?.expenses_cash_cents || 0)}
+                  </span>
+                </div>
+                <div className="bg-slate-800/90 p-2.5 rounded-xl border border-slate-700 col-span-2 sm:col-span-1">
                   <span className="text-slate-300 font-semibold block">Total Esperado</span>
                   <span className="text-base font-black text-amber-300 tabular-nums">
                     {formatCentsCOP(expectedCashCents)}
@@ -563,6 +593,13 @@ export function CashClosingModal({ isOpen, onClose, onClosedSuccess }: CashClosi
           closing={savedClosing}
         />
       )}
+
+      {/* Modal de Caja Menor / Gastos del Turno */}
+      <PettyCashModal
+        isOpen={pettyCashModalOpen}
+        onClose={() => setPettyCashModalOpen(false)}
+        onExpenseChanged={() => loadShiftSummary(initialBasePesos)}
+      />
     </>
   );
 }

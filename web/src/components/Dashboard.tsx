@@ -4,6 +4,7 @@ import StockAlerts from './StockAlerts';
 import SubscriptionBanner from './SubscriptionBanner';
 import SarinBusinessCopilot from './SarinBusinessCopilot';
 import CashClosingModal from './CashClosingModal';
+import PettyCashModal from './PettyCashModal';
 import { Icon } from './ui/Icon';
 import { PageHeader } from './ui/PageHeader';
 
@@ -33,6 +34,7 @@ const Dashboard = () => {
   const [error, setError] = useState<string | null>(null);
   const [copilotOpen, setCopilotOpen] = useState(false);
   const [closingModalOpen, setClosingModalOpen] = useState(false);
+  const [pettyCashModalOpen, setPettyCashModalOpen] = useState(false);
 
   const loadDashboardData = useCallback(async () => {
     try {
@@ -100,7 +102,14 @@ const Dashboard = () => {
     <PageHeader
       title="Panel de Control"
       actions={
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setPettyCashModalOpen(true)}
+            className="btn-secondary min-h-[44px] px-3 text-xs font-semibold text-slate-800"
+          >
+            <span>💸 Caja Menor</span>
+          </button>
           <button
             type="button"
             onClick={() => setClosingModalOpen(true)}
@@ -200,6 +209,12 @@ const Dashboard = () => {
         isOpen={closingModalOpen}
         onClose={() => setClosingModalOpen(false)}
         onClosedSuccess={() => void loadDashboardData()}
+      />
+
+      {/* Modal Caja Menor y Gastos del Turno */}
+      <PettyCashModal
+        isOpen={pettyCashModalOpen}
+        onClose={() => setPettyCashModalOpen(false)}
       />
     </section>
   );

@@ -289,6 +289,23 @@ export async function ensureDatabaseSchema(db: D1Database, force = false): Promi
       breakdown_json TEXT NOT NULL DEFAULT '{}',
       notes TEXT,
       total_sales_count INTEGER NOT NULL DEFAULT 0,
+      expenses_cash_cents INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT DEFAULT (datetime('now'))
+    )`
+  );
+
+  await safeRun(
+    db,
+    `CREATE TABLE IF NOT EXISTS cash_expenses (
+      id TEXT PRIMARY KEY,
+      negocio_id TEXT NOT NULL DEFAULT 'surtifacil',
+      category TEXT NOT NULL DEFAULT 'otro',
+      description TEXT NOT NULL,
+      beneficiary TEXT,
+      amount_cents INTEGER NOT NULL,
+      payment_method TEXT NOT NULL DEFAULT 'cash',
+      created_by_uid TEXT NOT NULL DEFAULT 'system',
+      created_by_name TEXT,
       created_at TEXT DEFAULT (datetime('now'))
     )`
   );
@@ -361,6 +378,8 @@ export async function ensureDatabaseSchema(db: D1Database, force = false): Promi
     'ALTER TABLE purchase_orders ADD COLUMN expected_date TEXT',
     'ALTER TABLE purchase_orders ADD COLUMN received_date TEXT',
     'ALTER TABLE purchase_orders ADD COLUMN notes TEXT',
+    // cash_closings
+    'ALTER TABLE cash_closings ADD COLUMN expenses_cash_cents INTEGER NOT NULL DEFAULT 0',
   ];
 
   for (const sql of alterColumns) {

@@ -239,6 +239,9 @@ export function generateCashClosingReceiptText(
   if (closing.credit_payments_cash_cents > 0) {
     lines.push(formatTwoColumns('Abonos Fiados Efectivo:', formatCentsCOP(closing.credit_payments_cash_cents), colWidth));
   }
+  if ((closing.expenses_cash_cents || 0) > 0) {
+    lines.push(formatTwoColumns('Gastos Caja Menor (-):', `-${formatCentsCOP(closing.expenses_cash_cents || 0)}`, colWidth));
+  }
   lines.push(divider);
   lines.push(formatTwoColumns('TOTAL ESPERADO:', formatCentsCOP(closing.expected_cash_cents), colWidth));
   lines.push(formatTwoColumns('TOTAL FÍSICO CONTADO:', formatCentsCOP(closing.counted_cash_cents), colWidth));
@@ -312,6 +315,9 @@ export function generateCashClosingWhatsAppText(closing: CashClosing, store: Par
   text += `▪ Ventas en Efectivo (${closing.total_sales_count}): ${formatCentsCOP(closing.sales_cash_cents)}\n`;
   if (closing.credit_payments_cash_cents > 0) {
     text += `▪ Abonos de Fiados: ${formatCentsCOP(closing.credit_payments_cash_cents)}\n`;
+  }
+  if ((closing.expenses_cash_cents || 0) > 0) {
+    text += `▪ Gastos Caja Menor (-): -${formatCentsCOP(closing.expenses_cash_cents || 0)}\n`;
   }
   text += `───────────────────────\n`;
   text += `💰 *Efectivo Esperado:* *${formatCentsCOP(closing.expected_cash_cents)}*\n`;
