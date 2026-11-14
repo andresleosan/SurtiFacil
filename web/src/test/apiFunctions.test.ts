@@ -21,6 +21,7 @@ class MockD1Database implements D1Database {
     whatsapp_messages: any[];
     cash_closings: any[];
     cash_expenses: any[];
+    inventory_shrinkage: any[];
   };
 
   constructor() {
@@ -130,6 +131,7 @@ class MockD1Database implements D1Database {
       whatsapp_messages: [],
       cash_closings: [],
       cash_expenses: [],
+      inventory_shrinkage: [],
     };
   }
 
@@ -419,13 +421,43 @@ class MockD1Database implements D1Database {
           return { results: list as T[], success: true };
         }
 
+        if (q.includes('FROM inventory_shrinkage WHERE id = ? AND negocio_id = ?')) {
+          const entry = db.tables.inventory_shrinkage.find(
+            (s) => s.id === boundValues[0] && s.negocio_id === boundValues[1]
+          );
+          return { results: entry ? [entry as T] : [], success: true };
+        }
+
+        if (q.includes('FROM inventory_shrinkage WHERE negocio_id = ?')) {
+          let list = db.tables.inventory_shrinkage.filter((s) => s.negocio_id === boundValues[0]);
+          let idx = 1;
+          if (q.includes('created_at >= ?')) {
+            const since = boundValues[idx++];
+            list = list.filter((s) => s.created_at >= since);
+          }
+          if (q.includes('reason = ?')) {
+            const r = boundValues[idx++];
+            list = list.filter((s) => s.reason === r);
+          }
+          if (q.includes('product_id = ?')) {
+            const pId = boundValues[idx++];
+            list = list.filter((s) => s.product_id === pId);
+          }
+          list = list.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+          return { results: list as T[], success: true };
+        }
+
         return { results: [], success: true };
       },
       async run() {
         const q = query.trim();
 
         if (q.startsWith('INSERT INTO products')) {
-          const [id, negocio_id, name, price_cents, stock, min_stock, unit, category, image_url, supplier_id, barcode, visible_kiosco, visible_tienda, en_oferta, precio_oferta_cents, last_cost_cents] = boundValues;
+          const [
+            id, negocio_id, name, price_cents, stock, min_stock, unit, category, image_url,
+            supplier_id, barcode, visible_kiosco, visible_tienda, en_oferta, precio_oferta_cents,
+            last_cost_cents, _lastCostSource, expiration_date,
+          ] = boundValues;
           db.tables.products.push({
             id,
             negocio_id,
@@ -443,7 +475,33 @@ class MockD1Database implements D1Database {
             en_oferta,
             precio_oferta_cents,
             last_cost_cents,
+            expiration_date: expiration_date ?? null,
           });
+        }
+
+        if (q.includes('UPDATE products') && q.includes('expiration_date = ?') && !q.includes('stock = stock')) {
+          const [
+            name, price_cents, stock, min_stock, unit, category, image_url,
+            supplier_id, barcode, visible_kiosco, visible_tienda, en_oferta,
+            precio_oferta_cents, expiration_date, prodId, negId,
+          ] = boundValues;
+          const prod = db.tables.products.find((p) => p.id === prodId && p.negocio_id === negId);
+          if (prod) {
+            if (name !== null) prod.name = name;
+            if (price_cents !== null) prod.price_cents = price_cents;
+            if (stock !== null) prod.stock = stock;
+            if (min_stock !== null) prod.min_stock = min_stock;
+            if (unit !== null) prod.unit = unit;
+            if (category !== null) prod.category = category;
+            if (image_url !== null) prod.image_url = image_url;
+            if (supplier_id !== null) prod.supplier_id = supplier_id;
+            if (barcode !== null) prod.barcode = barcode;
+            if (visible_kiosco !== null) prod.visible_kiosco = visible_kiosco;
+            if (visible_tienda !== null) prod.visible_tienda = visible_tienda;
+            if (en_oferta !== null) prod.en_oferta = en_oferta;
+            if (precio_oferta_cents !== null) prod.precio_oferta_cents = precio_oferta_cents;
+            prod.expiration_date = expiration_date;
+          }
         }
 
         if (q.includes('UPDATE products') && q.includes('stock = stock - ?')) {
@@ -453,12 +511,53 @@ class MockD1Database implements D1Database {
         }
 
         if (q.includes('UPDATE products') && q.includes('stock = stock + ?')) {
-          const [qty, lastCost, prodId, negId] = boundValues;
-          const prod = db.tables.products.find((p) => p.id === prodId && p.negocio_id === negId);
-          if (prod) {
-            prod.stock += qty;
-            prod.last_cost_cents = lastCost;
+          if (q.includes('last_cost_cents')) {
+            const [qty, lastCost, prodId, negId] = boundValues;
+            const prod = db.tables.products.find((p) => p.id === prodId && p.negocio_id === negId);
+            if (prod) {
+              prod.stock += qty;
+              prod.last_cost_cents = lastCost;
+            }
+          } else {
+            const [qty, prodId, negId] = boundValues;
+            const prod = db.tables.products.find((p) => p.id === prodId && p.negocio_id === negId);
+            if (prod) {
+              prod.stock += qty;
+            }
           }
+        }
+
+        if (q.startsWith('INSERT INTO inventory_shrinkage')) {
+          const [
+            id, negocio_id, product_id, product_name, category, unit, quantity,
+            unit_cost_cents, total_cost_loss_cents, retail_value_cents, cost_source,
+            reason, notes, created_by_uid, created_by_name, created_at,
+          ] = boundValues;
+          db.tables.inventory_shrinkage.push({
+            id,
+            negocio_id,
+            product_id,
+            product_name,
+            category,
+            unit,
+            quantity,
+            unit_cost_cents,
+            total_cost_loss_cents,
+            retail_value_cents,
+            cost_source,
+            reason,
+            notes,
+            created_by_uid,
+            created_by_name,
+            created_at,
+          });
+        }
+
+        if (q.startsWith('DELETE FROM inventory_shrinkage WHERE id = ? AND negocio_id = ?')) {
+          const [shkId, negId] = boundValues;
+          db.tables.inventory_shrinkage = db.tables.inventory_shrinkage.filter(
+            (s) => !(s.id === shkId && s.negocio_id === negId)
+          );
         }
 
         if (q.startsWith('INSERT INTO sales')) {
@@ -1693,5 +1792,109 @@ describe('Cloudflare Pages Functions API (/api/*)', () => {
     const listData = await listRes.json();
     expect(listData.length).toBe(1);
     expect(listData[0].payment_method).toBe('transfer');
+  });
+
+  it('registra mermas con descuento atómico, cálculo de costo, aislamiento multi-tenant, expiración y reversión', async () => {
+    const db = new MockD1Database();
+    // Stock inicial de p-1 = 20, last_cost_cents = 350000 ($3.500), price_cents = 450000 ($4.500)
+
+    // 1. Cajero no autorizado (403) para dar de baja merma
+    const cashierDeniedCtx = createMockContext(
+      'POST',
+      'http://localhost/api/shrinkage',
+      { Authorization: 'Bearer mock:cashier-1:cajero@surtifacil.com:cashier' },
+      { product_id: 'p-1', quantity: 2, reason: 'damaged' },
+      db
+    );
+    const deniedRes = await onRequest(cashierDeniedCtx as any);
+    expect(deniedRes.status).toBe(403);
+
+    // 2. Rechaza dar de baja más que el stock disponible
+    const overStockCtx = createMockContext(
+      'POST',
+      'http://localhost/api/shrinkage',
+      { Authorization: 'Bearer mock:admin-1:admin@surtifacil.com:admin' },
+      { product_id: 'p-1', quantity: 99, reason: 'damaged' },
+      db
+    );
+    const overRes = await onRequest(overStockCtx as any);
+    expect(overRes.status).toBe(400);
+
+    // 3. Aislamiento multi-tenant: no permite tocar producto de otra tienda (p-other-store)
+    const crossTenantCtx = createMockContext(
+      'POST',
+      'http://localhost/api/shrinkage',
+      { Authorization: 'Bearer mock:admin-1:admin@surtifacil.com:admin' },
+      { product_id: 'p-other-store', quantity: 1, reason: 'expired' },
+      db
+    );
+    const crossRes = await onRequest(crossTenantCtx as any);
+    expect(crossRes.status).toBe(404);
+
+    // 4. POST /api/shrinkage descuenta stock y calcula pérdida al costo autoritativamente
+    const createCtx = createMockContext(
+      'POST',
+      'http://localhost/api/shrinkage',
+      { Authorization: 'Bearer mock:admin-1:admin@surtifacil.com:admin' },
+      { product_id: 'p-1', quantity: 3, reason: 'damaged', notes: 'Bulto roto en bodega' },
+      db
+    );
+    const createRes = await onRequest(createCtx as any);
+    expect(createRes.status).toBe(201);
+    const created = await createRes.json();
+    expect(created.total_cost_loss_cents).toBe(3 * 350000);
+    expect(created.retail_value_cents).toBe(3 * 450000);
+    expect(created.updated_stock).toBe(17);
+    expect(db.tables.products.find((p) => p.id === 'p-1')?.stock).toBe(17);
+
+    // 5. GET /api/shrinkage/summary refleja el total de unidades y pérdida
+    const summaryCtx = createMockContext(
+      'GET',
+      'http://localhost/api/shrinkage/summary',
+      { Authorization: 'Bearer mock:admin-1:admin@surtifacil.com:admin' },
+      null,
+      db
+    );
+    const summaryRes = await onRequest(summaryCtx as any);
+    expect(summaryRes.status).toBe(200);
+    const summaryData = await summaryRes.json();
+    expect(summaryData.total_units).toBe(3);
+    expect(summaryData.total_cost_loss_cents).toBe(1050000);
+    expect(summaryData.by_reason.damaged.count).toBe(1);
+
+    // 6. PUT /api/products/:id actualiza y permite limpiar expiration_date
+    const putExpCtx = createMockContext(
+      'PUT',
+      'http://localhost/api/products/p-1',
+      { Authorization: 'Bearer mock:admin-1:admin@surtifacil.com:admin' },
+      { expiration_date: '2026-12-01' },
+      db
+    );
+    const putExpRes = await onRequest(putExpCtx as any);
+    expect(putExpRes.status).toBe(200);
+    expect((await putExpRes.json()).expiration_date).toBe('2026-12-01');
+
+    const clearExpCtx = createMockContext(
+      'PUT',
+      'http://localhost/api/products/p-1',
+      { Authorization: 'Bearer mock:admin-1:admin@surtifacil.com:admin' },
+      { expiration_date: null },
+      db
+    );
+    const clearExpRes = await onRequest(clearExpCtx as any);
+    expect(clearExpRes.status).toBe(200);
+    expect((await clearExpRes.json()).expiration_date).toBeNull();
+
+    // 7. DELETE /api/shrinkage/:id revierte la merma y devuelve el stock atomicamente
+    const revertCtx = createMockContext(
+      'DELETE',
+      `http://localhost/api/shrinkage/${created.id}`,
+      { Authorization: 'Bearer mock:admin-1:admin@surtifacil.com:admin' },
+      null,
+      db
+    );
+    const revertRes = await onRequest(revertCtx as any);
+    expect(revertRes.status).toBe(200);
+    expect(db.tables.products.find((p) => p.id === 'p-1')?.stock).toBe(20);
   });
 });

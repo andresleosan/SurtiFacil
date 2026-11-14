@@ -20,6 +20,26 @@ interface ProductInput {
   en_oferta?: boolean | number;
   precio_oferta_cents?: number | null;
   last_cost_cents?: number;
+  expiration_date?: string | null;
+}
+
+function normalizeExpirationDate(raw?: string | null): string | null | 'INVALID' {
+  if (raw === undefined || raw === null) return null;
+  if (typeof raw !== 'string') return 'INVALID';
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  const isoDay = trimmed.slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(isoDay)) return 'INVALID';
+  const [year, month, day] = isoDay.split('-').map(Number);
+  const check = new Date(Date.UTC(year, month - 1, day));
+  if (
+    check.getUTCFullYear() !== year ||
+    check.getUTCMonth() !== month - 1 ||
+    check.getUTCDate() !== day
+  ) {
+    return 'INVALID';
+  }
+  return isoDay;
 }
 
 interface SaleItemInput {
@@ -907,13 +927,18 @@ export const onRequest: PagesFunction<Env> = async (context) => {
           return errorResponse('Nombre y precio en centavos válidos son obligatorios.', 400);
         }
 
+        const normalizedExp = normalizeExpirationDate(body.expiration_date);
+        if (normalizedExp === 'INVALID') {
+          return errorResponse('Fecha de vencimiento inválida. Usa formato YYYY-MM-DD.', 400);
+        }
+
         const id = `prod-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
         await env.DB.prepare(
           `INSERT INTO products (
             id, negocio_id, name, price_cents, stock, min_stock, unit, category, image_url,
             supplier_id, barcode, visible_kiosco, visible_tienda, en_oferta, precio_oferta_cents,
-            last_cost_cents, last_cost_source, last_cost_updated_at, created_at, updated_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'), datetime('now'))`
+            last_cost_cents, last_cost_source, expiration_date, last_cost_updated_at, created_at, updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'), datetime('now'))`
         )
           .bind(
             id,
@@ -932,7 +957,8 @@ export const onRequest: PagesFunction<Env> = async (context) => {
             body.en_oferta ? 1 : 0,
             body.precio_oferta_cents ?? null,
             body.last_cost_cents ?? null,
-            body.last_cost_cents ? 'fallback_price' : null
+            body.last_cost_cents ? 'fallback_price' : null,
+            normalizedExp
           )
           .run();
 
@@ -946,12 +972,21 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       // PUT /api/products/:id
       if (method === 'PUT' && productId) {
         const body = (await request.json()) as Partial<ProductInput>;
-        const existing = await env.DB.prepare('SELECT id FROM products WHERE id = ? AND negocio_id = ?')
+        const existing = await env.DB.prepare('SELECT id, expiration_date FROM products WHERE id = ? AND negocio_id = ?')
           .bind(productId, auth.negocioId)
-          .first();
+          .first<{ id: string; expiration_date?: string | null }>();
 
         if (!existing) {
           return errorResponse('Producto no encontrado.', 404);
+        }
+
+        let nextExpirationDate: string | null = existing.expiration_date ?? null;
+        if (body.expiration_date !== undefined) {
+          const normalizedExp = normalizeExpirationDate(body.expiration_date);
+          if (normalizedExp === 'INVALID') {
+            return errorResponse('Fecha de vencimiento inválida. Usa formato YYYY-MM-DD.', 400);
+          }
+          nextExpirationDate = normalizedExp;
         }
 
         await env.DB.prepare(
@@ -969,6 +1004,7 @@ export const onRequest: PagesFunction<Env> = async (context) => {
             visible_tienda = COALESCE(?, visible_tienda),
             en_oferta = COALESCE(?, en_oferta),
             precio_oferta_cents = COALESCE(?, precio_oferta_cents),
+            expiration_date = ?,
             updated_at = datetime('now')
           WHERE id = ? AND negocio_id = ?`
         )
@@ -986,6 +1022,7 @@ export const onRequest: PagesFunction<Env> = async (context) => {
             body.visible_tienda !== undefined ? (body.visible_tienda ? 1 : 0) : null,
             body.en_oferta !== undefined ? (body.en_oferta ? 1 : 0) : null,
             body.precio_oferta_cents !== undefined ? body.precio_oferta_cents : null,
+            nextExpirationDate,
             productId,
             auth.negocioId
           )
@@ -1682,6 +1719,269 @@ export const onRequest: PagesFunction<Env> = async (context) => {
           .run();
 
         return jsonResponse({ success: true, deletedId: expenseId });
+      }
+    }
+
+    // 5.3 Control de Mermas, Averías y Bajas de Inventario (/shrinkage)
+    if (path === '/shrinkage' || path.startsWith('/shrinkage/')) {
+      const auth = await authenticateRequest(request, env);
+
+      await env.DB.prepare(
+        `CREATE TABLE IF NOT EXISTS inventory_shrinkage (
+          id TEXT PRIMARY KEY,
+          negocio_id TEXT NOT NULL DEFAULT 'surtifacil' REFERENCES negocios(id) ON DELETE CASCADE,
+          product_id TEXT NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+          product_name TEXT NOT NULL,
+          category TEXT,
+          unit TEXT DEFAULT 'unidad',
+          quantity INTEGER NOT NULL,
+          unit_cost_cents INTEGER NOT NULL,
+          total_cost_loss_cents INTEGER NOT NULL,
+          retail_value_cents INTEGER NOT NULL DEFAULT 0,
+          cost_source TEXT NOT NULL DEFAULT 'purchase',
+          reason TEXT NOT NULL DEFAULT 'damaged',
+          notes TEXT,
+          created_by_uid TEXT NOT NULL DEFAULT 'system',
+          created_by_name TEXT,
+          created_at TEXT DEFAULT (datetime('now'))
+        )`
+      ).run().catch(() => {});
+
+      const VALID_REASONS = new Set(['damaged', 'expired', 'spoiled_fruver', 'internal_use', 'other']);
+
+      if (method === 'GET' && path === '/shrinkage') {
+        const sinceParam = url.searchParams.get('since') || '';
+        const reasonParam = url.searchParams.get('reason') || '';
+        const productIdParam = url.searchParams.get('product_id') || '';
+
+        let query = 'SELECT * FROM inventory_shrinkage WHERE negocio_id = ?';
+        const params: unknown[] = [auth.negocioId];
+
+        if (sinceParam) {
+          query += ' AND created_at >= ?';
+          params.push(sinceParam);
+        }
+        if (reasonParam && VALID_REASONS.has(reasonParam)) {
+          query += ' AND reason = ?';
+          params.push(reasonParam);
+        }
+        if (productIdParam) {
+          query += ' AND product_id = ?';
+          params.push(productIdParam);
+        }
+
+        query += ' ORDER BY created_at DESC LIMIT 100';
+        const rows = await env.DB.prepare(query).bind(...params).all<any>();
+        return jsonResponse(rows.results || []);
+      }
+
+      if (method === 'GET' && path === '/shrinkage/summary') {
+        const sinceParam = url.searchParams.get('since') || '';
+        let query = 'SELECT * FROM inventory_shrinkage WHERE negocio_id = ?';
+        const params: unknown[] = [auth.negocioId];
+        if (sinceParam) {
+          query += ' AND created_at >= ?';
+          params.push(sinceParam);
+        }
+        const rows = await env.DB.prepare(query).bind(...params).all<any>();
+        const entries = rows.results || [];
+        const byReason: Record<string, { count: number; units: number; cost_loss_cents: number }> = {};
+        let totalUnits = 0;
+        let totalCostLossCents = 0;
+        let totalRetailValueCents = 0;
+
+        for (const item of entries) {
+          const qty = Number(item.quantity || 0);
+          const costLoss = Number(item.total_cost_loss_cents || 0);
+          const retailVal = Number(item.retail_value_cents || 0);
+          totalUnits += qty;
+          totalCostLossCents += costLoss;
+          totalRetailValueCents += retailVal;
+          const rKey = item.reason || 'other';
+          if (!byReason[rKey]) {
+            byReason[rKey] = { count: 0, units: 0, cost_loss_cents: 0 };
+          }
+          byReason[rKey].count += 1;
+          byReason[rKey].units += qty;
+          byReason[rKey].cost_loss_cents += costLoss;
+        }
+
+        return jsonResponse({
+          total_records: entries.length,
+          total_units: totalUnits,
+          total_cost_loss_cents: totalCostLossCents,
+          total_retail_value_cents: totalRetailValueCents,
+          by_reason: byReason,
+        });
+      }
+
+      if (method === 'POST' && path === '/shrinkage') {
+        if (auth.user.role !== 'admin' && auth.user.role !== 'manager') {
+          return errorResponse('Solo administradores y gerentes pueden registrar mermas e inventario dañado.', 403);
+        }
+
+        const body = (await request.json()) as {
+          product_id?: string;
+          quantity?: number;
+          reason?: string;
+          notes?: string;
+        };
+
+        const productId = typeof body.product_id === 'string' ? body.product_id.trim() : '';
+        if (!productId) {
+          return errorResponse('Debes seleccionar un producto válido para registrar la merma.', 400);
+        }
+
+        const rawQty = Number(body.quantity);
+        if (!Number.isFinite(rawQty) || !Number.isInteger(rawQty) || rawQty <= 0) {
+          return errorResponse('La cantidad a dar de baja debe ser un número entero mayor a 0.', 400);
+        }
+
+        const reason = typeof body.reason === 'string' ? body.reason.trim() : '';
+        if (!VALID_REASONS.has(reason)) {
+          return errorResponse('Motivo de merma inválido.', 400);
+        }
+
+        const product = await env.DB.prepare(
+          'SELECT id, name, category, unit, stock, price_cents, last_cost_cents FROM products WHERE id = ? AND negocio_id = ?'
+        )
+          .bind(productId, auth.negocioId)
+          .first<{
+            id: string;
+            name: string;
+            category?: string | null;
+            unit?: string | null;
+            stock: number;
+            price_cents: number;
+            last_cost_cents?: number | null;
+          }>();
+
+        if (!product) {
+          return errorResponse('Producto no encontrado en tu negocio.', 404);
+        }
+
+        const currentStock = Number(product.stock || 0);
+        if (rawQty > currentStock) {
+          return errorResponse(
+            `Stock insuficiente para "${product.name}": disponible ${currentStock}, solicitado ${rawQty}.`,
+            400
+          );
+        }
+
+        const priceCents = Math.max(0, Math.round(Number(product.price_cents || 0)));
+        const hasPurchaseCost = typeof product.last_cost_cents === 'number' && product.last_cost_cents > 0;
+        const unitCostCents = hasPurchaseCost
+          ? Math.round(product.last_cost_cents as number)
+          : Math.round(priceCents * 0.7);
+        const costSource = hasPurchaseCost ? 'purchase' : 'estimated_fallback';
+        const totalCostLossCents = unitCostCents * rawQty;
+        const retailValueCents = priceCents * rawQty;
+        const notes =
+          typeof body.notes === 'string' && body.notes.trim()
+            ? body.notes.trim().slice(0, 250)
+            : null;
+        const shrinkageId = `shk-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+        const createdAt = new Date().toISOString();
+        const createdByName = auth.user.displayName || auth.user.email;
+
+        await env.DB.batch([
+          env.DB.prepare(
+            `INSERT INTO inventory_shrinkage (
+              id, negocio_id, product_id, product_name, category, unit, quantity,
+              unit_cost_cents, total_cost_loss_cents, retail_value_cents, cost_source,
+              reason, notes, created_by_uid, created_by_name, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          ).bind(
+            shrinkageId,
+            auth.negocioId,
+            product.id,
+            product.name,
+            product.category || 'General',
+            product.unit || 'unidad',
+            rawQty,
+            unitCostCents,
+            totalCostLossCents,
+            retailValueCents,
+            costSource,
+            reason,
+            notes,
+            auth.user.id,
+            createdByName,
+            createdAt
+          ),
+          env.DB.prepare(
+            "UPDATE products SET stock = stock - ?, updated_at = datetime('now') WHERE id = ? AND negocio_id = ?"
+          ).bind(rawQty, product.id, auth.negocioId),
+        ]);
+
+        const created = await env.DB.prepare(
+          'SELECT * FROM inventory_shrinkage WHERE id = ? AND negocio_id = ?'
+        )
+          .bind(shrinkageId, auth.negocioId)
+          .first<any>();
+
+        return jsonResponse(
+          {
+            ...(created || {
+              id: shrinkageId,
+              negocio_id: auth.negocioId,
+              product_id: product.id,
+              product_name: product.name,
+              category: product.category || 'General',
+              unit: product.unit || 'unidad',
+              quantity: rawQty,
+              unit_cost_cents: unitCostCents,
+              total_cost_loss_cents: totalCostLossCents,
+              retail_value_cents: retailValueCents,
+              cost_source: costSource,
+              reason,
+              notes,
+              created_by_uid: auth.user.id,
+              created_by_name: createdByName,
+              created_at: createdAt,
+            }),
+            updated_stock: Math.max(0, currentStock - rawQty),
+          },
+          201
+        );
+      }
+
+      if (method === 'DELETE' && path.startsWith('/shrinkage/')) {
+        if (auth.user.role !== 'admin' && auth.user.role !== 'manager') {
+          return errorResponse('Solo administradores y gerentes pueden revertir bajas de inventario.', 403);
+        }
+
+        const shrinkageId = decodeURIComponent(path.replace(/^\/shrinkage\//, ''));
+        if (!shrinkageId || shrinkageId === 'summary') {
+          return errorResponse('ID de merma inválido.', 400);
+        }
+
+        const existing = await env.DB.prepare(
+          'SELECT * FROM inventory_shrinkage WHERE id = ? AND negocio_id = ?'
+        )
+          .bind(shrinkageId, auth.negocioId)
+          .first<{ id: string; product_id: string; quantity: number }>();
+
+        if (!existing) {
+          return errorResponse('Registro de merma no encontrado.', 404);
+        }
+
+        await env.DB.batch([
+          env.DB.prepare('DELETE FROM inventory_shrinkage WHERE id = ? AND negocio_id = ?').bind(
+            shrinkageId,
+            auth.negocioId
+          ),
+          env.DB.prepare(
+            "UPDATE products SET stock = stock + ?, updated_at = datetime('now') WHERE id = ? AND negocio_id = ?"
+          ).bind(existing.quantity, existing.product_id, auth.negocioId),
+        ]);
+
+        return jsonResponse({
+          success: true,
+          deletedId: shrinkageId,
+          restored_stock_units: existing.quantity,
+          product_id: existing.product_id,
+        });
       }
     }
 

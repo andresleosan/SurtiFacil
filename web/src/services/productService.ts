@@ -24,6 +24,7 @@ export interface NewProductInput {
   visible_tienda?: boolean | number;
   en_oferta?: boolean | number;
   precio_oferta_cents?: number;
+  expiration_date?: string | null;
 }
 
 export type ProductsListener = (products: Product[]) => void;
@@ -55,6 +56,7 @@ function mapProduct(row: any): Product {
     last_cost_cents: row.last_cost_cents ?? undefined,
     last_cost_source: row.last_cost_source || undefined,
     last_cost_updated_at: row.last_cost_updated_at || undefined,
+    expiration_date: row.expiration_date || undefined,
   };
 }
 
@@ -149,11 +151,18 @@ export async function addProduct(input: NewProductInput): Promise<Product> {
     visible_tienda: input.visible_tienda !== undefined ? (input.visible_tienda ? 1 : 0) : 1,
     en_oferta: input.en_oferta ? 1 : 0,
     precio_oferta_cents: input.precio_oferta_cents ?? null,
+    expiration_date: input.expiration_date?.trim() || null,
     ...(input.barcode ? { barcode: input.barcode } : {}),
   };
 
   if (isMockMode()) {
-    const product: Product = { id: `prod-${Date.now()}`, ...payload, barcode: payload.barcode ?? undefined, image_url: payload.image_url ?? undefined };
+    const product: Product = {
+      id: `prod-${Date.now()}`,
+      ...payload,
+      barcode: payload.barcode ?? undefined,
+      image_url: payload.image_url ?? undefined,
+      expiration_date: payload.expiration_date ?? undefined,
+    };
     mockProducts.push(product);
     emitMock();
     return product;
@@ -183,12 +192,23 @@ export async function updateProduct(product: Product): Promise<void> {
     visible_tienda: product.visible_tienda !== undefined ? (product.visible_tienda ? 1 : 0) : 1,
     en_oferta: product.en_oferta !== undefined ? (product.en_oferta ? 1 : 0) : 0,
     precio_oferta_cents: product.precio_oferta_cents ?? null,
+    ...(product.expiration_date !== undefined
+      ? { expiration_date: product.expiration_date?.trim() || null }
+      : {}),
   };
 
   if (isMockMode()) {
     const index = mockProducts.findIndex((candidate) => candidate.id === product.id);
     if (index >= 0) {
-      mockProducts[index] = { ...mockProducts[index], ...changes, barcode: changes.barcode ?? undefined, image_url: changes.image_url ?? undefined };
+      mockProducts[index] = {
+        ...mockProducts[index],
+        ...changes,
+        barcode: changes.barcode ?? undefined,
+        image_url: changes.image_url ?? undefined,
+        ...(product.expiration_date !== undefined
+          ? { expiration_date: changes.expiration_date ?? undefined }
+          : {}),
+      };
     }
     emitMock();
     return;

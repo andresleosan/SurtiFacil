@@ -123,6 +123,7 @@ export async function ensureDatabaseSchema(db: D1Database, force = false): Promi
       last_cost_cents INTEGER,
       last_cost_source TEXT,
       last_cost_updated_at TEXT,
+      expiration_date TEXT,
       created_at TEXT DEFAULT (datetime('now')),
       updated_at TEXT DEFAULT (datetime('now'))
     )`
@@ -310,6 +311,28 @@ export async function ensureDatabaseSchema(db: D1Database, force = false): Promi
     )`
   );
 
+  await safeRun(
+    db,
+    `CREATE TABLE IF NOT EXISTS inventory_shrinkage (
+      id TEXT PRIMARY KEY,
+      negocio_id TEXT NOT NULL DEFAULT 'surtifacil',
+      product_id TEXT NOT NULL,
+      product_name TEXT NOT NULL,
+      category TEXT,
+      unit TEXT DEFAULT 'unidad',
+      quantity INTEGER NOT NULL,
+      unit_cost_cents INTEGER NOT NULL,
+      total_cost_loss_cents INTEGER NOT NULL,
+      retail_value_cents INTEGER NOT NULL DEFAULT 0,
+      cost_source TEXT NOT NULL DEFAULT 'purchase',
+      reason TEXT NOT NULL DEFAULT 'damaged',
+      notes TEXT,
+      created_by_uid TEXT NOT NULL DEFAULT 'system',
+      created_by_name TEXT,
+      created_at TEXT DEFAULT (datetime('now'))
+    )`
+  );
+
   // 2. Migrar columnas faltantes en tablas preexistentes de Fase 1
   const alterColumns = [
     // users
@@ -333,6 +356,7 @@ export async function ensureDatabaseSchema(db: D1Database, force = false): Promi
     'ALTER TABLE products ADD COLUMN last_cost_cents INTEGER',
     'ALTER TABLE products ADD COLUMN last_cost_source TEXT',
     'ALTER TABLE products ADD COLUMN last_cost_updated_at TEXT',
+    'ALTER TABLE products ADD COLUMN expiration_date TEXT',
     "ALTER TABLE products ADD COLUMN updated_at TEXT DEFAULT (datetime('now'))",
     // suppliers
     "ALTER TABLE suppliers ADD COLUMN negocio_id TEXT NOT NULL DEFAULT 'surtifacil'",
@@ -509,7 +533,27 @@ export async function ensureDatabaseSchema(db: D1Database, force = false): Promi
     "UPDATE products SET negocio_id = 'surtifacil', visible_kiosco = 1, visible_tienda = 1 WHERE negocio_id IS NULL OR negocio_id = ''"
   );
 
-  const seedProducts = [
+  const futureIsoDate = (daysFromNow: number): string => {
+    const d = new Date();
+    d.setDate(d.getDate() + daysFromNow);
+    return d.toISOString().slice(0, 10);
+  };
+
+  const seedProducts: Array<{
+    id: string;
+    name: string;
+    price_cents: number;
+    stock: number;
+    min_stock: number;
+    unit: string;
+    category: string;
+    barcode: string;
+    image_url: string;
+    en_oferta: number;
+    precio_oferta_cents: number | null;
+    last_cost_cents: number;
+    expiration_date?: string | null;
+  }> = [
     {
       id: 'prod-leche-alqueria-1l',
       name: 'Leche Entera Alquería 1L',
@@ -523,6 +567,7 @@ export async function ensureDatabaseSchema(db: D1Database, force = false): Promi
       en_oferta: 1,
       precio_oferta_cents: 420000,
       last_cost_cents: 340000,
+      expiration_date: futureIsoDate(3),
     },
     {
       id: 'prod-arroz-diana-1lb',
@@ -579,6 +624,7 @@ export async function ensureDatabaseSchema(db: D1Database, force = false): Promi
       en_oferta: 0,
       precio_oferta_cents: null,
       last_cost_cents: 290000,
+      expiration_date: futureIsoDate(6),
     },
     {
       id: 'prod-quesito-antioqueno-400g',
@@ -593,6 +639,7 @@ export async function ensureDatabaseSchema(db: D1Database, force = false): Promi
       en_oferta: 0,
       precio_oferta_cents: null,
       last_cost_cents: 760000,
+      expiration_date: futureIsoDate(5),
     },
     {
       id: 'prod-aceite-gourmet-1l',
@@ -733,6 +780,7 @@ export async function ensureDatabaseSchema(db: D1Database, force = false): Promi
       en_oferta: 0,
       precio_oferta_cents: null,
       last_cost_cents: 220000,
+      expiration_date: futureIsoDate(2),
     },
   ];
 
@@ -741,13 +789,14 @@ export async function ensureDatabaseSchema(db: D1Database, force = false): Promi
       db,
       `INSERT INTO products (
         id, negocio_id, name, price_cents, stock, min_stock, unit, category, image_url, barcode,
-        visible_kiosco, visible_tienda, en_oferta, precio_oferta_cents, last_cost_cents, last_cost_source, created_at, updated_at
-      ) VALUES (?, 'surtifacil', ?, ?, ?, ?, ?, ?, ?, ?, 1, 1, ?, ?, ?, 'purchase', datetime('now'), datetime('now'))
+        visible_kiosco, visible_tienda, en_oferta, precio_oferta_cents, last_cost_cents, last_cost_source, expiration_date, created_at, updated_at
+      ) VALUES (?, 'surtifacil', ?, ?, ?, ?, ?, ?, ?, ?, 1, 1, ?, ?, ?, 'purchase', ?, datetime('now'), datetime('now'))
       ON CONFLICT(id) DO UPDATE SET
         image_url = excluded.image_url,
         price_cents = excluded.price_cents,
         category = excluded.category,
         barcode = excluded.barcode,
+        expiration_date = COALESCE(products.expiration_date, excluded.expiration_date),
         updated_at = datetime('now')`,
       [
         p.id,
@@ -762,6 +811,7 @@ export async function ensureDatabaseSchema(db: D1Database, force = false): Promi
         p.en_oferta,
         p.precio_oferta_cents,
         p.last_cost_cents,
+        p.expiration_date ?? null,
       ]
     );
   }

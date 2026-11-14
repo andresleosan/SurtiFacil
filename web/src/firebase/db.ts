@@ -20,6 +20,7 @@ export interface Product {
   visible_tienda?: boolean | number;
   en_oferta?: boolean | number;
   precio_oferta_cents?: number | null;
+  expiration_date?: string | null;
 }
 
 /**

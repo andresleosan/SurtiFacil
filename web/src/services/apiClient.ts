@@ -199,7 +199,8 @@ export type DataEntity =
   | 'combos'
   | 'settings'
   | 'cash-closings'
-  | 'cash-expenses';
+  | 'cash-expenses'
+  | 'shrinkage';
 
 const eventBus = new EventTarget();
 

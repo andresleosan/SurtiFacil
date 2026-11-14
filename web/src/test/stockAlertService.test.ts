@@ -1,5 +1,13 @@
 import { describe, it, expect } from 'vitest';
-import { checkLowStock, getStockAlertCount, getCriticalAlertCount } from '../services/stockAlertService';
+import {
+  checkLowStock,
+  getStockAlertCount,
+  getCriticalAlertCount,
+  checkExpiringProducts,
+  getExpiringAlertCount,
+  getDaysUntilExpiration,
+  isFruverOrDairyCategory,
+} from '../services/stockAlertService';
 import { Product } from '../firebase/db';
 
 const makeProduct = (id: string, name: string, stock: number, category?: string): Product => ({
@@ -105,6 +113,51 @@ describe('stockAlertService', () => {
         makeProduct('2', 'Producto', 5),
       ];
       expect(getCriticalAlertCount(noCritical)).toBe(0);
+    });
+  });
+
+  describe('checkExpiringProducts & alertas de vencimiento', () => {
+    const refDate = new Date(2026, 10, 10, 14, 0, 0); // 2026-11-10 local
+
+    it('clasifica vencidos, urgentes (<=3d), próximos (<=7d), ignora sin stock o fecha lejana y ordena por urgencia', () => {
+      const catalog: Product[] = [
+        { ...makeProduct('p-leche', 'Leche Entera 1L', 12, 'Lácteos y Huevos'), price_cents: 450000, last_cost_cents: 340000, expiration_date: '2026-11-12' }, // +2d urgent
+        { ...makeProduct('p-aguacate', 'Aguacate Hass', 5, 'Frutas y Verduras'), price_cents: 350000, last_cost_cents: 220000, expiration_date: '2026-11-08' }, // -2d expired
+        { ...makeProduct('p-queso', 'Quesito 400g', 4, 'Lácteos'), price_cents: 980000, expiration_date: '2026-11-16' }, // +6d upcoming, no last_cost_cents -> 70%
+        { ...makeProduct('p-cero', 'Yogur Vencido Sin Stock', 0, 'Lácteos'), expiration_date: '2026-11-09' }, // ignored stock 0
+        { ...makeProduct('p-arroz', 'Arroz Diana', 50, 'Granos'), expiration_date: '2026-12-20' }, // > 7d ignored
+        { ...makeProduct('p-invalido', 'Dato Malo', 10, 'Otros'), expiration_date: 'not-a-date' }, // ignored invalid
+      ];
+
+      const alerts = checkExpiringProducts(catalog, 7, refDate);
+      expect(alerts).toHaveLength(3);
+
+      expect(alerts[0].productId).toBe('p-aguacate');
+      expect(alerts[0].severity).toBe('expired');
+      expect(alerts[0].daysUntilExpiry).toBe(-2);
+      expect(alerts[0].estimatedValueAtRiskCents).toBe(5 * 220000);
+
+      expect(alerts[1].productId).toBe('p-leche');
+      expect(alerts[1].severity).toBe('urgent');
+      expect(alerts[1].daysUntilExpiry).toBe(2);
+      expect(alerts[1].estimatedValueAtRiskCents).toBe(12 * 340000);
+
+      expect(alerts[2].productId).toBe('p-queso');
+      expect(alerts[2].severity).toBe('upcoming');
+      expect(alerts[2].daysUntilExpiry).toBe(6);
+      expect(alerts[2].estimatedValueAtRiskCents).toBe(4 * Math.round(980000 * 0.7));
+
+      expect(getExpiringAlertCount(catalog, 7, refDate)).toBe(3);
+    });
+
+    it('calcula días hasta vencimiento exactos y detecta categorías Fruver/Lácteos', () => {
+      const refDate = new Date(2026, 10, 10, 23, 55, 0);
+      expect(getDaysUntilExpiration('2026-11-10', refDate)).toBe(0);
+      expect(getDaysUntilExpiration('2026-11-11', refDate)).toBe(1);
+      expect(getDaysUntilExpiration('invalid', refDate)).toBeNull();
+      expect(isFruverOrDairyCategory('Frutas y Verduras')).toBe(true);
+      expect(isFruverOrDairyCategory('Lácteos y Huevos')).toBe(true);
+      expect(isFruverOrDairyCategory('Aseo y Hogar')).toBe(false);
     });
   });
 });

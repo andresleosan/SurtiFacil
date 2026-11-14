@@ -1,10 +1,18 @@
 import { useEffect, useState } from 'react';
 import { Product } from '../firebase/db';
 import { getProducts } from '../services/saleService';
-import { StockAlert, checkLowStock, getStockAlertCount, getCriticalAlertCount } from '../services/stockAlertService';
+import {
+  StockAlert,
+  ExpirationAlert,
+  checkLowStock,
+  checkExpiringProducts,
+  getCriticalAlertCount,
+} from '../services/stockAlertService';
+import { formatCentsCOP } from '../utils/currency';
 
 const StockAlerts = () => {
   const [alerts, setAlerts] = useState<StockAlert[]>([]);
+  const [expiringAlerts, setExpiringAlerts] = useState<ExpirationAlert[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [threshold, setThreshold] = useState(10);
@@ -19,7 +27,9 @@ const StockAlerts = () => {
       setError(null);
       const products = await getProducts();
       const stockAlerts = checkLowStock(products, threshold);
+      const expiring = checkExpiringProducts(products, 7);
       setAlerts(stockAlerts);
+      setExpiringAlerts(expiring);
     } catch {
       console.error('Error loading alerts.');
       setError('No se pudieron cargar las alertas de stock.');
@@ -131,6 +141,59 @@ const StockAlerts = () => {
               </div>
             </div>
           ))}
+        </div>
+      )}
+
+      {expiringAlerts.length > 0 && (
+        <div className="mt-5 border-t border-gray-200 pt-4">
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+            <h4 className="flex items-center gap-2 text-base font-bold text-sf-text">
+              <span>⏰</span> Alertas de Vencimiento (Fruver y Perecederos ≤ 7 días)
+            </h4>
+            <span className="rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-semibold text-amber-800 tabular-nums">
+              {expiringAlerts.length} por revisar
+            </span>
+          </div>
+          <div className="space-y-2">
+            {expiringAlerts.map((item) => {
+              const isExpired = item.severity === 'expired';
+              const isUrgent = item.severity === 'urgent';
+              const styleClass = isExpired
+                ? 'bg-red-100 border-red-400 text-red-900'
+                : isUrgent
+                ? 'bg-orange-100 border-orange-400 text-orange-900'
+                : 'bg-amber-50 border-amber-300 text-amber-900';
+              const daysLabel =
+                item.daysUntilExpiry < 0
+                  ? `Vencido hace ${Math.abs(item.daysUntilExpiry)}d`
+                  : item.daysUntilExpiry === 0
+                  ? 'Vence hoy'
+                  : `Vence en ${item.daysUntilExpiry}d`;
+
+              return (
+                <div
+                  key={`exp-${item.productId}`}
+                  className={`flex items-center justify-between rounded-lg border p-3 ${styleClass}`}
+                >
+                  <div>
+                    <p className="font-medium">{item.productName}</p>
+                    <p className="text-xs opacity-80">
+                      {item.category ? `${item.category} · ` : ''}Vence: {item.expirationDate} ·{' '}
+                      <span className="font-semibold">{daysLabel}</span>
+                    </p>
+                  </div>
+                  <div className="text-right tabular-nums">
+                    <p className="font-bold">
+                      {item.stock} {item.unit || 'uds'}
+                    </p>
+                    <p className="text-xs opacity-80">
+                      En riesgo: {formatCentsCOP(item.estimatedValueAtRiskCents)}
+                    </p>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
         </div>
       )}
     </div>

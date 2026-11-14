@@ -34,6 +34,15 @@ async function setupProductionE2EHarness(page: Page) {
   const adminEmail = 'andres.san1404@gmail.com';
   const idToken = createFakeFirebaseJwt(adminUid, adminEmail);
 
+  const futureDayIso = (deltaDays: number) => {
+    const d = new Date();
+    d.setDate(d.getDate() + deltaDays);
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  };
+
   // Estado autoritativo multi-tenant en memoria para la sesión E2E
   const products = [
     {
@@ -50,6 +59,7 @@ async function setupProductionE2EHarness(page: Page) {
       visible_kiosco: 1,
       visible_tienda: 1,
       en_oferta: 0,
+      expiration_date: futureDayIso(3),
     },
     {
       id: 'prod-arroz-1',
@@ -81,6 +91,7 @@ async function setupProductionE2EHarness(page: Page) {
       visible_kiosco: 1,
       visible_tienda: 1,
       en_oferta: 0,
+      expiration_date: futureDayIso(1),
     },
   ];
 
@@ -131,6 +142,7 @@ async function setupProductionE2EHarness(page: Page) {
   const sales: Array<Record<string, any>> = [];
   const cashClosings: Array<Record<string, any>> = [];
   let cashExpenses: Array<Record<string, any>> = [];
+  let shrinkageEntries: Array<Record<string, any>> = [];
 
   let storeSettings = {
     id: 'surtifacil',
@@ -552,6 +564,65 @@ async function setupProductionE2EHarness(page: Page) {
       const expenseId = decodeURIComponent(pathname.replace('/cash-expenses/', ''));
       cashExpenses = cashExpenses.filter((e) => e.id !== expenseId);
       return jsonResponse({ success: true, deletedId: expenseId });
+    }
+
+    // Mermas, Averías y Vencimientos
+    if (pathname === '/shrinkage' && method === 'GET') {
+      return jsonResponse(shrinkageEntries);
+    }
+    if (pathname === '/shrinkage/summary' && method === 'GET') {
+      const totalUnits = shrinkageEntries.reduce((s, e) => s + Number(e.quantity || 0), 0);
+      const totalCostLossCents = shrinkageEntries.reduce((s, e) => s + Number(e.total_cost_loss_cents || 0), 0);
+      return jsonResponse({
+        total_records: shrinkageEntries.length,
+        total_units: totalUnits,
+        total_cost_loss_cents: totalCostLossCents,
+        total_retail_value_cents: shrinkageEntries.reduce((s, e) => s + Number(e.retail_value_cents || 0), 0),
+        by_reason: {},
+      });
+    }
+    if (pathname === '/shrinkage' && method === 'POST') {
+      const targetProd = products.find((p) => p.id === body.product_id);
+      if (!targetProd) {
+        return jsonResponse({ error: 'Producto no encontrado.' }, 404);
+      }
+      const qty = Math.floor(Number(body.quantity || 0));
+      if (qty <= 0 || qty > targetProd.stock) {
+        return jsonResponse({ error: 'Stock insuficiente o cantidad inválida.' }, 400);
+      }
+      const unitCostCents = targetProd.last_cost_cents ?? Math.round(targetProd.price_cents * 0.7);
+      targetProd.stock -= qty;
+      const created = {
+        id: `shk-e2e-${Date.now()}`,
+        negocio_id: 'surtifacil',
+        product_id: targetProd.id,
+        product_name: targetProd.name,
+        category: targetProd.category,
+        unit: targetProd.unit,
+        quantity: qty,
+        unit_cost_cents: unitCostCents,
+        total_cost_loss_cents: unitCostCents * qty,
+        retail_value_cents: targetProd.price_cents * qty,
+        cost_source: 'purchase',
+        reason: body.reason || 'damaged',
+        notes: body.notes || null,
+        created_by_uid: adminUid,
+        created_by_name: 'Andrés Sánchez',
+        created_at: new Date().toISOString(),
+        updated_stock: targetProd.stock,
+      };
+      shrinkageEntries.unshift(created);
+      return jsonResponse(created, 201);
+    }
+    if (pathname.startsWith('/shrinkage/') && method === 'DELETE') {
+      const shkId = decodeURIComponent(pathname.replace('/shrinkage/', ''));
+      const entry = shrinkageEntries.find((s) => s.id === shkId);
+      if (entry) {
+        const prod = products.find((p) => p.id === entry.product_id);
+        if (prod) prod.stock += Number(entry.quantity || 0);
+        shrinkageEntries = shrinkageEntries.filter((s) => s.id !== shkId);
+      }
+      return jsonResponse({ success: true, deletedId: shkId });
     }
 
     // Arqueo y Cierre de Caja COP
@@ -1133,5 +1204,62 @@ test.describe('Suite E2E de Certificación de Producción — SurtiFácil SaaS',
     await expect(
       detailDialog.getByRole('button', { name: /Ver tirilla térmica del abono de \$5\.000/i }),
     ).toBeVisible();
+  });
+
+  test('9. Control de Mermas, Averías y Alertas de Vencimiento en Fruver y Bodega (#/inventory)', async ({ page }) => {
+    await setupProductionE2EHarness(page);
+
+    await page.goto('/#/login');
+    await page.getByLabel('Correo electrónico').fill('andres.san1404@gmail.com');
+    await page.getByLabel('Contraseña').fill('TestPass123!');
+    await page.getByRole('button', { name: 'Iniciar Sesión' }).click();
+
+    await page.goto('/#/inventory');
+    await expect(page.getByText(/2 productos próximos a vencer o vencidos/i)).toBeVisible();
+    await expect(page.getByText('Aguacate Hass Maduro')).toBeVisible();
+    await expect(page.getByText('Vence en 1d').first()).toBeVisible();
+
+    // Filtrar por vencer
+    await page.getByRole('button', { name: /Filtrar por vencer \(2\)/i }).click();
+    await expect(page.getByText('Aguacate Hass Maduro')).toBeVisible();
+    await expect(page.getByText('Arroz Diana 1kg')).not.toBeVisible();
+    await page.getByRole('button', { name: /Mostrar todos/i }).click();
+    await expect(page.getByText('Arroz Diana 1kg')).toBeVisible();
+
+    // Abrir modal de Mermas y Averías
+    await page.getByRole('button', { name: /Mermas y Averías/i }).click();
+    const shrinkageDialog = page.getByRole('dialog', {
+      name: /Control de Mermas, Averías y Vencimientos/i,
+    });
+    await expect(shrinkageDialog).toBeVisible();
+
+    await shrinkageDialog.locator('#shrinkage-product').selectOption('prod-aguacate-1');
+    await shrinkageDialog.getByRole('button', { name: /Daño Fruver \/ Maduración/i }).click();
+    await shrinkageDialog.getByRole('button', { name: '2', exact: true }).click();
+    await shrinkageDialog.getByLabel(/Observación \/ Detalle/i).fill('Aguacate pasado en exhibidor');
+
+    await shrinkageDialog.getByRole('button', { name: /Registrar Baja de Inventario/i }).click();
+
+    await expect(shrinkageDialog.getByRole('status')).toHaveText(
+      /Baja registrada: -2 libra de Aguacate Hass Maduro/i,
+    );
+    await expect(shrinkageDialog.getByText(/−\$ 4\.800/)).toBeVisible();
+
+    // Cerrar y verificar stock actualizado en inventario (25 -> 23)
+    await shrinkageDialog.getByRole('button', { name: 'Cerrar', exact: true }).last().click();
+    await expect(shrinkageDialog).not.toBeVisible();
+    await expect(page.getByText(/^23$/).or(page.getByText(/23\s*uds\./i)).first()).toBeVisible();
+
+    // Reabrir y revertir merma en 2 toques restaurando stock (23 -> 25)
+    await page.getByRole('button', { name: /Registrar merma de Aguacate Hass Maduro/i }).click();
+    const dialogAfter = page.getByRole('dialog', {
+      name: /Control de Mermas, Averías y Vencimientos/i,
+    });
+    await expect(dialogAfter).toBeVisible();
+    await dialogAfter.getByRole('button', { name: /Revertir merma de Aguacate Hass Maduro/i }).click();
+    await dialogAfter.getByRole('button', { name: /Devolver \+2/i }).click();
+    await expect(dialogAfter.getByRole('status')).toHaveText(/Merma revertida/i);
+    await dialogAfter.getByRole('button', { name: 'Cerrar', exact: true }).last().click();
+    await expect(page.getByText(/^25$/).or(page.getByText(/25\s*uds\./i)).first()).toBeVisible();
   });
 });

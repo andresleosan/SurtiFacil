@@ -89,6 +89,7 @@ CREATE TABLE IF NOT EXISTS products (
   last_cost_cents INTEGER,
   last_cost_source TEXT CHECK(last_cost_source IN ('purchase', 'fallback_price')),
   last_cost_updated_at TEXT,
+  expiration_date TEXT, -- ISO YYYY-MM-DD para alertas de vencimiento en Fruver/Lácteos
   created_at TEXT DEFAULT (datetime('now')),
   updated_at TEXT DEFAULT (datetime('now'))
 );
@@ -284,6 +285,28 @@ CREATE TABLE IF NOT EXISTS cash_expenses (
 );
 
 CREATE INDEX IF NOT EXISTS idx_cash_expenses_negocio_date ON cash_expenses(negocio_id, created_at DESC);
+
+-- 10.3 Tabla de Mermas, Averías y Bajas de Inventario
+CREATE TABLE IF NOT EXISTS inventory_shrinkage (
+  id TEXT PRIMARY KEY,
+  negocio_id TEXT NOT NULL DEFAULT 'surtifacil' REFERENCES negocios(id) ON DELETE CASCADE,
+  product_id TEXT NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+  product_name TEXT NOT NULL,
+  category TEXT,
+  unit TEXT DEFAULT 'unidad',
+  quantity INTEGER NOT NULL,
+  unit_cost_cents INTEGER NOT NULL,
+  total_cost_loss_cents INTEGER NOT NULL,
+  retail_value_cents INTEGER NOT NULL DEFAULT 0,
+  cost_source TEXT NOT NULL DEFAULT 'purchase' CHECK(cost_source IN ('purchase', 'estimated_fallback')),
+  reason TEXT NOT NULL CHECK(reason IN ('damaged', 'expired', 'spoiled_fruver', 'internal_use', 'other')),
+  notes TEXT,
+  created_by_uid TEXT NOT NULL DEFAULT 'system',
+  created_by_name TEXT,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_inventory_shrinkage_negocio_date ON inventory_shrinkage(negocio_id, created_at DESC);
 
 -- ==============================================================================
 -- 11. Semillas Iniciales (Negocio Insignia y SuperAdmin de la Plataforma)

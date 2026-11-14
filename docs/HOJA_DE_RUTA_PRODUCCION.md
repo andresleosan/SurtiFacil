@@ -432,9 +432,23 @@ Para maximizar la eficiencia de tokens y la precisión de razonamiento en cada s
        - **Build de Producción:** `npm run build:web` (`tsc && vite build`) completado sin errores en 5.80 s con Service Worker y 69 entradas en precaché PWA.
        - **Playwright E2E:** 28/28 pruebas activas aprobadas en verde (7 opcionales dependientes de credenciales QA omitidas según configuración), validando en [`qa/e2e/saas-production.spec.ts`](../qa/e2e/saas-production.spec.ts) el registro de un gasto de `$ 20.000` en Caja Menor y su descuento automático en el Arqueo de Caja COP.
 
-- [ ] **Tarea 25 — Control de Mermas, Averías y Alertas de Vencimiento en Bodega y Fruver (`ShrinkageModal.tsx`, `Inventory.tsx` y `/api/shrinkage`):**
+- [x] **Tarea 25 — Control de Mermas, Averías y Alertas de Vencimiento en Bodega y Fruver (`ShrinkageModal.tsx`, `Inventory.tsx` y `/api/shrinkage`):**
   - **Nivel Recomendado:** `3.8 Flash (Medium)`
   - **Objetivo:** Permitir al tendero y gerente dar de baja mercancía dañada, vencida o consumida internamente con descuento atómico de stock en D1, registro de pérdida al costo (`last_cost_cents`) y alertas de vencimiento próximo en Fruver y Lácteos.
+  - **Completado (Evidencia Técnica Verificada):**
+    1. **Esquema D1 y Auto-Migración (`docs/schema-d1.sql`, `web/functions/_lib/dbSchema.ts`):**
+       - Añadida columna `expiration_date` (`YYYY-MM-DD`) en la tabla `products` y migración idempotente `ALTER TABLE products ADD COLUMN expiration_date TEXT`, sembrando fechas de vencimiento iniciales en perecederos Fruver y Lácteos (`prod-leche-alqueria-1l`, `prod-aguacate-hass`, `prod-arepas-antioquenas-x10`, `prod-quesito-antioqueno-400g`).
+       - Creada tabla multi-tenant `inventory_shrinkage` e índice `idx_inventory_shrinkage_negocio_date` para registrar motivo, unidades dadas de baja, costo unitario (`last_cost_cents` o fallback 70%), pérdida total al costo y valor PVP dejado de percibir.
+    2. **API REST Serverless y Reglas de Integridad (`web/functions/api/[[route]].ts`):**
+       - Endpoints `GET /api/shrinkage`, `GET /api/shrinkage/summary`, `POST /api/shrinkage` y `DELETE /api/shrinkage/:id` estrictamente aislados por `negocio_id` y protegidos por RBAC (bloqueo `403` para rol `cashier` en altas/reversiones).
+       - Descuento y reversión atómicos de inventario mediante `env.DB.batch([...])`, validación de stock suficiente y cálculo autoritativo de pérdida al costo en servidor, además de soporte para fijar/limpiar `expiration_date` en `POST /api/products` y `PUT /api/products/:id`.
+    3. **Alertas de Vencimiento, Servicio e Interfaz Táctil (`stockAlertService.ts`, `shrinkage.ts`, `shrinkageService.ts`, `ShrinkageModal.tsx`, `Inventory.tsx`, `AddProductModal.tsx`, `StockAlerts.tsx`):**
+       - Extendido `stockAlertService.ts` con `checkExpiringProducts`, `getExpiringAlertCount`, `getDaysUntilExpiration` e `isFruverOrDairyCategory` y renderizado en `StockAlerts.tsx` e `Inventory.tsx` (banner de capital en riesgo COP, badges `Vencido` / `Vence hoy` / `Vence en Xd`, filtro rápido `⏰ Por Vencer` y campo de fecha en alta/edición de productos).
+       - Implementado `<ShrinkageModal />` accesible (`min-h-[44px]`, formato `formatCentsCOP`) con tarjetas de resumen, chips de perecederos próximos a vencer, 5 motivos táctiles, previsualización de pérdida al costo en tiempo real y reversión en 2 toques sin `window.confirm`.
+    4. **100% de Pruebas en Verde:**
+       - **Vitest:** 58 archivos de prueba y 442 tests aprobados al 100% (incluyendo [`web/src/test/shrinkage.test.tsx`](../web/src/test/shrinkage.test.tsx), pruebas ampliadas en [`web/src/test/stockAlertService.test.ts`](../web/src/test/stockAlertService.test.ts) y pruebas D1 en [`web/src/test/apiFunctions.test.ts`](../web/src/test/apiFunctions.test.ts)).
+       - **Build de Producción:** `npm run build:web` (`tsc && vite build`) completado sin errores en 11.06 s con Service Worker y 69 entradas en precaché PWA.
+       - **Playwright E2E:** 29 pruebas aprobadas y 7 condicionales sin credenciales omitidas (0 fallos), validando en [`qa/e2e/saas-production.spec.ts`](../qa/e2e/saas-production.spec.ts) las alertas de vencimiento en `#/inventory`, filtrado `Por vencer`, registro de merma Fruver con cálculo de costo COP y reversión atómica en 2 toques.
 
 - [ ] **Tarea 26 — Promociones Mayoristas / Descuentos por Volumen ("Lleva 3+ a Precio Especial") en POS, Kiosco iPad y Tienda Vecinal:**
   - **Nivel Recomendado:** `Argon (Low)`

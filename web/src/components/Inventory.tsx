@@ -5,11 +5,16 @@ import { useIsMobile } from '../hooks/useMediaQuery';
 import { useBarcode } from '../hooks/useBarcode';
 import { useHasRole } from '../auth/CurrentUserContext';
 import { addProduct, deleteProduct, updateProduct, type NewProductInput } from '../services/productService';
-import { getStockAlertCount } from '../services/stockAlertService';
+import {
+  checkExpiringProducts,
+  getDaysUntilExpiration,
+  getStockAlertCount,
+} from '../services/stockAlertService';
 import { getCombos, createCombo, updateCombo, deleteCombo, subscribeToCombos } from '../services/comboService';
 import { Combo, ComboItem, NewComboInput } from '../types/combo';
 import AddProductModal from './AddProductModal';
 import BarcodeScanner from './BarcodeScanner';
+import { ShrinkageModal } from './ShrinkageModal';
 import { Icon } from './ui/Icon';
 import { Modal } from './ui/Modal';
 import { PageHeader } from './ui/PageHeader';
@@ -20,6 +25,48 @@ import { ProductPhotoUploader } from './ui/ProductPhotoUploader';
 
 const formatPrice = (cents: number) => `$${(cents / 100).toFixed(0)}`;
 
+function getExpirationBadge(expirationDate?: string | null): {
+  label: string;
+  chipClass: string;
+  urgent: boolean;
+} | null {
+  const days = getDaysUntilExpiration(expirationDate);
+  if (days === null) return null;
+  if (days < 0) {
+    return {
+      label: `Vencido (${Math.abs(days)}d)`,
+      chipClass: 'bg-red-100 text-red-800 border border-red-300',
+      urgent: true,
+    };
+  }
+  if (days === 0) {
+    return {
+      label: 'Vence hoy',
+      chipClass: 'bg-red-100 text-red-800 border border-red-300',
+      urgent: true,
+    };
+  }
+  if (days <= 3) {
+    return {
+      label: `Vence en ${days}d`,
+      chipClass: 'bg-orange-100 text-orange-800 border border-orange-300',
+      urgent: true,
+    };
+  }
+  if (days <= 7) {
+    return {
+      label: `Vence en ${days}d`,
+      chipClass: 'bg-amber-100 text-amber-800 border border-amber-300',
+      urgent: true,
+    };
+  }
+  return {
+    label: `Vence ${expirationDate?.slice(0, 10)}`,
+    chipClass: 'bg-slate-100 text-slate-600',
+    urgent: false,
+  };
+}
+
 interface EditDraft {
   name: string;
   price: string;
@@ -29,6 +76,7 @@ interface EditDraft {
   unit: string;
   min_stock: string;
   image_url: string;
+  expiration_date: string;
   visible_kiosco: boolean;
   visible_tienda: boolean;
   en_oferta: boolean;
@@ -44,6 +92,7 @@ const EMPTY_DRAFT: EditDraft = {
   unit: 'unidad',
   min_stock: '5',
   image_url: '',
+  expiration_date: '',
   visible_kiosco: true,
   visible_tienda: true,
   en_oferta: false,
@@ -178,10 +227,12 @@ const Inventory = () => {
   // Filtros de catálogo y pasillos
   const [selectedPasillo, setSelectedPasillo] = useState<string>('all');
   const [searchTerm, setSearchTerm] = useState('');
-  const [quickFilter, setQuickFilter] = useState<'all' | 'offers' | 'low_stock'>('all');
+  const [quickFilter, setQuickFilter] = useState<'all' | 'offers' | 'low_stock' | 'expiring'>('all');
 
   // Modales y edición
   const [showAddModal, setShowAddModal] = useState(false);
+  const [showShrinkageModal, setShowShrinkageModal] = useState(false);
+  const [shrinkageProductId, setShrinkageProductId] = useState<string | undefined>(undefined);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [editDraft, setEditDraft] = useState<EditDraft>(EMPTY_DRAFT);
   const [editError, setEditError] = useState('');
@@ -212,6 +263,11 @@ const Inventory = () => {
     );
   }, []);
 
+  const openShrinkage = (productId?: string) => {
+    setShrinkageProductId(productId);
+    setShowShrinkageModal(true);
+  };
+
   const openEdit = (product: Product) => {
     setEditDraft({
       name: product.name,
@@ -222,6 +278,7 @@ const Inventory = () => {
       unit: product.unit || 'unidad',
       min_stock: String(product.min_stock ?? 5),
       image_url: product.image_url ?? '',
+      expiration_date: product.expiration_date ? product.expiration_date.slice(0, 10) : '',
       visible_kiosco: product.visible_kiosco !== undefined ? Boolean(product.visible_kiosco) : true,
       visible_tienda: product.visible_tienda !== undefined ? Boolean(product.visible_tienda) : true,
       en_oferta: product.en_oferta !== undefined ? Boolean(product.en_oferta) : false,
@@ -245,6 +302,10 @@ const Inventory = () => {
       // Filtro rápido
       if (quickFilter === 'offers' && !product.en_oferta) return false;
       if (quickFilter === 'low_stock' && product.stock > (product.min_stock ?? 5)) return false;
+      if (quickFilter === 'expiring') {
+        const daysLeft = getDaysUntilExpiration(product.expiration_date);
+        if (daysLeft === null || daysLeft > 7 || product.stock <= 0) return false;
+      }
 
       // Búsqueda por texto
       if (!term) return true;
@@ -257,6 +318,11 @@ const Inventory = () => {
   }, [products, selectedPasillo, quickFilter, searchTerm]);
 
   const alertCount = useMemo(() => getStockAlertCount(products), [products]);
+  const expiringAlerts = useMemo(() => checkExpiringProducts(products, 7), [products]);
+  const expiringValueAtRiskCents = useMemo(
+    () => expiringAlerts.reduce((acc, alert) => acc + alert.estimatedValueAtRiskCents, 0),
+    [expiringAlerts]
+  );
 
   // Conteo de productos por pasillo para Rappi Aisles
   const pasilloCounts = useMemo(() => {
@@ -331,6 +397,7 @@ const Inventory = () => {
         unit: editDraft.unit || 'unidad',
         min_stock: minStock,
         image_url: editDraft.image_url.trim() || undefined,
+        expiration_date: editDraft.expiration_date.trim() || null,
         visible_kiosco: editDraft.visible_kiosco,
         visible_tienda: editDraft.visible_tienda,
         en_oferta: editDraft.en_oferta,
@@ -543,6 +610,15 @@ const Inventory = () => {
         badge={badge}
         actions={
           <div className="flex flex-wrap items-center gap-2">
+            {canEdit && (
+              <button
+                type="button"
+                onClick={() => openShrinkage()}
+                className="btn-secondary border-amber-300 bg-amber-50 text-amber-900 hover:bg-amber-100"
+              >
+                📉 Mermas y Averías
+              </button>
+            )}
             <button type="button" onClick={openScanner} className="btn-secondary">
               <Icon name="scan" size={18} />
               Escanear
@@ -556,6 +632,49 @@ const Inventory = () => {
           </div>
         }
       />
+
+      {expiringAlerts.length > 0 && (
+        <div className="flex flex-col justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50/90 px-4 py-3 text-sm sm:flex-row sm:items-center">
+          <div className="flex items-start gap-2.5">
+            <span className="text-lg leading-none">⏰</span>
+            <div>
+              <p className="font-semibold text-amber-950">
+                {expiringAlerts.length}{' '}
+                {expiringAlerts.length === 1
+                  ? 'producto próximo a vencer o vencido'
+                  : 'productos próximos a vencer o vencidos'}{' '}
+                (Fruver, Lácteos y Bodega)
+              </p>
+              <p className="text-xs text-amber-800 tabular-nums">
+                Capital en riesgo al costo: <strong>{formatCentsCOP(expiringValueAtRiskCents)}</strong>
+              </p>
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setQuickFilter(quickFilter === 'expiring' ? 'all' : 'expiring')}
+              aria-pressed={quickFilter === 'expiring'}
+              className={`min-h-[40px] rounded-lg border px-3 py-1.5 text-xs font-semibold transition ${
+                quickFilter === 'expiring'
+                  ? 'border-amber-700 bg-amber-700 text-white'
+                  : 'border-amber-300 bg-white text-amber-900 hover:bg-amber-100'
+              }`}
+            >
+              {quickFilter === 'expiring' ? 'Mostrar todos' : `⏰ Filtrar por vencer (${expiringAlerts.length})`}
+            </button>
+            {canEdit && (
+              <button
+                type="button"
+                onClick={() => openShrinkage(expiringAlerts[0]?.productId)}
+                className="min-h-[40px] rounded-lg bg-red-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-red-700"
+              >
+                📉 Dar de baja merma
+              </button>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Selector de Pestañas Principales (Tabla, Catálogo Táctil, Combos) */}
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 pb-2">
@@ -646,6 +765,7 @@ const Inventory = () => {
             <ul className="space-y-2" aria-label="Productos">
               {filteredProducts.map((product) => {
                 const tone = stockTone(product.stock);
+                const expBadge = getExpirationBadge(product.expiration_date);
                 return (
                   <li key={product.id} className="card p-3">
                     <div className="flex items-start gap-3">
@@ -668,6 +788,7 @@ const Inventory = () => {
                         <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-gray-500">
                           <span className="chip bg-sf-cyan/10 text-sf-cyan">{product.category || 'Sin categoría'}</span>
                           <span className="chip bg-slate-100 text-slate-700">{product.unit || 'unidad'}</span>
+                          {expBadge && <span className={`chip ${expBadge.chipClass}`}>{expBadge.label}</span>}
                           {product.barcode && <span className="font-mono">{product.barcode}</span>}
                         </div>
                       </div>
@@ -683,6 +804,15 @@ const Inventory = () => {
                         <span>{tone.label && <span className={`chip ${tone.chip}`}>{tone.label}</span>}</span>
                         {canEdit && (
                           <div className="flex gap-1">
+                            <button
+                              type="button"
+                              onClick={() => openShrinkage(product.id)}
+                              aria-label={`Registrar merma de ${product.name}`}
+                              title="Registrar merma / avería"
+                              className="icon-btn text-amber-700 hover:bg-amber-50"
+                            >
+                              <span aria-hidden="true">📉</span>
+                            </button>
                             <button
                               type="button"
                               onClick={() => openEdit(product)}
@@ -742,6 +872,7 @@ const Inventory = () => {
                 <tbody className="divide-y divide-gray-100 bg-white">
                   {filteredProducts.map((product) => {
                     const tone = stockTone(product.stock);
+                    const expBadge = getExpirationBadge(product.expiration_date);
                     return (
                       <tr key={product.id} className="transition hover:bg-sf-light">
                         <td className="px-4 py-3 text-sm font-medium text-sf-text">
@@ -757,9 +888,16 @@ const Inventory = () => {
                               className="h-full w-full object-contain"
                               loading="lazy"
                             />
-                            <span className="truncate max-w-[220px]" title={product.name}>
-                              {product.name}
-                            </span>
+                            <div className="min-w-0">
+                              <span className="block truncate max-w-[220px]" title={product.name}>
+                                {product.name}
+                              </span>
+                              {expBadge && (
+                                <span className={`mt-0.5 inline-block rounded-full px-2 py-0.5 text-[11px] font-semibold ${expBadge.chipClass}`}>
+                                  {expBadge.label}
+                                </span>
+                              )}
+                            </div>
                           </div>
                         </td>
                         <td className="px-4 py-3 text-sm">
@@ -779,6 +917,15 @@ const Inventory = () => {
                         {canEdit && (
                           <td className="px-4 py-2 text-center">
                             <div className="flex justify-center gap-1">
+                              <button
+                                type="button"
+                                onClick={() => openShrinkage(product.id)}
+                                aria-label={`Registrar merma de ${product.name}`}
+                                title="Registrar merma / avería"
+                                className="icon-btn h-10 w-10 text-amber-700 hover:bg-amber-50"
+                              >
+                                <span aria-hidden="true">📉</span>
+                              </button>
                               <button
                                 type="button"
                                 onClick={() => openEdit(product)}
@@ -953,6 +1100,15 @@ const Inventory = () => {
                   >
                     ⚠️ Por Agotarse
                   </button>
+                  <button
+                    type="button"
+                    onClick={() => setQuickFilter(quickFilter === 'expiring' ? 'all' : 'expiring')}
+                    className={`chip text-xs ${
+                      quickFilter === 'expiring' ? 'bg-amber-600 text-white' : 'bg-slate-100 text-slate-700'
+                    }`}
+                  >
+                    ⏰ Por Vencer
+                  </button>
                 </div>
               </div>
 
@@ -965,6 +1121,7 @@ const Inventory = () => {
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
                   {filteredProducts.map((product) => {
                     const tone = stockTone(product.stock);
+                    const expBadge = getExpirationBadge(product.expiration_date);
                     const isInline = inlineEditingId === product.id;
 
                     return (
@@ -991,6 +1148,11 @@ const Inventory = () => {
                               </span>
                               {product.en_oferta ? (
                                 <span className="chip bg-red-100 text-[10px] font-bold text-red-700">OFERTA</span>
+                              ) : null}
+                              {expBadge ? (
+                                <span className={`chip text-[10px] font-bold ${expBadge.chipClass}`}>
+                                  {expBadge.label}
+                                </span>
                               ) : null}
                             </div>
                           </div>
@@ -1102,7 +1264,15 @@ const Inventory = () => {
                                 Web: {product.visible_tienda ? 'Sí' : 'No'}
                               </button>
 
-                              <div className="flex gap-1">
+                              <div className="flex gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => openShrinkage(product.id)}
+                                  aria-label={`Registrar merma de ${product.name}`}
+                                  className="text-amber-700 hover:underline font-medium"
+                                >
+                                  Merma
+                                </button>
                                 <button
                                   type="button"
                                   onClick={() => openEdit(product)}
@@ -1266,6 +1436,14 @@ const Inventory = () => {
       {/* Modal Agregar Producto */}
       <AddProductModal isOpen={showAddModal} onClose={() => setShowAddModal(false)} onAddProduct={handleAddProduct} />
 
+      {/* Modal Mermas y Averías */}
+      <ShrinkageModal
+        isOpen={showShrinkageModal}
+        onClose={() => setShowShrinkageModal(false)}
+        products={products}
+        initialProductId={shrinkageProductId}
+      />
+
       {/* Escáner de Códigos de Barras */}
       {isScannerOpen && <BarcodeScanner onScan={handleScan} onClose={closeScanner} />}
 
@@ -1387,6 +1565,30 @@ const Inventory = () => {
               onChange={(event) => setEditDraft({ ...editDraft, barcode: event.target.value })}
               placeholder="EAN-13, UPC-A o QR"
               className="input"
+            />
+          </div>
+
+          <div>
+            <div className="mb-1 flex items-center justify-between">
+              <label htmlFor="edit-expiration" className="block text-sm font-medium text-gray-700">
+                Fecha de vencimiento (opcional)
+              </label>
+              {editDraft.expiration_date && (
+                <button
+                  type="button"
+                  onClick={() => setEditDraft({ ...editDraft, expiration_date: '' })}
+                  className="text-xs font-medium text-red-600 hover:underline"
+                >
+                  Limpiar fecha
+                </button>
+              )}
+            </div>
+            <input
+              id="edit-expiration"
+              type="date"
+              value={editDraft.expiration_date}
+              onChange={(event) => setEditDraft({ ...editDraft, expiration_date: event.target.value })}
+              className="input text-base"
             />
           </div>
 

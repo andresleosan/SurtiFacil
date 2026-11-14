@@ -20,6 +20,7 @@ interface AddProductModalProps {
     unit?: string;
     barcode?: string;
     image_url?: string;
+    expiration_date?: string;
   }) => void | Promise<void>;
 }
 
@@ -35,6 +36,7 @@ const CATEGORIES = [
   'Abarrotes',
   'Granos y Despensa',
   'Lácteos y Huevos',
+  'Frutas y Verduras',
   'Panadería y Arepas',
   'Bebidas',
   'Limpieza',
@@ -50,6 +52,7 @@ const EMPTY_FORM = {
   unit: 'unidad',
   barcode: '',
   image_url: '',
+  expiration_date: '',
 };
 
 const AddProductModal = ({ isOpen, onClose, onAddProduct }: AddProductModalProps) => {
@@ -82,6 +85,7 @@ const AddProductModal = ({ isOpen, onClose, onAddProduct }: AddProductModalProps
       unit: item.unit,
       barcode: item.barcode,
       image_url: item.image_url,
+      expiration_date: '',
     });
   };
 
@@ -165,6 +169,7 @@ const AddProductModal = ({ isOpen, onClose, onAddProduct }: AddProductModalProps
         unit: formData.unit || 'unidad',
         barcode: formData.barcode.trim() || undefined,
         image_url: formData.image_url.trim() || undefined,
+        expiration_date: formData.expiration_date.trim() || undefined,
       });
       resetAndClose();
     } catch (err) {
@@ -372,6 +377,20 @@ const AddProductModal = ({ isOpen, onClose, onAddProduct }: AddProductModalProps
                     <Icon name="scan" />
                   </button>
                 </div>
+              </div>
+
+              <div>
+                <label htmlFor="add-expiration" className="mb-1 block text-sm font-medium text-sf-text">
+                  Fecha de vencimiento (opcional — Fruver, Lácteos y Perecederos)
+                </label>
+                <input
+                  id="add-expiration"
+                  type="date"
+                  name="expiration_date"
+                  value={formData.expiration_date}
+                  onChange={handleInputChange}
+                  className="input text-base"
+                />
               </div>
             </form>
           )}
