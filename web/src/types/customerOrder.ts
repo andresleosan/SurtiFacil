@@ -1,3 +1,5 @@
+import type { WholesaleTier } from '../utils/wholesalePricing';
+
 export type CustomerOrderSource = 'kiosk' | 'web' | 'whatsapp';
 
 export type CustomerOrderDeliveryType = 'pickup_counter' | 'delivery';
@@ -12,6 +14,9 @@ export interface CustomerOrderItem {
   quantity: number;
   unit_price_cents: number;
   subtotal_cents: number;
+  regular_unit_price_cents?: number;
+  applied_wholesale_tier?: WholesaleTier | null;
+  wholesale_savings_cents?: number;
   image_url?: string;
   unit?: string;
 }
@@ -91,6 +96,8 @@ export interface PublicStoreData {
     visible_tienda: number;
     en_oferta: number;
     precio_oferta_cents?: number | null;
+    wholesale_tiers?: WholesaleTier[];
+    wholesale_tiers_json?: string | null;
   }>;
   combos: Array<{
     id: string;

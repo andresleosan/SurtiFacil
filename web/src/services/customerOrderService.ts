@@ -6,6 +6,7 @@ import type {
   CustomerOrderStatus,
 } from '../types/customerOrder';
 import { mockProducts } from './mockData';
+import { parseWholesaleTiers, resolveProductUnitPricing } from '../utils/wholesalePricing';
 
 function isMockMode(): boolean {
   return import.meta.env.VITE_USE_MOCK_DATA === 'true';
@@ -130,7 +131,10 @@ export async function getPublicStore(slug: string): Promise<PublicStoreData> {
           costo_domicilio_cents: response.store.costo_domicilio_cents || 0,
           datos_pago_offline: response.store.datos_pago_offline,
           config: response.store.config || {},
-          products: response.products || [],
+          products: (response.products || []).map((p: any) => ({
+            ...p,
+            wholesale_tiers: parseWholesaleTiers(p.wholesale_tiers ?? p.wholesale_tiers_json),
+          })),
           combos: response.combos || [],
         };
       }
@@ -160,20 +164,25 @@ export async function getPublicStore(slug: string): Promise<PublicStoreData> {
       permite_domicilio: true,
       permite_retiro: true,
     },
-    products: mockProducts.map((p) => ({
-      id: p.id,
-      name: p.name,
-      price_cents: p.price_cents,
-      stock: p.stock,
-      unit: p.unit || 'unidad',
-      category: p.category || 'General',
-      image_url: p.image_url,
-      barcode: p.barcode,
-      visible_kiosco: 1,
-      visible_tienda: 1,
-      en_oferta: p.en_oferta ? 1 : 0,
-      precio_oferta_cents: p.precio_oferta_cents,
-    })),
+    products: mockProducts.map((p) => {
+      const tiers = parseWholesaleTiers(p.wholesale_tiers ?? p.wholesale_tiers_json);
+      return {
+        id: p.id,
+        name: p.name,
+        price_cents: p.price_cents,
+        stock: p.stock,
+        unit: p.unit || 'unidad',
+        category: p.category || 'General',
+        image_url: p.image_url,
+        barcode: p.barcode,
+        visible_kiosco: 1,
+        visible_tienda: 1,
+        en_oferta: p.en_oferta ? 1 : 0,
+        precio_oferta_cents: p.precio_oferta_cents,
+        wholesale_tiers: tiers,
+        wholesale_tiers_json: JSON.stringify(tiers),
+      };
+    }),
     combos: [
       {
         id: 'combo-desayuno-paisa',
@@ -218,10 +227,25 @@ export async function createCustomerOrder(
   const count = mockOrders.length + 1;
   const prefix = input.source === 'kiosk' ? 'K' : input.source === 'whatsapp' ? 'WA' : 'W';
   const orderCode = `#${prefix}-${String(count).padStart(2, '0')}`;
-  const totalCents = input.items.reduce((sum, item) => {
-    const price = item.unit_price_cents || 250;
-    return sum + price * item.quantity;
-  }, 0);
+  const resolvedItems = input.items.map((i) => {
+    const matchedProd = mockProducts.find((p) => p.id === i.product_id);
+    const pricing = matchedProd ? resolveProductUnitPricing(matchedProd, i.quantity) : null;
+    const unitPrice = pricing ? pricing.unit_price_cents : (i.unit_price_cents || 250);
+    const subtotal = pricing ? pricing.subtotal_cents : unitPrice * i.quantity;
+    return {
+      product_id: i.product_id,
+      product_name: matchedProd?.name || i.product_name || 'Producto',
+      quantity: i.quantity,
+      unit_price_cents: unitPrice,
+      subtotal_cents: subtotal,
+      regular_unit_price_cents: pricing?.regular_unit_price_cents,
+      applied_wholesale_tier: pricing?.applied_tier ?? null,
+      wholesale_savings_cents: pricing?.wholesale_savings_cents ?? 0,
+      unit: i.unit || matchedProd?.unit || 'unidad',
+      image_url: i.image_url,
+    };
+  });
+  const totalCents = resolvedItems.reduce((sum, item) => sum + item.subtotal_cents, 0);
 
   const newOrder: CustomerOrder = {
     id: `ord-mock-${Date.now()}`,
@@ -234,26 +258,8 @@ export async function createCustomerOrder(
     delivery_address: input.delivery_address || null,
     delivery_neighborhood: input.delivery_neighborhood || null,
     payment_method: input.payment_method,
-    items_json: JSON.stringify(
-      input.items.map((i) => ({
-        product_id: i.product_id,
-        product_name: i.product_name || 'Producto',
-        quantity: i.quantity,
-        unit_price_cents: i.unit_price_cents || 250,
-        subtotal_cents: (i.unit_price_cents || 250) * i.quantity,
-        unit: i.unit || 'unidad',
-        image_url: i.image_url,
-      }))
-    ),
-    items: input.items.map((i) => ({
-      product_id: i.product_id,
-      product_name: i.product_name || 'Producto',
-      quantity: i.quantity,
-      unit_price_cents: i.unit_price_cents || 250,
-      subtotal_cents: (i.unit_price_cents || 250) * i.quantity,
-      unit: i.unit || 'unidad',
-      image_url: i.image_url,
-    })),
+    items_json: JSON.stringify(resolvedItems),
+    items: resolvedItems,
     total_cents: totalCents,
     status: 'pending',
     tracking_token: `tk_${Date.now()}`,

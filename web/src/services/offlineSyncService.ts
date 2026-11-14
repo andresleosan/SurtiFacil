@@ -1,6 +1,7 @@
 import { CreditCustomer, CreditEntryType, PaymentMethod, Product, SaleItem, UserRole } from '../firebase/db';
 import { apiClient, emitDataChange, getActiveNegocioId } from './apiClient';
 import { addLocalCreditEntry, addLocalSale, mockCreditCustomers, mockProducts } from './mockData';
+import { resolveProductUnitPricing } from '../utils/wholesalePricing';
 
 const DB_NAME = 'surtifacil_offline_v1';
 const DB_VERSION = 1;
@@ -443,14 +444,22 @@ export async function enqueueOfflineSale(
 
   const normalizedItems = cartItems.map((item) => {
     const cachedProd = prodMap.get(item.product_id);
-    const unitPrice = cachedProd ? cachedProd.price_cents : item.price_cents;
-    const prodName = cachedProd ? cachedProd.name : item.product_name;
+    if (cachedProd) {
+      const pricing = resolveProductUnitPricing(cachedProd, item.quantity);
+      return {
+        product_id: item.product_id,
+        product_name: cachedProd.name,
+        quantity: item.quantity,
+        price_cents: pricing.unit_price_cents,
+        subtotal: pricing.subtotal_cents,
+      };
+    }
     return {
       product_id: item.product_id,
-      product_name: prodName,
+      product_name: item.product_name,
       quantity: item.quantity,
-      price_cents: unitPrice,
-      subtotal: unitPrice * item.quantity,
+      price_cents: item.price_cents,
+      subtotal: item.price_cents * item.quantity,
     };
   });
 

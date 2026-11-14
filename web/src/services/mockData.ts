@@ -24,6 +24,10 @@ const baseProducts: Product[] = [
     price_cents: 350, // $3.50
     stock: 32,
     image_url: '/images/products/leche-alqueria-1l.svg',
+    wholesale_tiers: [
+      { min_quantity: 3, unit_price_cents: 310 },
+      { min_quantity: 6, unit_price_cents: 290 },
+    ],
   },
   {
     id: 'p4',
@@ -51,6 +55,10 @@ const baseProducts: Product[] = [
     price_cents: 420, // $4.20
     stock: 89,
     image_url: '/images/products/arroz-diana-1lb.svg',
+    wholesale_tiers: [
+      { min_quantity: 3, unit_price_cents: 380 },
+      { min_quantity: 6, unit_price_cents: 350 },
+    ],
   },
   {
     id: 'p8',

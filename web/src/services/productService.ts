@@ -6,6 +6,7 @@ import {
   getCachedProductsForTenant,
   isOfflineModeActive,
 } from './offlineSyncService';
+import { parseWholesaleTiers, type WholesaleTier } from '../utils/wholesalePricing';
 
 function isMockMode(): boolean {
   return import.meta.env.VITE_USE_MOCK_DATA === 'true';
@@ -24,6 +25,8 @@ export interface NewProductInput {
   visible_tienda?: boolean | number;
   en_oferta?: boolean | number;
   precio_oferta_cents?: number;
+  wholesale_tiers?: WholesaleTier[];
+  wholesale_tiers_json?: string | null;
   expiration_date?: string | null;
 }
 
@@ -37,6 +40,7 @@ function sortByName(products: Product[]): Product[] {
 }
 
 function mapProduct(row: any): Product {
+  const wholesaleTiers = parseWholesaleTiers(row.wholesale_tiers ?? row.wholesale_tiers_json);
   return {
     id: row.id,
     name: row.name,
@@ -51,6 +55,11 @@ function mapProduct(row: any): Product {
     visible_tienda: row.visible_tienda !== undefined ? Boolean(row.visible_tienda) : true,
     en_oferta: row.en_oferta !== undefined ? Boolean(row.en_oferta) : false,
     precio_oferta_cents: row.precio_oferta_cents ?? undefined,
+    wholesale_tiers: wholesaleTiers,
+    wholesale_tiers_json:
+      typeof row.wholesale_tiers_json === 'string'
+        ? row.wholesale_tiers_json
+        : JSON.stringify(wholesaleTiers),
     supplier_id: row.supplier_id || undefined,
     createdAt: row.created_at || row.createdAt,
     last_cost_cents: row.last_cost_cents ?? undefined,
@@ -139,6 +148,7 @@ export function refreshProducts(): void {
 }
 
 export async function addProduct(input: NewProductInput): Promise<Product> {
+  const wholesaleTiers = parseWholesaleTiers(input.wholesale_tiers ?? input.wholesale_tiers_json);
   const payload = {
     name: input.name,
     price_cents: input.price_cents,
@@ -151,6 +161,8 @@ export async function addProduct(input: NewProductInput): Promise<Product> {
     visible_tienda: input.visible_tienda !== undefined ? (input.visible_tienda ? 1 : 0) : 1,
     en_oferta: input.en_oferta ? 1 : 0,
     precio_oferta_cents: input.precio_oferta_cents ?? null,
+    wholesale_tiers: wholesaleTiers,
+    wholesale_tiers_json: JSON.stringify(wholesaleTiers),
     expiration_date: input.expiration_date?.trim() || null,
     ...(input.barcode ? { barcode: input.barcode } : {}),
   };
@@ -179,6 +191,11 @@ export async function addProduct(input: NewProductInput): Promise<Product> {
 }
 
 export async function updateProduct(product: Product): Promise<void> {
+  const hasWholesaleUpdate =
+    product.wholesale_tiers !== undefined || product.wholesale_tiers_json !== undefined;
+  const parsedTiers = hasWholesaleUpdate
+    ? parseWholesaleTiers(product.wholesale_tiers ?? product.wholesale_tiers_json)
+    : undefined;
   const changes = {
     name: product.name,
     price_cents: product.price_cents,
@@ -192,6 +209,12 @@ export async function updateProduct(product: Product): Promise<void> {
     visible_tienda: product.visible_tienda !== undefined ? (product.visible_tienda ? 1 : 0) : 1,
     en_oferta: product.en_oferta !== undefined ? (product.en_oferta ? 1 : 0) : 0,
     precio_oferta_cents: product.precio_oferta_cents ?? null,
+    ...(hasWholesaleUpdate
+      ? {
+          wholesale_tiers: parsedTiers,
+          wholesale_tiers_json: JSON.stringify(parsedTiers),
+        }
+      : {}),
     ...(product.expiration_date !== undefined
       ? { expiration_date: product.expiration_date?.trim() || null }
       : {}),

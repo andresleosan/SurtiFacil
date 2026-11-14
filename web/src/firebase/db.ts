@@ -1,3 +1,5 @@
+import type { WholesaleTier } from '../utils/wholesalePricing';
+
 /**
  * Tipo para un producto en Firestore
  */
@@ -20,6 +22,8 @@ export interface Product {
   visible_tienda?: boolean | number;
   en_oferta?: boolean | number;
   precio_oferta_cents?: number | null;
+  wholesale_tiers?: WholesaleTier[];
+  wholesale_tiers_json?: string | null;
   expiration_date?: string | null;
 }
 
@@ -52,6 +56,9 @@ export interface SaleItem {
   quantity: number;
   price_cents: number;
   subtotal: number; // quantity * price_cents
+  regular_price_cents?: number;
+  applied_wholesale_tier?: WholesaleTier | null;
+  wholesale_savings_cents?: number;
   unit_cost_cents?: number;
   cost_subtotal_cents?: number;
   cost_source?: 'purchase' | 'fallback_price';

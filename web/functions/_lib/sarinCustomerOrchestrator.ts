@@ -5,6 +5,11 @@ import {
   callDeepSeekChat,
   checkAndConsumeAiQuota,
 } from './deepseekEngine';
+import {
+  parseWholesaleTiers,
+  resolveProductUnitPricing,
+  WholesaleTier,
+} from './wholesalePricing';
 
 export interface CartItem {
   productId: string;
@@ -13,6 +18,8 @@ export interface CartItem {
   quantity: number;
   priceCents: number;
   subtotalCents: number;
+  appliedWholesaleTier?: WholesaleTier | null;
+  wholesaleSavingsCents?: number;
 }
 
 export interface StoreConfig {
@@ -188,7 +195,7 @@ export async function executeConsultarCatalogo(
   const categoryTerm = (args.category || '').trim();
 
   // Consultar productos
-  let sql = `SELECT id, name, price_cents, stock, unit, category, en_oferta, precio_oferta_cents 
+  let sql = `SELECT id, name, price_cents, stock, unit, category, en_oferta, precio_oferta_cents, wholesale_tiers_json 
              FROM products 
              WHERE negocio_id = ? AND visible_tienda = 1 AND stock > 0`;
   const bindings: unknown[] = [negocioId];
@@ -205,16 +212,26 @@ export async function executeConsultarCatalogo(
 
   const productsResult = await db.prepare(sql).bind(...bindings).all<any>();
   const products = (productsResult?.results || []).map((p) => {
-    const finalPrice = p.en_oferta && p.precio_oferta_cents ? p.precio_oferta_cents : p.price_cents;
+    const pricing = resolveProductUnitPricing(p, 1);
+    const wholesaleTiers = parseWholesaleTiers(p.wholesale_tiers_json).filter(
+      (t) => pricing.active_base_unit_price_cents === 0 || t.unit_price_cents < pricing.active_base_unit_price_cents
+    );
     return {
       id: p.id,
       name: p.name,
       category: p.category || 'General',
       unit: p.unit || 'unidad',
-      price_cents: finalPrice,
-      price_display: formatCOP(finalPrice),
+      price_cents: pricing.unit_price_cents,
+      price_display: formatCOP(pricing.unit_price_cents),
       stock: p.stock,
       en_oferta: Boolean(p.en_oferta),
+      wholesale_tiers: wholesaleTiers,
+      promo_mayorista:
+        wholesaleTiers.length > 0
+          ? wholesaleTiers
+              .map((t) => `${t.min_quantity}+ a ${formatCOP(t.unit_price_cents)} c/u`)
+              .join(' · ')
+          : null,
     };
   });
 
@@ -272,7 +289,7 @@ export async function executeModificarCanasta(
     let match = null;
     if (item.product_id) {
       match = await db
-        .prepare('SELECT id, name, price_cents, stock, unit, en_oferta, precio_oferta_cents FROM products WHERE negocio_id = ? AND id = ?')
+        .prepare('SELECT id, name, price_cents, stock, unit, en_oferta, precio_oferta_cents, wholesale_tiers_json FROM products WHERE negocio_id = ? AND id = ?')
         .bind(negocioId, item.product_id)
         .first<any>();
     }
@@ -280,7 +297,7 @@ export async function executeModificarCanasta(
     if (!match && item.name) {
       match = await db
         .prepare(
-          'SELECT id, name, price_cents, stock, unit, en_oferta, precio_oferta_cents FROM products WHERE negocio_id = ? AND name LIKE ? AND visible_tienda = 1 ORDER BY stock DESC LIMIT 1'
+          'SELECT id, name, price_cents, stock, unit, en_oferta, precio_oferta_cents, wholesale_tiers_json FROM products WHERE negocio_id = ? AND name LIKE ? AND visible_tienda = 1 ORDER BY stock DESC LIMIT 1'
         )
         .bind(negocioId, `%${item.name.trim()}%`)
         .first<any>();
@@ -304,11 +321,25 @@ export async function executeModificarCanasta(
     const itemName = match ? match.name : comboMatch.name;
     const itemUnit = match ? match.unit || 'unidad' : 'combo';
     const itemStock = match ? Number(match.stock) : 999;
-    const itemPrice = match
-      ? match.en_oferta && match.precio_oferta_cents
-        ? match.precio_oferta_cents
-        : match.price_cents
-      : comboMatch.price_cents;
+
+    const computeLinePricing = (targetQty: number) => {
+      if (!match) {
+        const comboPrice = comboMatch.price_cents;
+        return {
+          priceCents: comboPrice,
+          subtotalCents: targetQty * comboPrice,
+          appliedWholesaleTier: null as WholesaleTier | null,
+          wholesaleSavingsCents: 0,
+        };
+      }
+      const pricing = resolveProductUnitPricing(match, targetQty);
+      return {
+        priceCents: pricing.unit_price_cents,
+        subtotalCents: pricing.subtotal_cents,
+        appliedWholesaleTier: pricing.applied_tier,
+        wholesaleSavingsCents: pricing.wholesale_savings_cents,
+      };
+    };
 
     const existingIndex = updatedCart.findIndex((c) => c.productId === itemId);
 
@@ -319,18 +350,24 @@ export async function executeModificarCanasta(
         warnings.push(`Solo quedan ${itemStock} ${itemUnit}s de ${itemName}. Ajustamos al máximo.`);
       }
       const finalQty = Math.min(newQty, itemStock);
+      const linePricing = computeLinePricing(finalQty);
 
       if (existingIndex >= 0) {
         updatedCart[existingIndex].quantity = finalQty;
-        updatedCart[existingIndex].subtotalCents = finalQty * itemPrice;
+        updatedCart[existingIndex].priceCents = linePricing.priceCents;
+        updatedCart[existingIndex].subtotalCents = linePricing.subtotalCents;
+        updatedCart[existingIndex].appliedWholesaleTier = linePricing.appliedWholesaleTier;
+        updatedCart[existingIndex].wholesaleSavingsCents = linePricing.wholesaleSavingsCents;
       } else if (finalQty > 0) {
         updatedCart.push({
           productId: itemId,
           name: itemName,
           unit: itemUnit,
           quantity: finalQty,
-          priceCents: itemPrice,
-          subtotalCents: finalQty * itemPrice,
+          priceCents: linePricing.priceCents,
+          subtotalCents: linePricing.subtotalCents,
+          appliedWholesaleTier: linePricing.appliedWholesaleTier,
+          wholesaleSavingsCents: linePricing.wholesaleSavingsCents,
         });
       }
     } else if (args.action === 'remove') {
@@ -339,8 +376,12 @@ export async function executeModificarCanasta(
         if (newQty <= 0) {
           updatedCart.splice(existingIndex, 1);
         } else {
+          const linePricing = computeLinePricing(newQty);
           updatedCart[existingIndex].quantity = newQty;
-          updatedCart[existingIndex].subtotalCents = newQty * itemPrice;
+          updatedCart[existingIndex].priceCents = linePricing.priceCents;
+          updatedCart[existingIndex].subtotalCents = linePricing.subtotalCents;
+          updatedCart[existingIndex].appliedWholesaleTier = linePricing.appliedWholesaleTier;
+          updatedCart[existingIndex].wholesaleSavingsCents = linePricing.wholesaleSavingsCents;
         }
       }
     } else if (args.action === 'set') {
@@ -352,17 +393,24 @@ export async function executeModificarCanasta(
         if (finalQty <= 0) {
           updatedCart.splice(existingIndex, 1);
         } else {
+          const linePricing = computeLinePricing(finalQty);
           updatedCart[existingIndex].quantity = finalQty;
-          updatedCart[existingIndex].subtotalCents = finalQty * itemPrice;
+          updatedCart[existingIndex].priceCents = linePricing.priceCents;
+          updatedCart[existingIndex].subtotalCents = linePricing.subtotalCents;
+          updatedCart[existingIndex].appliedWholesaleTier = linePricing.appliedWholesaleTier;
+          updatedCart[existingIndex].wholesaleSavingsCents = linePricing.wholesaleSavingsCents;
         }
       } else if (finalQty > 0) {
+        const linePricing = computeLinePricing(finalQty);
         updatedCart.push({
           productId: itemId,
           name: itemName,
           unit: itemUnit,
           quantity: finalQty,
-          priceCents: itemPrice,
-          subtotalCents: finalQty * itemPrice,
+          priceCents: linePricing.priceCents,
+          subtotalCents: linePricing.subtotalCents,
+          appliedWholesaleTier: linePricing.appliedWholesaleTier,
+          wholesaleSavingsCents: linePricing.wholesaleSavingsCents,
         });
       }
     }

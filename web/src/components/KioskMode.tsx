@@ -4,6 +4,11 @@ import type { PublicStoreData, CustomerOrderItem } from '../types/customerOrder'
 import { formatCentsCOP, formatCOP } from '../utils/currency';
 import { Icon } from './ui/Icon';
 import { ProductImage } from './ui/ProductImage';
+import {
+  getPrimaryWholesaleTier,
+  resolveProductUnitPricing,
+  type WholesaleTier,
+} from '../utils/wholesalePricing';
 
 const AISLES = [
   { id: 'todos', label: 'Todos', emoji: '🌟' },
@@ -168,6 +173,21 @@ export default function KioskMode({ slug = 'surtifacil', onExit }: KioskModeProp
   }, [storeData, selectedAisle, search]);
 
   // Manejo de carrito
+  const resolveCartLinePricing = (
+    product: {
+      id: string;
+      price_cents: number;
+      en_oferta?: number | boolean;
+      precio_oferta_cents?: number | null;
+      wholesale_tiers?: WholesaleTier[];
+      wholesale_tiers_json?: string | null;
+    },
+    quantity: number
+  ) => {
+    const storeProduct = storeData?.products.find((p) => p.id === product.id);
+    return resolveProductUnitPricing(storeProduct ?? product, quantity);
+  };
+
   const addToCart = (product: {
     id: string;
     name: string;
@@ -175,28 +195,41 @@ export default function KioskMode({ slug = 'surtifacil', onExit }: KioskModeProp
     stock: number;
     unit?: string;
     image_url?: string;
+    en_oferta?: number | boolean;
+    precio_oferta_cents?: number | null;
+    wholesale_tiers?: WholesaleTier[];
+    wholesale_tiers_json?: string | null;
   }) => {
     const existingIndex = cart.findIndex((i) => i.product_id === product.id);
     if (existingIndex >= 0) {
       const existing = cart[existingIndex];
       if (existing.quantity >= product.stock) return;
       const nextQty = existing.quantity + 1;
+      const pricing = resolveCartLinePricing(product, nextQty);
       const updated = [...cart];
       updated[existingIndex] = {
         ...existing,
         quantity: nextQty,
-        subtotal_cents: nextQty * existing.unit_price_cents,
+        unit_price_cents: pricing.unit_price_cents,
+        subtotal_cents: pricing.subtotal_cents,
+        regular_unit_price_cents: pricing.regular_unit_price_cents,
+        applied_wholesale_tier: pricing.applied_tier,
+        wholesale_savings_cents: pricing.wholesale_savings_cents,
       };
       setCart(updated);
     } else {
+      const pricing = resolveCartLinePricing(product, 1);
       setCart([
         ...cart,
         {
           product_id: product.id,
           product_name: product.name,
           quantity: 1,
-          unit_price_cents: product.price_cents,
-          subtotal_cents: product.price_cents,
+          unit_price_cents: pricing.unit_price_cents,
+          subtotal_cents: pricing.subtotal_cents,
+          regular_unit_price_cents: pricing.regular_unit_price_cents,
+          applied_wholesale_tier: pricing.applied_tier,
+          wholesale_savings_cents: pricing.wholesale_savings_cents,
           stock: product.stock,
           unit: product.unit || 'unidad',
           image_url: product.image_url,
@@ -214,11 +247,19 @@ export default function KioskMode({ slug = 'surtifacil', onExit }: KioskModeProp
     if (nextQty <= 0) {
       setCart(cart.filter((i) => i.product_id !== productId));
     } else if (nextQty <= existing.stock) {
+      const storeProduct = storeData?.products.find((p) => p.id === productId);
+      const pricing = storeProduct ? resolveProductUnitPricing(storeProduct, nextQty) : null;
+      const nextUnitPrice = pricing ? pricing.unit_price_cents : existing.unit_price_cents;
+      const nextSubtotal = pricing ? pricing.subtotal_cents : nextQty * existing.unit_price_cents;
       const updated = [...cart];
       updated[existingIndex] = {
         ...existing,
         quantity: nextQty,
-        subtotal_cents: nextQty * existing.unit_price_cents,
+        unit_price_cents: nextUnitPrice,
+        subtotal_cents: nextSubtotal,
+        regular_unit_price_cents: pricing?.regular_unit_price_cents ?? existing.regular_unit_price_cents,
+        applied_wholesale_tier: pricing ? pricing.applied_tier : existing.applied_wholesale_tier,
+        wholesale_savings_cents: pricing ? pricing.wholesale_savings_cents : existing.wholesale_savings_cents,
       };
       setCart(updated);
     }
@@ -227,6 +268,10 @@ export default function KioskMode({ slug = 'surtifacil', onExit }: KioskModeProp
   const removeCartItem = (productId: string) => {
     setCart(cart.filter((i) => i.product_id !== productId));
   };
+
+  const cartWholesaleSavingsCents = useMemo(() => {
+    return cart.reduce((sum, item) => sum + (item.wholesale_savings_cents || 0), 0);
+  }, [cart]);
 
   const cartTotalCents = useMemo(() => {
     const itemsTotal = cart.reduce((sum, item) => sum + item.subtotal_cents, 0);
@@ -573,7 +618,8 @@ export default function KioskMode({ slug = 'surtifacil', onExit }: KioskModeProp
                   {filteredProducts.map((prod) => {
                     const inCartItem = cart.find((i) => i.product_id === prod.id);
                     const isOffer = prod.en_oferta === 1 && prod.precio_oferta_cents;
-                    const finalPrice = isOffer ? prod.precio_oferta_cents! : prod.price_cents;
+                    const cardPricing = resolveProductUnitPricing(prod, inCartItem?.quantity ?? 1);
+                    const primaryWholesale = getPrimaryWholesaleTier(prod);
 
                     return (
                       <article
@@ -605,20 +651,34 @@ export default function KioskMode({ slug = 'surtifacil', onExit }: KioskModeProp
                           <h3 className="text-lg font-bold text-slate-800 line-clamp-2 leading-snug">
                             {prod.name}
                           </h3>
+
+                          {inCartItem?.applied_wholesale_tier ? (
+                            <p className="mt-2 inline-flex items-center gap-1 rounded-xl bg-emerald-100 border border-emerald-200 px-2.5 py-1 text-xs font-bold text-emerald-800 tabular-nums">
+                              ✅ Promo {inCartItem.applied_wholesale_tier.min_quantity}+ activa · Ahorras{' '}
+                              {formatCentsCOP(inCartItem.wholesale_savings_cents || 0)}
+                            </p>
+                          ) : primaryWholesale ? (
+                            <p className="mt-2 inline-flex items-center gap-1 rounded-xl bg-amber-100 border border-amber-200 px-2.5 py-1 text-xs font-bold text-amber-900 tabular-nums">
+                              🏷️ Lleva {primaryWholesale.min_quantity}+ a {formatCentsCOP(primaryWholesale.unit_price_cents)} c/u
+                            </p>
+                          ) : null}
                         </div>
 
                         <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between gap-3">
                           <div>
-                            <p className="text-xs text-slate-400 uppercase font-bold tracking-wider">Precio</p>
+                            <p className="text-xs text-slate-400 uppercase font-bold tracking-wider">
+                              {inCartItem?.applied_wholesale_tier ? 'Precio Mayorista' : 'Precio'}
+                            </p>
                             <div className="flex items-baseline gap-1.5">
                               <p className="text-2xl font-black text-sf-primary tabular-nums">
-                                {formatCentsCOP(finalPrice)}
+                                {formatCentsCOP(cardPricing.unit_price_cents)}
                               </p>
-                              {isOffer && (
-                                <p className="text-xs text-slate-400 line-through tabular-nums">
-                                  {formatCentsCOP(prod.price_cents)}
-                                </p>
-                              )}
+                              {(isOffer || inCartItem?.applied_wholesale_tier) &&
+                                cardPricing.unit_price_cents < prod.price_cents && (
+                                  <p className="text-xs text-slate-400 line-through tabular-nums">
+                                    {formatCentsCOP(prod.price_cents)}
+                                  </p>
+                                )}
                             </div>
                           </div>
 
@@ -651,10 +711,14 @@ export default function KioskMode({ slug = 'surtifacil', onExit }: KioskModeProp
                                 addToCart({
                                   id: prod.id,
                                   name: prod.name,
-                                  price_cents: finalPrice,
+                                  price_cents: prod.price_cents,
                                   stock: prod.stock,
                                   unit: prod.unit,
                                   image_url: prod.image_url,
+                                  en_oferta: prod.en_oferta,
+                                  precio_oferta_cents: prod.precio_oferta_cents,
+                                  wholesale_tiers: prod.wholesale_tiers,
+                                  wholesale_tiers_json: prod.wholesale_tiers_json,
                                 })
                               }
                               aria-label={`Agregar ${prod.name} al pedido`}
@@ -700,54 +764,77 @@ export default function KioskMode({ slug = 'surtifacil', onExit }: KioskModeProp
                 <p className="text-xs mt-1">Toca "+ Agregar" en los productos que deseas llevar.</p>
               </div>
             ) : (
-              cart.map((item) => (
-                <div
-                  key={item.product_id}
-                  className="flex items-center justify-between gap-3 rounded-2xl border border-slate-100 bg-slate-50/60 p-3"
-                >
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate font-semibold text-slate-800 text-sm">{item.product_name}</p>
-                    <p className="text-xs text-slate-500 tabular-nums">
-                      {formatCentsCOP(item.unit_price_cents)} c/u
-                    </p>
-                  </div>
-
-                  <div className="flex items-center gap-2">
-                    <div className="flex items-center rounded-xl bg-white border border-slate-200">
-                      <button
-                        type="button"
-                        onClick={() => updateCartQty(item.product_id, -1)}
-                        className="flex h-9 w-9 items-center justify-center text-slate-600 hover:bg-slate-100 rounded-l-xl"
-                      >
-                        <Icon name="minus" size={16} />
-                      </button>
-                      <span className="w-7 text-center text-sm font-bold text-slate-800 tabular-nums">
-                        {item.quantity}
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => updateCartQty(item.product_id, 1)}
-                        className="flex h-9 w-9 items-center justify-center text-sf-primary hover:bg-slate-100 rounded-r-xl"
-                      >
-                        <Icon name="plus" size={16} />
-                      </button>
+              cart.map((item) => {
+                const storeProd = storeData?.products.find((p) => p.id === item.product_id);
+                const livePricing = storeProd ? resolveProductUnitPricing(storeProd, item.quantity) : null;
+                return (
+                  <div
+                    key={item.product_id}
+                    className="flex items-center justify-between gap-3 rounded-2xl border border-slate-100 bg-slate-50/60 p-3"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate font-semibold text-slate-800 text-sm">{item.product_name}</p>
+                      <p className="text-xs text-slate-500 tabular-nums">
+                        {formatCentsCOP(item.unit_price_cents)} c/u · {formatCentsCOP(item.subtotal_cents)}
+                      </p>
+                      {item.applied_wholesale_tier ? (
+                        <span className="mt-1 inline-flex items-center rounded-lg bg-emerald-100 px-2 py-0.5 text-[11px] font-bold text-emerald-800">
+                          🏷️ Mayorista {item.applied_wholesale_tier.min_quantity}+ · Ahorras{' '}
+                          {formatCentsCOP(item.wholesale_savings_cents || 0)}
+                        </span>
+                      ) : livePricing?.next_tier ? (
+                        <span className="mt-1 inline-flex items-center rounded-lg bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-800">
+                          +{livePricing.units_to_next_tier} más a {formatCentsCOP(livePricing.next_tier.unit_price_cents)} c/u
+                        </span>
+                      ) : null}
                     </div>
 
-                    <button
-                      type="button"
-                      onClick={() => removeCartItem(item.product_id)}
-                      className="p-1 text-slate-400 hover:text-red-500"
-                    >
-                      <Icon name="trash" size={18} />
-                    </button>
+                    <div className="flex items-center gap-2">
+                      <div className="flex items-center rounded-xl bg-white border border-slate-200">
+                        <button
+                          type="button"
+                          onClick={() => updateCartQty(item.product_id, -1)}
+                          aria-label={`Quitar una unidad de ${item.product_name} en carrito`}
+                          className="flex h-11 w-11 items-center justify-center text-slate-600 hover:bg-slate-100 rounded-l-xl"
+                        >
+                          <Icon name="minus" size={16} />
+                        </button>
+                        <span className="w-7 text-center text-sm font-bold text-slate-800 tabular-nums">
+                          {item.quantity}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => updateCartQty(item.product_id, 1)}
+                          aria-label={`Agregar otra unidad de ${item.product_name} en carrito`}
+                          className="flex h-11 w-11 items-center justify-center text-sf-primary hover:bg-slate-100 rounded-r-xl"
+                        >
+                          <Icon name="plus" size={16} />
+                        </button>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => removeCartItem(item.product_id)}
+                        aria-label={`Eliminar ${item.product_name} del carrito`}
+                        className="p-2 text-slate-400 hover:text-red-500"
+                      >
+                        <Icon name="trash" size={18} />
+                      </button>
+                    </div>
                   </div>
-                </div>
-              ))
+                );
+              })
             )}
           </div>
 
           {/* Pie de Carrito con Total y Botón Hero */}
           <div className="border-t border-slate-200 pt-4 space-y-4">
+            {cartWholesaleSavingsCents > 0 && (
+              <div className="flex justify-between items-center rounded-xl bg-emerald-50 border border-emerald-200 px-3 py-2 text-xs font-bold text-emerald-800">
+                <span>🏷️ Ahorro mayorista aplicado:</span>
+                <span className="tabular-nums">-{formatCentsCOP(cartWholesaleSavingsCents)}</span>
+              </div>
+            )}
             <div className="flex justify-between items-baseline">
               <span className="text-slate-500 font-semibold">Total a pagar:</span>
               <span className="text-3xl font-black text-sf-primary tabular-nums">
@@ -807,7 +894,15 @@ export default function KioskMode({ slug = 'surtifacil', onExit }: KioskModeProp
                     />
                     <div className="min-w-0 flex-1">
                       <p className="truncate font-semibold text-slate-800">{item.product_name}</p>
-                      <p className="text-xs text-slate-500">{formatCentsCOP(item.unit_price_cents)} c/u</p>
+                      <p className="text-xs text-slate-500 tabular-nums">
+                        {formatCentsCOP(item.unit_price_cents)} c/u · {formatCentsCOP(item.subtotal_cents)}
+                      </p>
+                      {item.applied_wholesale_tier && (
+                        <span className="mt-1 inline-flex items-center rounded-lg bg-emerald-100 px-2 py-0.5 text-[11px] font-bold text-emerald-800">
+                          🏷️ Mayorista {item.applied_wholesale_tier.min_quantity}+ · Ahorras{' '}
+                          {formatCentsCOP(item.wholesale_savings_cents || 0)}
+                        </span>
+                      )}
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
@@ -815,7 +910,7 @@ export default function KioskMode({ slug = 'surtifacil', onExit }: KioskModeProp
                       <button
                         type="button"
                         onClick={() => updateCartQty(item.product_id, -1)}
-                        className="flex h-10 w-10 items-center justify-center text-slate-600"
+                        className="flex h-11 w-11 items-center justify-center text-slate-600"
                       >
                         <Icon name="minus" size={18} />
                       </button>
@@ -823,7 +918,7 @@ export default function KioskMode({ slug = 'surtifacil', onExit }: KioskModeProp
                       <button
                         type="button"
                         onClick={() => updateCartQty(item.product_id, 1)}
-                        className="flex h-10 w-10 items-center justify-center text-sf-primary"
+                        className="flex h-11 w-11 items-center justify-center text-sf-primary"
                       >
                         <Icon name="plus" size={18} />
                       </button>
@@ -834,6 +929,12 @@ export default function KioskMode({ slug = 'surtifacil', onExit }: KioskModeProp
             </div>
 
             <div className="border-t border-slate-200 pt-4 space-y-4">
+              {cartWholesaleSavingsCents > 0 && (
+                <div className="flex justify-between items-center rounded-xl bg-emerald-50 border border-emerald-200 px-3 py-2 text-xs font-bold text-emerald-800">
+                  <span>🏷️ Ahorro mayorista aplicado:</span>
+                  <span className="tabular-nums">-{formatCentsCOP(cartWholesaleSavingsCents)}</span>
+                </div>
+              )}
               <div className="flex justify-between items-baseline">
                 <span className="text-slate-500 font-semibold">Total a pagar:</span>
                 <span className="text-2xl font-black text-sf-primary tabular-nums">

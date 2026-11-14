@@ -120,6 +120,7 @@ export async function ensureDatabaseSchema(db: D1Database, force = false): Promi
       visible_tienda INTEGER NOT NULL DEFAULT 1,
       en_oferta INTEGER NOT NULL DEFAULT 0,
       precio_oferta_cents INTEGER,
+      wholesale_tiers_json TEXT NOT NULL DEFAULT '[]',
       last_cost_cents INTEGER,
       last_cost_source TEXT,
       last_cost_updated_at TEXT,
@@ -353,6 +354,7 @@ export async function ensureDatabaseSchema(db: D1Database, force = false): Promi
     'ALTER TABLE products ADD COLUMN visible_tienda INTEGER NOT NULL DEFAULT 1',
     'ALTER TABLE products ADD COLUMN en_oferta INTEGER NOT NULL DEFAULT 0',
     'ALTER TABLE products ADD COLUMN precio_oferta_cents INTEGER',
+    "ALTER TABLE products ADD COLUMN wholesale_tiers_json TEXT NOT NULL DEFAULT '[]'",
     'ALTER TABLE products ADD COLUMN last_cost_cents INTEGER',
     'ALTER TABLE products ADD COLUMN last_cost_source TEXT',
     'ALTER TABLE products ADD COLUMN last_cost_updated_at TEXT',
@@ -551,6 +553,7 @@ export async function ensureDatabaseSchema(db: D1Database, force = false): Promi
     image_url: string;
     en_oferta: number;
     precio_oferta_cents: number | null;
+    wholesale_tiers_json?: string;
     last_cost_cents: number;
     expiration_date?: string | null;
   }> = [
@@ -566,6 +569,10 @@ export async function ensureDatabaseSchema(db: D1Database, force = false): Promi
       image_url: '/images/products/leche-alqueria-1l.svg',
       en_oferta: 1,
       precio_oferta_cents: 420000,
+      wholesale_tiers_json: JSON.stringify([
+        { min_quantity: 3, unit_price_cents: 400000 },
+        { min_quantity: 6, unit_price_cents: 380000 },
+      ]),
       last_cost_cents: 340000,
       expiration_date: futureIsoDate(3),
     },
@@ -581,6 +588,10 @@ export async function ensureDatabaseSchema(db: D1Database, force = false): Promi
       image_url: '/images/products/arroz-diana-1lb.svg',
       en_oferta: 0,
       precio_oferta_cents: null,
+      wholesale_tiers_json: JSON.stringify([
+        { min_quantity: 3, unit_price_cents: 250000 },
+        { min_quantity: 6, unit_price_cents: 235000 },
+      ]),
       last_cost_cents: 210000,
     },
     {
@@ -623,6 +634,9 @@ export async function ensureDatabaseSchema(db: D1Database, force = false): Promi
       image_url: '/images/products/arepas-antioquenas-x10.svg',
       en_oferta: 0,
       precio_oferta_cents: null,
+      wholesale_tiers_json: JSON.stringify([
+        { min_quantity: 3, unit_price_cents: 380000 },
+      ]),
       last_cost_cents: 290000,
       expiration_date: futureIsoDate(6),
     },
@@ -789,13 +803,18 @@ export async function ensureDatabaseSchema(db: D1Database, force = false): Promi
       db,
       `INSERT INTO products (
         id, negocio_id, name, price_cents, stock, min_stock, unit, category, image_url, barcode,
-        visible_kiosco, visible_tienda, en_oferta, precio_oferta_cents, last_cost_cents, last_cost_source, expiration_date, created_at, updated_at
-      ) VALUES (?, 'surtifacil', ?, ?, ?, ?, ?, ?, ?, ?, 1, 1, ?, ?, ?, 'purchase', ?, datetime('now'), datetime('now'))
+        visible_kiosco, visible_tienda, en_oferta, precio_oferta_cents, wholesale_tiers_json, last_cost_cents, last_cost_source, expiration_date, created_at, updated_at
+      ) VALUES (?, 'surtifacil', ?, ?, ?, ?, ?, ?, ?, ?, 1, 1, ?, ?, ?, ?, 'purchase', ?, datetime('now'), datetime('now'))
       ON CONFLICT(id) DO UPDATE SET
         image_url = excluded.image_url,
         price_cents = excluded.price_cents,
         category = excluded.category,
         barcode = excluded.barcode,
+        wholesale_tiers_json = CASE
+          WHEN products.wholesale_tiers_json IS NULL OR products.wholesale_tiers_json = '[]'
+          THEN excluded.wholesale_tiers_json
+          ELSE products.wholesale_tiers_json
+        END,
         expiration_date = COALESCE(products.expiration_date, excluded.expiration_date),
         updated_at = datetime('now')`,
       [
@@ -810,6 +829,7 @@ export async function ensureDatabaseSchema(db: D1Database, force = false): Promi
         p.barcode,
         p.en_oferta,
         p.precio_oferta_cents,
+        p.wholesale_tiers_json ?? '[]',
         p.last_cost_cents,
         p.expiration_date ?? null,
       ]

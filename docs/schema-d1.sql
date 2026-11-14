@@ -86,6 +86,7 @@ CREATE TABLE IF NOT EXISTS products (
   visible_tienda INTEGER NOT NULL DEFAULT 1,
   en_oferta INTEGER NOT NULL DEFAULT 0,
   precio_oferta_cents INTEGER,
+  wholesale_tiers_json TEXT NOT NULL DEFAULT '[]', -- Array de { min_quantity, unit_price_cents }
   last_cost_cents INTEGER,
   last_cost_source TEXT CHECK(last_cost_source IN ('purchase', 'fallback_price')),
   last_cost_updated_at TEXT,

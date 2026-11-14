@@ -4,6 +4,20 @@ import { authenticateRequest, AuthContext } from '../_lib/authMiddleware';
 import { ensureDatabaseSchema, hashPassword } from '../_lib/dbSchema';
 import { processSarinCustomerMessage, ensureWhatsAppTables } from '../_lib/sarinCustomerOrchestrator';
 import { processSarinCopilotMessage } from '../_lib/sarinCopilotOrchestrator';
+import {
+  parseWholesaleTiers,
+  resolveProductUnitPricing,
+  validateWholesaleTiersInput,
+  WholesaleTier,
+} from '../_lib/wholesalePricing';
+
+function enrichProductRow<T extends Record<string, any> | null | undefined>(row: T): T {
+  if (!row) return row;
+  return {
+    ...row,
+    wholesale_tiers: parseWholesaleTiers(row.wholesale_tiers ?? row.wholesale_tiers_json),
+  };
+}
 
 interface ProductInput {
   name: string;
@@ -19,6 +33,8 @@ interface ProductInput {
   visible_tienda?: boolean | number;
   en_oferta?: boolean | number;
   precio_oferta_cents?: number | null;
+  wholesale_tiers?: WholesaleTier[] | string | null;
+  wholesale_tiers_json?: string | null;
   last_cost_cents?: number;
   expiration_date?: string | null;
 }
@@ -365,7 +381,7 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       }
 
       const productsResult = await env.DB.prepare(
-        `SELECT id, name, price_cents, stock, min_stock, unit, category, image_url, barcode, visible_kiosco, visible_tienda, en_oferta, precio_oferta_cents
+        `SELECT id, name, price_cents, stock, min_stock, unit, category, image_url, barcode, visible_kiosco, visible_tienda, en_oferta, precio_oferta_cents, wholesale_tiers_json
          FROM products
          WHERE negocio_id = ? AND stock > 0 AND (visible_kiosco = 1 OR visible_tienda = 1)
          ORDER BY category ASC, name ASC`
@@ -398,7 +414,7 @@ export const onRequest: PagesFunction<Env> = async (context) => {
           datos_pago_offline: negocio.datos_pago_offline,
           config: parsedConfig,
         },
-        products: productsResult.results || [],
+        products: (productsResult.results || []).map((row: any) => enrichProductRow(row)),
         combos: combosResult.results || [],
       });
     }
@@ -917,7 +933,7 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         query += ' ORDER BY name ASC';
 
         const result = await env.DB.prepare(query).bind(...params).all();
-        return jsonResponse(result.results || []);
+        return jsonResponse((result.results || []).map((row: any) => enrichProductRow(row)));
       }
 
       // POST /api/products
@@ -932,13 +948,21 @@ export const onRequest: PagesFunction<Env> = async (context) => {
           return errorResponse('Fecha de vencimiento inválida. Usa formato YYYY-MM-DD.', 400);
         }
 
+        const tiersCheck = validateWholesaleTiersInput(
+          body.wholesale_tiers ?? body.wholesale_tiers_json,
+          Math.round(body.price_cents)
+        );
+        if (!tiersCheck.valid) {
+          return errorResponse(tiersCheck.error, 400);
+        }
+
         const id = `prod-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
         await env.DB.prepare(
           `INSERT INTO products (
             id, negocio_id, name, price_cents, stock, min_stock, unit, category, image_url,
             supplier_id, barcode, visible_kiosco, visible_tienda, en_oferta, precio_oferta_cents,
-            last_cost_cents, last_cost_source, expiration_date, last_cost_updated_at, created_at, updated_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'), datetime('now'))`
+            wholesale_tiers_json, last_cost_cents, last_cost_source, expiration_date, last_cost_updated_at, created_at, updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'), datetime('now'))`
         )
           .bind(
             id,
@@ -956,6 +980,7 @@ export const onRequest: PagesFunction<Env> = async (context) => {
             body.visible_tienda !== undefined ? (body.visible_tienda ? 1 : 0) : 1,
             body.en_oferta ? 1 : 0,
             body.precio_oferta_cents ?? null,
+            tiersCheck.json,
             body.last_cost_cents ?? null,
             body.last_cost_cents ? 'fallback_price' : null,
             normalizedExp
@@ -964,17 +989,19 @@ export const onRequest: PagesFunction<Env> = async (context) => {
 
         const created = await env.DB.prepare('SELECT * FROM products WHERE id = ? AND negocio_id = ?')
           .bind(id, auth.negocioId)
-          .first();
+          .first<Record<string, any>>();
 
-        return jsonResponse(created, 201);
+        return jsonResponse(enrichProductRow(created), 201);
       }
 
       // PUT /api/products/:id
       if (method === 'PUT' && productId) {
         const body = (await request.json()) as Partial<ProductInput>;
-        const existing = await env.DB.prepare('SELECT id, expiration_date FROM products WHERE id = ? AND negocio_id = ?')
+        const existing = await env.DB.prepare(
+          'SELECT id, price_cents, expiration_date, wholesale_tiers_json FROM products WHERE id = ? AND negocio_id = ?'
+        )
           .bind(productId, auth.negocioId)
-          .first<{ id: string; expiration_date?: string | null }>();
+          .first<{ id: string; price_cents: number; expiration_date?: string | null; wholesale_tiers_json?: string | null }>();
 
         if (!existing) {
           return errorResponse('Producto no encontrado.', 404);
@@ -987,6 +1014,20 @@ export const onRequest: PagesFunction<Env> = async (context) => {
             return errorResponse('Fecha de vencimiento inválida. Usa formato YYYY-MM-DD.', 400);
           }
           nextExpirationDate = normalizedExp;
+        }
+
+        const effectivePriceCents =
+          body.price_cents !== undefined ? Math.round(body.price_cents) : existing.price_cents;
+        let nextWholesaleTiersJson = existing.wholesale_tiers_json ?? '[]';
+        if (body.wholesale_tiers !== undefined || body.wholesale_tiers_json !== undefined) {
+          const tiersCheck = validateWholesaleTiersInput(
+            body.wholesale_tiers ?? body.wholesale_tiers_json,
+            effectivePriceCents
+          );
+          if (!tiersCheck.valid) {
+            return errorResponse(tiersCheck.error, 400);
+          }
+          nextWholesaleTiersJson = tiersCheck.json;
         }
 
         await env.DB.prepare(
@@ -1004,6 +1045,7 @@ export const onRequest: PagesFunction<Env> = async (context) => {
             visible_tienda = COALESCE(?, visible_tienda),
             en_oferta = COALESCE(?, en_oferta),
             precio_oferta_cents = COALESCE(?, precio_oferta_cents),
+            wholesale_tiers_json = ?,
             expiration_date = ?,
             updated_at = datetime('now')
           WHERE id = ? AND negocio_id = ?`
@@ -1022,6 +1064,7 @@ export const onRequest: PagesFunction<Env> = async (context) => {
             body.visible_tienda !== undefined ? (body.visible_tienda ? 1 : 0) : null,
             body.en_oferta !== undefined ? (body.en_oferta ? 1 : 0) : null,
             body.precio_oferta_cents !== undefined ? body.precio_oferta_cents : null,
+            nextWholesaleTiersJson,
             nextExpirationDate,
             productId,
             auth.negocioId
@@ -1030,9 +1073,9 @@ export const onRequest: PagesFunction<Env> = async (context) => {
 
         const updated = await env.DB.prepare('SELECT * FROM products WHERE id = ? AND negocio_id = ?')
           .bind(productId, auth.negocioId)
-          .first();
+          .first<Record<string, any>>();
 
-        return jsonResponse(updated);
+        return jsonResponse(enrichProductRow(updated));
       }
 
       // DELETE /api/products/:id
@@ -1141,10 +1184,21 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         const productIds = body.items.map((i) => i.product_id);
         const placeholders = productIds.map(() => '?').join(',');
         const dbProductsResult = await env.DB.prepare(
-          `SELECT id, name, price_cents, stock, category, last_cost_cents FROM products WHERE negocio_id = ? AND id IN (${placeholders})`
+          `SELECT id, name, price_cents, stock, category, last_cost_cents, en_oferta, precio_oferta_cents, wholesale_tiers_json
+           FROM products WHERE negocio_id = ? AND id IN (${placeholders})`
         )
           .bind(auth.negocioId, ...productIds)
-          .all<{ id: string; name: string; price_cents: number; stock: number; category: string; last_cost_cents: number | null }>();
+          .all<{
+            id: string;
+            name: string;
+            price_cents: number;
+            stock: number;
+            category: string;
+            last_cost_cents: number | null;
+            en_oferta?: number;
+            precio_oferta_cents?: number | null;
+            wholesale_tiers_json?: string | null;
+          }>();
 
         const productMap = new Map((dbProductsResult.results || []).map((p) => [p.id, p]));
 
@@ -1157,6 +1211,9 @@ export const onRequest: PagesFunction<Env> = async (context) => {
           quantity: number;
           price_cents: number;
           subtotal_cents: number;
+          regular_price_cents: number;
+          applied_wholesale_tier: WholesaleTier | null;
+          wholesale_savings_cents: number;
           unit_cost_cents: number;
           cost_subtotal_cents: number;
           category: string;
@@ -1171,8 +1228,9 @@ export const onRequest: PagesFunction<Env> = async (context) => {
             return errorResponse('La cantidad vendida debe ser mayor a 0.', 400);
           }
 
-          const unitPrice = dbProd.price_cents;
-          const subtotal = unitPrice * item.quantity;
+          const pricing = resolveProductUnitPricing(dbProd, item.quantity);
+          const unitPrice = pricing.unit_price_cents;
+          const subtotal = pricing.subtotal_cents;
           const unitCost = dbProd.last_cost_cents ?? Math.round(unitPrice * 0.7);
           const costSubtotal = unitCost * item.quantity;
 
@@ -1186,6 +1244,9 @@ export const onRequest: PagesFunction<Env> = async (context) => {
             quantity: item.quantity,
             price_cents: unitPrice,
             subtotal_cents: subtotal,
+            regular_price_cents: pricing.regular_unit_price_cents,
+            applied_wholesale_tier: pricing.applied_tier,
+            wholesale_savings_cents: pricing.wholesale_savings_cents,
             unit_cost_cents: unitCost,
             cost_subtotal_cents: costSubtotal,
             category: dbProd.category || 'General',
@@ -2598,23 +2659,23 @@ export const onRequest: PagesFunction<Env> = async (context) => {
 
           // Consultar producto
           const dbProd = await env.DB.prepare(
-            'SELECT id, name, price_cents, en_oferta, precio_oferta_cents, unit, image_url, stock FROM products WHERE id = ? AND negocio_id = ?'
+            'SELECT id, name, price_cents, en_oferta, precio_oferta_cents, wholesale_tiers_json, unit, image_url, stock FROM products WHERE id = ? AND negocio_id = ?'
           )
             .bind(prodId, negocio.id)
             .first<any>();
 
           if (dbProd) {
-            const unitPrice = (dbProd.en_oferta && dbProd.precio_oferta_cents && dbProd.precio_oferta_cents > 0)
-              ? dbProd.precio_oferta_cents
-              : dbProd.price_cents;
-            const subtotal = unitPrice * qty;
-            totalCents += subtotal;
+            const pricing = resolveProductUnitPricing(dbProd, qty);
+            totalCents += pricing.subtotal_cents;
             verifiedItems.push({
               product_id: dbProd.id,
               product_name: dbProd.name,
               quantity: qty,
-              unit_price_cents: unitPrice,
-              subtotal_cents: subtotal,
+              unit_price_cents: pricing.unit_price_cents,
+              subtotal_cents: pricing.subtotal_cents,
+              regular_unit_price_cents: pricing.regular_unit_price_cents,
+              applied_wholesale_tier: pricing.applied_tier,
+              wholesale_savings_cents: pricing.wholesale_savings_cents,
               unit: dbProd.unit,
               image_url: dbProd.image_url,
             });

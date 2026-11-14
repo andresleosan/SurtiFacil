@@ -223,9 +223,16 @@ export function LiveOrdersTray({ onLoadOrderToCart, onSaleCreated }: LiveOrdersT
                 {/* Ítems del pedido */}
                 <div className="rounded-xl bg-slate-50 p-2.5 mb-3 text-xs divide-y divide-slate-100">
                   {items.map((item, idx) => (
-                    <div key={idx} className="py-1 flex justify-between items-center">
-                      <span className="font-medium text-slate-700">
-                        {item.quantity}× {item.product_name}
+                    <div key={idx} className="py-1 flex justify-between items-center gap-2">
+                      <span className="font-medium text-slate-700 flex items-center gap-1.5 flex-wrap">
+                        <span>
+                          {item.quantity}× {item.product_name}
+                        </span>
+                        {item.applied_wholesale_tier && (
+                          <span className="inline-flex items-center rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-800 tabular-nums">
+                            🏷️ {item.applied_wholesale_tier.min_quantity}+
+                          </span>
+                        )}
                       </span>
                       <span className="text-slate-500 tabular-nums">
                         {formatCentsCOP(item.subtotal_cents || item.unit_price_cents * item.quantity)}

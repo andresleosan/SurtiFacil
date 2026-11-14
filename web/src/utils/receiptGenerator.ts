@@ -111,8 +111,10 @@ export function generateSaleReceiptText(
 
   // Ítems de la venta
   let totalItemsCount = 0;
+  let totalWholesaleSavings = 0;
   for (const item of sale.items || []) {
     totalItemsCount += item.quantity;
+    totalWholesaleSavings += item.wholesale_savings_cents || 0;
     const subtotalStr = formatCentsCOP(item.subtotal || item.price_cents * item.quantity);
     if (options.width === '58mm') {
       const leftCol = `${item.quantity}x ${item.product_name}`;
@@ -122,12 +124,24 @@ export function generateSaleReceiptText(
       const leftCol = `${item.quantity}x ${item.product_name} (${unitStr})`;
       lines.push(formatTwoColumns(leftCol, subtotalStr, colWidth));
     }
+    if (item.applied_wholesale_tier) {
+      lines.push(
+        formatTwoColumns(
+          `  Promo ${item.applied_wholesale_tier.min_quantity}+ c/u`,
+          formatCentsCOP(item.price_cents),
+          colWidth
+        )
+      );
+    }
   }
 
   lines.push(divider);
 
   // Totales
   lines.push(formatTwoColumns(`Total Artículos (${totalItemsCount}):`, formatCentsCOP(sale.total), colWidth));
+  if (totalWholesaleSavings > 0) {
+    lines.push(formatTwoColumns('Ahorro Mayorista:', formatCentsCOP(totalWholesaleSavings), colWidth));
+  }
 
   const paymentMethodLabels: Record<string, string> = {
     cash: 'Efectivo',
@@ -182,11 +196,19 @@ export function generateSaleWhatsAppText(sale: Sale, store: Partial<StoreSetting
   }
 
   text += `\n🛒 *DETALLE DEL MERCADO:*\n`;
+  let totalWhatsAppSavings = 0;
   for (const item of sale.items || []) {
+    totalWhatsAppSavings += item.wholesale_savings_cents || 0;
     const subtotalStr = formatCentsCOP(item.subtotal || item.price_cents * item.quantity);
-    text += `▪ ${item.quantity}x ${item.product_name} — ${subtotalStr}\n`;
+    const tierSuffix = item.applied_wholesale_tier
+      ? ` _(Promo ${item.applied_wholesale_tier.min_quantity}+)_`
+      : '';
+    text += `▪ ${item.quantity}x ${item.product_name}${tierSuffix} — ${subtotalStr}\n`;
   }
 
+  if (totalWhatsAppSavings > 0) {
+    text += `🏷️ *Ahorro Mayorista:* ${formatCentsCOP(totalWhatsAppSavings)}\n`;
+  }
   text += `\n💰 *TOTAL A PAGAR:* *${formatCentsCOP(sale.total)}*\n`;
   text += `💳 *Medio de pago:* ${methodLabel}\n`;
 

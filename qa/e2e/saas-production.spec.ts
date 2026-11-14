@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { resolveProductUnitPricing } from '../../web/functions/_lib/wholesalePricing';
 
 function createFakeFirebaseJwt(uid: string, email: string): string {
   const toBase64Url = (obj: Record<string, unknown>) =>
@@ -59,6 +60,7 @@ async function setupProductionE2EHarness(page: Page) {
       visible_kiosco: 1,
       visible_tienda: 1,
       en_oferta: 0,
+      wholesale_tiers: [{ min_quantity: 3, unit_price_cents: 380000 }],
       expiration_date: futureDayIso(3),
     },
     {
@@ -396,13 +398,17 @@ async function setupProductionE2EHarness(page: Page) {
       const trackingToken = `trk_${Date.now()}_${orderNum}`;
       const items = (body.items || []).map((it: any) => {
         const prod = products.find((p) => p.id === it.product_id) || products[0];
-        const unitPrice = prod.en_oferta && prod.precio_oferta_cents ? prod.precio_oferta_cents : prod.price_cents;
+        const qty = Math.max(1, Number(it.quantity || 1));
+        const pricing = resolveProductUnitPricing(prod, qty);
         return {
           product_id: prod.id,
           product_name: prod.name,
-          quantity: it.quantity || 1,
-          unit_price_cents: unitPrice,
-          subtotal_cents: unitPrice * (it.quantity || 1),
+          quantity: qty,
+          unit_price_cents: pricing.unit_price_cents,
+          subtotal_cents: pricing.subtotal_cents,
+          regular_price_cents: pricing.active_base_unit_price_cents,
+          applied_wholesale_tier: pricing.applied_tier,
+          wholesale_savings_cents: pricing.wholesale_savings_cents,
         };
       });
       const subtotal = items.reduce((s: number, i: any) => s + i.subtotal_cents, 0);
@@ -479,13 +485,18 @@ async function setupProductionE2EHarness(page: Page) {
       const saleId = `sale-${Date.now()}`;
       const mappedItems = (body.items || []).map((it: any) => {
         const prod = products.find((p) => p.id === it.product_id) || products[0];
-        prod.stock = Math.max(0, prod.stock - Number(it.quantity || 1));
+        const qty = Math.max(1, Number(it.quantity || 1));
+        prod.stock = Math.max(0, prod.stock - qty);
+        const pricing = resolveProductUnitPricing(prod, qty);
         return {
           product_id: prod.id,
           product_name: prod.name,
-          quantity: Number(it.quantity || 1),
-          price_cents: prod.price_cents,
-          subtotal_cents: prod.price_cents * Number(it.quantity || 1),
+          quantity: qty,
+          price_cents: pricing.unit_price_cents,
+          subtotal_cents: pricing.subtotal_cents,
+          regular_price_cents: pricing.active_base_unit_price_cents,
+          applied_wholesale_tier: pricing.applied_tier,
+          wholesale_savings_cents: pricing.wholesale_savings_cents,
         };
       });
       const totalCents = mappedItems.reduce((s: number, i: any) => s + i.subtotal_cents, 0);
@@ -1261,5 +1272,82 @@ test.describe('Suite E2E de Certificación de Producción — SurtiFácil SaaS',
     await expect(dialogAfter.getByRole('status')).toHaveText(/Merma revertida/i);
     await dialogAfter.getByRole('button', { name: 'Cerrar', exact: true }).last().click();
     await expect(page.getByText(/^25$/).or(page.getByText(/25\s*uds\./i)).first()).toBeVisible();
+  });
+
+  test('10. Promociones Mayoristas (3+ a precio especial) en Inventario, Kiosco iPad, POS y Tienda Vecinal', async ({ page }) => {
+    await setupProductionE2EHarness(page);
+
+    // 1. Autenticación y configuración adicional de escala mayorista en Inventario (#/inventory)
+    await page.goto('/#/login');
+    await page.getByLabel('Correo electrónico').fill('andres.san1404@gmail.com');
+    await page.getByLabel('Contraseña').fill('TestPass123!');
+    await page.getByRole('button', { name: 'Iniciar Sesión' }).click();
+
+    await page.goto('/#/inventory');
+    await expect(page.getByText(/🏷️\s*3\+/i).first()).toBeVisible();
+
+    await page.getByRole('button', { name: /Editar Leche Entera Colanta 1L/i }).first().click();
+    const editDialog = page.getByRole('dialog', { name: 'Editar producto' });
+    await expect(editDialog).toBeVisible();
+    await expect(editDialog.getByText('Precios Mayoristas / Descuento por Volumen')).toBeVisible();
+
+    // Agregar segundo tramo rápido (+6 uds) y guardar
+    await editDialog.getByRole('button', { name: '+6 uds' }).click();
+    await editDialog.getByRole('button', { name: 'Guardar', exact: true }).click();
+    await expect(editDialog).not.toBeVisible();
+
+    // 2. Kiosco iPad (#/kiosco/surtifacil): activar 3+ y revertir al bajar a 2
+    await page.goto('/#/kiosco/surtifacil');
+    await expect(page.getByText(/🏷️ Lleva 3\+ a \$ 3\.800 c\/u/i)).toBeVisible();
+
+    await page.getByRole('button', { name: 'Agregar Leche Entera Colanta 1L al pedido' }).click();
+    const kioskPlus = page.getByRole('button', {
+      name: 'Agregar otra unidad de Leche Entera Colanta 1L',
+      exact: true,
+    });
+    await kioskPlus.click(); // 2 uds
+    await kioskPlus.click(); // 3 uds -> activa promo 3+ ($3.800 x 3 = $11.400, ahorro $1.200)
+
+    await expect(page.getByText(/✅ Promo 3\+ activa · Ahorras \$ 1\.200/i)).toBeVisible();
+    await expect(page.getByText('🏷️ Ahorro mayorista aplicado:').first()).toBeVisible();
+
+    await page
+      .getByRole('button', { name: 'Quitar una unidad de Leche Entera Colanta 1L', exact: true })
+      .click(); // vuelve a 2
+    await expect(page.getByText(/✅ Promo 3\+ activa/i)).not.toBeVisible();
+
+    // 3. POS (#/create-sale): nudge -> 3+ -> ahorro mayorista -> confirmar venta
+    await page.goto('/#/create-sale');
+    const posList = page.getByRole('list', { name: 'Productos disponibles' });
+    const posAddMilk = posList.getByRole('button', { name: /Agregar Leche Entera Colanta 1L/i });
+    await expect(posList.getByText(/🏷️\s*3\+/).first()).toBeVisible();
+
+    await posAddMilk.click();
+    await posAddMilk.click();
+    await expect(page.getByText(/\+1 para 3\+/i)).toBeVisible();
+
+    await posAddMilk.click(); // 3 unidades
+    await expect(page.getByText(/🏷️ Mayorista 3\+/i)).toBeVisible();
+    await expect(page.getByText('Ahorro mayorista')).toBeVisible();
+
+    await page.getByRole('button', { name: /Pago exacto de/i }).click();
+    await page.getByRole('button', { name: /Confirmar venta/i }).click();
+    await expect(
+      page.getByRole('status').filter({ hasText: 'Venta registrada exitosamente' })
+    ).toBeVisible();
+
+    // 4. Tienda Vecinal (#/tienda/surtifacil): badge promocional y ahorro dinámico en checkout
+    await page.goto('/#/tienda/surtifacil');
+    await expect(page.getByText(/🏷️\s*3\+ a /i).first()).toBeVisible();
+    await page
+      .getByRole('button', { name: /Agregar Leche Entera Colanta 1L a la canasta/i })
+      .click();
+    await page.getByRole('button', { name: /Abrir canasta y confirmar pedido/i }).click();
+    await expect(page.getByText(/Lleva 2 más para pagar/i)).toBeVisible();
+    const storePlus = page.getByRole('button', { name: 'Sumar uno de Leche Entera Colanta 1L' });
+    await storePlus.click();
+    await storePlus.click();
+    await expect(page.getByText(/🏷️ Mayorista 3\+/i)).toBeVisible();
+    await expect(page.getByText(/🏷️ Ahorro mayorista incluido:/i)).toBeVisible();
   });
 });

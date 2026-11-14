@@ -9,12 +9,14 @@ import {
   getCachedProductsForTenant,
   isOfflineModeActive,
 } from './offlineSyncService';
+import { parseWholesaleTiers, resolveProductUnitPricing } from '../utils/wholesalePricing';
 
 function isMockMode(): boolean {
   return import.meta.env.VITE_USE_MOCK_DATA === 'true';
 }
 
 function mapProduct(row: any): Product {
+  const wholesaleTiers = parseWholesaleTiers(row.wholesale_tiers ?? row.wholesale_tiers_json);
   return {
     id: row.id,
     name: row.name,
@@ -24,6 +26,13 @@ function mapProduct(row: any): Product {
     barcode: row.barcode || undefined,
     supplier_id: row.supplier_id || undefined,
     createdAt: row.created_at || row.createdAt,
+    en_oferta: row.en_oferta !== undefined ? Boolean(row.en_oferta) : false,
+    precio_oferta_cents: row.precio_oferta_cents ?? undefined,
+    wholesale_tiers: wholesaleTiers,
+    wholesale_tiers_json:
+      typeof row.wholesale_tiers_json === 'string'
+        ? row.wholesale_tiers_json
+        : JSON.stringify(wholesaleTiers),
     last_cost_cents: row.last_cost_cents ?? undefined,
     last_cost_source: row.last_cost_source || undefined,
     last_cost_updated_at: row.last_cost_updated_at || undefined,
@@ -54,6 +63,9 @@ function mapSale(row: any): Sale {
       quantity: it.quantity,
       price_cents: it.price_cents,
       subtotal: it.subtotal_cents ?? it.subtotal ?? (it.price_cents * it.quantity),
+      regular_price_cents: it.regular_price_cents ?? undefined,
+      applied_wholesale_tier: it.applied_wholesale_tier ?? undefined,
+      wholesale_savings_cents: it.wholesale_savings_cents ?? undefined,
       unit_cost_cents: it.unit_cost_cents ?? undefined,
       cost_subtotal_cents: it.cost_subtotal_cents ?? undefined,
       category: it.category || undefined,
@@ -193,6 +205,7 @@ function createMockSale(
 
   const snapshotItems: SaleItem[] = cartItems.map((item) => {
     const product = mockProducts.find((candidate) => candidate.id === item.product_id)!;
+    const pricing = resolveProductUnitPricing(product, item.quantity);
     const hasCost = Number.isSafeInteger(product.last_cost_cents) && product.last_cost_cents! >= 0;
     const unitCost = hasCost ? product.last_cost_cents! : Math.floor(product.price_cents / 2);
     const costSource = hasCost ? (product.last_cost_source || 'purchase') : 'fallback_price';
@@ -200,8 +213,11 @@ function createMockSale(
       product_id: product.id,
       product_name: product.name,
       quantity: item.quantity,
-      price_cents: product.price_cents,
-      subtotal: product.price_cents * item.quantity,
+      price_cents: pricing.unit_price_cents,
+      subtotal: pricing.subtotal_cents,
+      regular_price_cents: pricing.regular_unit_price_cents,
+      applied_wholesale_tier: pricing.applied_tier,
+      wholesale_savings_cents: pricing.wholesale_savings_cents,
       unit_cost_cents: unitCost,
       cost_subtotal_cents: unitCost * item.quantity,
       cost_source: costSource,

@@ -223,4 +223,46 @@ describe('offlineSyncService & Multi-Tenant Offline Resilience', () => {
     rerender(<OfflineQueueModal isOpen={modalOpen} onClose={() => {}} />);
     expect(syncPendingQueue).toBeDefined();
   });
+
+  it('recalcula escalas mayoristas en modo offline a partir de los productos cacheados del tenant', async () => {
+    setSimulatedOfflineMode(true);
+
+    await cacheProductsForTenant(
+      [
+        {
+          id: 'p-leche-off',
+          name: 'Leche Entera 1L',
+          price_cents: 450000,
+          stock: 25,
+          wholesale_tiers: [
+            { min_quantity: 3, unit_price_cents: 400000 },
+            { min_quantity: 6, unit_price_cents: 380000 },
+          ],
+        },
+      ],
+      'surtifacil',
+    );
+
+    const queued = await enqueueOfflineSale(
+      [
+        {
+          product_id: 'p-leche-off',
+          product_name: 'Leche Entera 1L',
+          quantity: 3,
+          price_cents: 450000,
+          subtotal: 1350000,
+        },
+      ],
+      'cash',
+      undefined,
+      'surtifacil',
+    );
+
+    const payload = queued.sale_payload!;
+    expect(payload.total_cents).toBe(1200000);
+    expect(payload.items[0]).toMatchObject({
+      price_cents: 400000,
+      subtotal: 1200000,
+    });
+  });
 });

@@ -8,6 +8,12 @@ import type {
   CustomerOrderPaymentMethod,
 } from '../types/customerOrder';
 import { formatCOP } from '../utils/currency';
+import {
+  getPrimaryWholesaleTier,
+  parseWholesaleTiers,
+  resolveProductUnitPricing,
+  type WholesaleTier,
+} from '../utils/wholesalePricing';
 
 export interface PublicStorefrontProps {
   slug?: string;
@@ -19,6 +25,13 @@ interface CartItem {
   product_name: string;
   quantity: number;
   unit_price_cents: number;
+  regular_price_cents: number;
+  applied_wholesale_tier: WholesaleTier | null;
+  wholesale_savings_cents: number;
+  wholesale_tiers: WholesaleTier[];
+  base_price_cents: number;
+  en_oferta?: number;
+  precio_oferta_cents?: number | null;
   unit: string;
   image_url?: string;
 }
@@ -96,17 +109,40 @@ export default function PublicStorefront({ slug = 'surtifacil', onExit }: Public
     image_url?: string;
     en_oferta?: number;
     precio_oferta_cents?: number | null;
+    wholesale_tiers?: WholesaleTier[];
+    wholesale_tiers_json?: string | null;
   }) => {
-    const finalPrice =
-      product.en_oferta && product.precio_oferta_cents && product.precio_oferta_cents > 0
-        ? product.precio_oferta_cents
-        : product.price_cents;
+    const tiers = parseWholesaleTiers(product.wholesale_tiers ?? product.wholesale_tiers_json);
 
     setCart((prev) => {
       const existing = prev.find((item) => item.product_id === product.id);
+      const nextQty = existing ? existing.quantity + 1 : 1;
+      const pricing = resolveProductUnitPricing(
+        {
+          price_cents: product.price_cents,
+          en_oferta: product.en_oferta,
+          precio_oferta_cents: product.precio_oferta_cents,
+          wholesale_tiers: tiers,
+        },
+        nextQty
+      );
+
       if (existing) {
         return prev.map((item) =>
-          item.product_id === product.id ? { ...item, quantity: item.quantity + 1 } : item
+          item.product_id === product.id
+            ? {
+                ...item,
+                quantity: nextQty,
+                unit_price_cents: pricing.unit_price_cents,
+                regular_price_cents: pricing.active_base_unit_price_cents,
+                applied_wholesale_tier: pricing.applied_tier,
+                wholesale_savings_cents: pricing.wholesale_savings_cents,
+                wholesale_tiers: tiers,
+                base_price_cents: product.price_cents,
+                en_oferta: product.en_oferta,
+                precio_oferta_cents: product.precio_oferta_cents,
+              }
+            : item
         );
       }
       return [
@@ -115,7 +151,14 @@ export default function PublicStorefront({ slug = 'surtifacil', onExit }: Public
           product_id: product.id,
           product_name: product.name,
           quantity: 1,
-          unit_price_cents: finalPrice,
+          unit_price_cents: pricing.unit_price_cents,
+          regular_price_cents: pricing.active_base_unit_price_cents,
+          applied_wholesale_tier: pricing.applied_tier,
+          wholesale_savings_cents: pricing.wholesale_savings_cents,
+          wholesale_tiers: tiers,
+          base_price_cents: product.price_cents,
+          en_oferta: product.en_oferta,
+          precio_oferta_cents: product.precio_oferta_cents,
           unit: product.unit || 'unidad',
           image_url: product.image_url,
         },
@@ -129,7 +172,25 @@ export default function PublicStorefront({ slug = 'surtifacil', onExit }: Public
         .map((item) => {
           if (item.product_id === productId) {
             const nextQty = item.quantity + delta;
-            return nextQty > 0 ? { ...item, quantity: nextQty } : null;
+            if (nextQty <= 0) return null;
+            const catalogProduct = store?.products.find((p) => p.id === productId);
+            const pricing = resolveProductUnitPricing(
+              catalogProduct ?? {
+                price_cents: item.base_price_cents,
+                en_oferta: item.en_oferta,
+                precio_oferta_cents: item.precio_oferta_cents,
+                wholesale_tiers: item.wholesale_tiers,
+              },
+              nextQty
+            );
+            return {
+              ...item,
+              quantity: nextQty,
+              unit_price_cents: pricing.unit_price_cents,
+              regular_price_cents: pricing.active_base_unit_price_cents,
+              applied_wholesale_tier: pricing.applied_tier,
+              wholesale_savings_cents: pricing.wholesale_savings_cents,
+            };
           }
           return item;
         })
@@ -140,6 +201,10 @@ export default function PublicStorefront({ slug = 'surtifacil', onExit }: Public
   // Cálculos financieros
   const subtotalCents = useMemo(() => {
     return cart.reduce((sum, item) => sum + item.unit_price_cents * item.quantity, 0);
+  }, [cart]);
+
+  const totalWholesaleSavingsCents = useMemo(() => {
+    return cart.reduce((sum, item) => sum + (item.wholesale_savings_cents || 0), 0);
   }, [cart]);
 
   const deliveryCostCents = useMemo(() => {
@@ -567,6 +632,23 @@ export default function PublicStorefront({ slug = 'surtifacil', onExit }: Public
                           </span>
                         )}
                       </div>
+                      {(() => {
+                        const primaryTier = getPrimaryWholesaleTier({
+                          price_cents: product.price_cents,
+                          en_oferta: product.en_oferta,
+                          precio_oferta_cents: product.precio_oferta_cents,
+                          wholesale_tiers: product.wholesale_tiers,
+                          wholesale_tiers_json: product.wholesale_tiers_json,
+                        });
+                        if (!primaryTier) return null;
+                        return (
+                          <div className="mt-1">
+                            <span className="inline-flex items-center gap-1 rounded-md bg-amber-50 border border-amber-200 px-1.5 py-0.5 text-[10px] font-bold text-amber-800 tabular-nums">
+                              🏷️ {primaryTier.min_quantity}+ a {formatCOP(primaryTier.unit_price_cents)}
+                            </span>
+                          </div>
+                        );
+                      })()}
                     </div>
 
                     {/* Controles de Canasta */}
@@ -683,22 +765,52 @@ export default function PublicStorefront({ slug = 'surtifacil', onExit }: Public
                   Productos Seleccionados ({totalItemsCount})
                 </h3>
                 <div className="divide-y divide-gray-100 rounded-xl border border-slate-200 bg-white">
-                  {cart.map((item) => (
-                    <div key={item.product_id} className="flex items-center justify-between p-3 gap-2.5">
-                      <ProductImage
-                        src={item.image_url}
-                        alt={item.product_name}
-                        productName={item.product_name}
-                        showOfferBadge={false}
-                        containerClassName="h-10 w-10 shrink-0 rounded-lg bg-slate-50 p-1 border border-slate-200"
-                        className="h-full w-full object-contain"
-                      />
-                      <div className="min-w-0 flex-1">
-                        <div className="text-xs font-semibold text-sf-text truncate">{item.product_name}</div>
-                        <div className="text-[11px] text-gray-500 tabular-nums">
-                          {formatCOP(item.unit_price_cents)} × {item.quantity} {item.unit}
+                  {cart.map((item) => {
+                    const catalogProduct = store?.products.find((p) => p.id === item.product_id);
+                    const pricing = resolveProductUnitPricing(
+                      catalogProduct ?? {
+                        price_cents: item.base_price_cents,
+                        en_oferta: item.en_oferta,
+                        precio_oferta_cents: item.precio_oferta_cents,
+                        wholesale_tiers: item.wholesale_tiers,
+                      },
+                      item.quantity
+                    );
+                    return (
+                      <div key={item.product_id} className="flex items-center justify-between p-3 gap-2.5">
+                        <ProductImage
+                          src={item.image_url}
+                          alt={item.product_name}
+                          productName={item.product_name}
+                          showOfferBadge={false}
+                          containerClassName="h-10 w-10 shrink-0 rounded-lg bg-slate-50 p-1 border border-slate-200"
+                          className="h-full w-full object-contain"
+                        />
+                        <div className="min-w-0 flex-1">
+                          <div className="text-xs font-semibold text-sf-text truncate">{item.product_name}</div>
+                          <div className="text-[11px] text-gray-500 tabular-nums flex items-center gap-1.5 flex-wrap">
+                            <span>
+                              {formatCOP(item.unit_price_cents)} × {item.quantity} {item.unit}
+                            </span>
+                            {item.applied_wholesale_tier && item.regular_price_cents > item.unit_price_cents && (
+                              <span className="line-through text-gray-400">
+                                {formatCOP(item.regular_price_cents)}
+                              </span>
+                            )}
+                          </div>
+                          {item.applied_wholesale_tier && (
+                            <div className="mt-0.5 inline-flex items-center rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-800 tabular-nums">
+                              🏷️ Mayorista {item.applied_wholesale_tier.min_quantity}+ · Ahorras{' '}
+                              {formatCOP(item.wholesale_savings_cents)}
+                            </div>
+                          )}
+                          {!item.applied_wholesale_tier && pricing.next_tier && (
+                            <div className="mt-0.5 text-[10px] font-semibold text-amber-700 tabular-nums">
+                              Lleva {pricing.units_to_next_tier} más para pagar{' '}
+                              {formatCOP(pricing.next_tier.unit_price_cents)} c/u
+                            </div>
+                          )}
                         </div>
-                      </div>
 
                       <div className="flex items-center gap-2 shrink-0">
                         <span className="text-xs font-bold text-sf-primary tabular-nums">
@@ -725,7 +837,8 @@ export default function PublicStorefront({ slug = 'surtifacil', onExit }: Public
                         </div>
                       </div>
                     </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
 
@@ -916,6 +1029,12 @@ export default function PublicStorefront({ slug = 'surtifacil', onExit }: Public
                     <span>Subtotal productos:</span>
                     <span className="font-semibold tabular-nums">{formatCOP(subtotalCents)}</span>
                   </div>
+                  {totalWholesaleSavingsCents > 0 && (
+                    <div className="flex justify-between text-emerald-700 font-semibold">
+                      <span>🏷️ Ahorro mayorista incluido:</span>
+                      <span className="tabular-nums">-{formatCOP(totalWholesaleSavingsCents)}</span>
+                    </div>
+                  )}
                   {deliveryType === 'delivery' && (
                     <div className="flex justify-between text-gray-600">
                       <span>Costo de domicilio:</span>

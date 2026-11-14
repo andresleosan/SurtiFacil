@@ -8,6 +8,8 @@ import { Modal } from './ui/Modal';
 import { ProductImage } from './ui/ProductImage';
 import { ProductPhotoUploader } from './ui/ProductPhotoUploader';
 import { COLOMBIAN_PRODUCT_CATALOG, findColombianProductImage } from '../data/colombianCatalog';
+import { WholesaleTiersEditor } from './ui/WholesaleTiersEditor';
+import { validateWholesaleTiersInput, type WholesaleTier } from '../utils/wholesalePricing';
 
 interface AddProductModalProps {
   isOpen: boolean;
@@ -21,6 +23,7 @@ interface AddProductModalProps {
     barcode?: string;
     image_url?: string;
     expiration_date?: string;
+    wholesale_tiers?: WholesaleTier[];
   }) => void | Promise<void>;
 }
 
@@ -58,6 +61,7 @@ const EMPTY_FORM = {
 const AddProductModal = ({ isOpen, onClose, onAddProduct }: AddProductModalProps) => {
   const [mode, setMode] = useState<InputMode>('manual');
   const [formData, setFormData] = useState(EMPTY_FORM);
+  const [wholesaleTiers, setWholesaleTiers] = useState<WholesaleTier[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -125,6 +129,7 @@ const AddProductModal = ({ isOpen, onClose, onAddProduct }: AddProductModalProps
 
   const resetAndClose = () => {
     setFormData(EMPTY_FORM);
+    setWholesaleTiers([]);
     setMode('manual');
     setError('');
     onClose();
@@ -159,17 +164,25 @@ const AddProductModal = ({ isOpen, onClose, onAddProduct }: AddProductModalProps
       return;
     }
 
+    const priceCents = Math.round(price * 100);
+    const tiersCheck = validateWholesaleTiersInput(wholesaleTiers, priceCents);
+    if (!tiersCheck.valid) {
+      setError(tiersCheck.error);
+      return;
+    }
+
     try {
       setLoading(true);
       await onAddProduct({
         name: formData.name.trim(),
-        price_cents: Math.round(price * 100),
+        price_cents: priceCents,
         stock,
         category: formData.category,
         unit: formData.unit || 'unidad',
         barcode: formData.barcode.trim() || undefined,
         image_url: formData.image_url.trim() || undefined,
         expiration_date: formData.expiration_date.trim() || undefined,
+        ...(tiersCheck.tiers.length > 0 ? { wholesale_tiers: tiersCheck.tiers } : {}),
       });
       resetAndClose();
     } catch (err) {
@@ -392,6 +405,18 @@ const AddProductModal = ({ isOpen, onClose, onAddProduct }: AddProductModalProps
                   className="input text-base"
                 />
               </div>
+
+              <WholesaleTiersEditor
+                idPrefix="add-wholesale"
+                inputScale="pesos"
+                tiers={wholesaleTiers}
+                regularPriceCents={
+                  Number.isFinite(parseFloat(formData.price))
+                    ? Math.max(0, Math.round(parseFloat(formData.price) * 100))
+                    : 0
+                }
+                onChange={setWholesaleTiers}
+              />
             </form>
           )}
 

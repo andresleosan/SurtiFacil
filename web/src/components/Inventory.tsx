@@ -22,6 +22,13 @@ import { useConfirm } from './ui/ConfirmDialog';
 import { formatCOP, formatCentsCOP } from '../utils/currency';
 import { ProductImage } from './ui/ProductImage';
 import { ProductPhotoUploader } from './ui/ProductPhotoUploader';
+import { WholesaleTiersEditor } from './ui/WholesaleTiersEditor';
+import {
+  getPrimaryWholesaleTier,
+  parseWholesaleTiers,
+  validateWholesaleTiersInput,
+  type WholesaleTier,
+} from '../utils/wholesalePricing';
 
 const formatPrice = (cents: number) => `$${(cents / 100).toFixed(0)}`;
 
@@ -81,6 +88,7 @@ interface EditDraft {
   visible_tienda: boolean;
   en_oferta: boolean;
   precio_oferta: string;
+  wholesale_tiers: WholesaleTier[];
 }
 
 const EMPTY_DRAFT: EditDraft = {
@@ -97,6 +105,7 @@ const EMPTY_DRAFT: EditDraft = {
   visible_tienda: true,
   en_oferta: false,
   precio_oferta: '',
+  wholesale_tiers: [],
 };
 
 export interface PasilloDef {
@@ -283,6 +292,7 @@ const Inventory = () => {
       visible_tienda: product.visible_tienda !== undefined ? Boolean(product.visible_tienda) : true,
       en_oferta: product.en_oferta !== undefined ? Boolean(product.en_oferta) : false,
       precio_oferta: product.precio_oferta_cents ? String(product.precio_oferta_cents) : '',
+      wholesale_tiers: parseWholesaleTiers(product.wholesale_tiers ?? product.wholesale_tiers_json),
     });
     setEditError('');
     setEditingProduct(product);
@@ -383,6 +393,11 @@ const Inventory = () => {
       setEditError('El stock debe ser un entero mayor o igual a 0');
       return;
     }
+    const tiersValidation = validateWholesaleTiersInput(editDraft.wholesale_tiers, price);
+    if (!tiersValidation.valid) {
+      setEditError(tiersValidation.error);
+      return;
+    }
     setEditError('');
     setActionError('');
     setSaving(true);
@@ -402,6 +417,8 @@ const Inventory = () => {
         visible_tienda: editDraft.visible_tienda,
         en_oferta: editDraft.en_oferta,
         precio_oferta_cents: precioOferta ?? undefined,
+        wholesale_tiers: tiersValidation.tiers,
+        wholesale_tiers_json: tiersValidation.json,
       });
       closeEdit();
     } catch (err) {
@@ -766,6 +783,7 @@ const Inventory = () => {
               {filteredProducts.map((product) => {
                 const tone = stockTone(product.stock);
                 const expBadge = getExpirationBadge(product.expiration_date);
+                const primaryWholesale = getPrimaryWholesaleTier(product);
                 return (
                   <li key={product.id} className="card p-3">
                     <div className="flex items-start gap-3">
@@ -788,6 +806,11 @@ const Inventory = () => {
                         <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-gray-500">
                           <span className="chip bg-sf-cyan/10 text-sf-cyan">{product.category || 'Sin categoría'}</span>
                           <span className="chip bg-slate-100 text-slate-700">{product.unit || 'unidad'}</span>
+                          {primaryWholesale && (
+                            <span className="chip bg-amber-100 text-amber-800 border border-amber-200">
+                              🏷️ {primaryWholesale.min_quantity}+ a {formatCentsCOP(primaryWholesale.unit_price_cents)}
+                            </span>
+                          )}
                           {expBadge && <span className={`chip ${expBadge.chipClass}`}>{expBadge.label}</span>}
                           {product.barcode && <span className="font-mono">{product.barcode}</span>}
                         </div>
@@ -873,6 +896,7 @@ const Inventory = () => {
                   {filteredProducts.map((product) => {
                     const tone = stockTone(product.stock);
                     const expBadge = getExpirationBadge(product.expiration_date);
+                    const primaryWholesale = getPrimaryWholesaleTier(product);
                     return (
                       <tr key={product.id} className="transition hover:bg-sf-light">
                         <td className="px-4 py-3 text-sm font-medium text-sf-text">
@@ -892,10 +916,19 @@ const Inventory = () => {
                               <span className="block truncate max-w-[220px]" title={product.name}>
                                 {product.name}
                               </span>
-                              {expBadge && (
-                                <span className={`mt-0.5 inline-block rounded-full px-2 py-0.5 text-[11px] font-semibold ${expBadge.chipClass}`}>
-                                  {expBadge.label}
-                                </span>
+                              {(expBadge || primaryWholesale) && (
+                                <div className="mt-0.5 flex flex-wrap items-center gap-1">
+                                  {primaryWholesale && (
+                                    <span className="inline-block rounded-full bg-amber-100 border border-amber-200 px-2 py-0.5 text-[11px] font-semibold text-amber-800">
+                                      🏷️ {primaryWholesale.min_quantity}+ a {formatCentsCOP(primaryWholesale.unit_price_cents)}
+                                    </span>
+                                  )}
+                                  {expBadge && (
+                                    <span className={`inline-block rounded-full px-2 py-0.5 text-[11px] font-semibold ${expBadge.chipClass}`}>
+                                      {expBadge.label}
+                                    </span>
+                                  )}
+                                </div>
                               )}
                             </div>
                           </div>
@@ -1148,6 +1181,11 @@ const Inventory = () => {
                               </span>
                               {product.en_oferta ? (
                                 <span className="chip bg-red-100 text-[10px] font-bold text-red-700">OFERTA</span>
+                              ) : null}
+                              {getPrimaryWholesaleTier(product) ? (
+                                <span className="chip bg-amber-100 text-[10px] font-bold text-amber-800 border border-amber-200">
+                                  🏷️ {getPrimaryWholesaleTier(product)!.min_quantity}+
+                                </span>
                               ) : null}
                               {expBadge ? (
                                 <span className={`chip text-[10px] font-bold ${expBadge.chipClass}`}>
@@ -1600,6 +1638,14 @@ const Inventory = () => {
             category={editDraft.category}
             onChange={(newUrl) => setEditDraft({ ...editDraft, image_url: newUrl })}
             onRemove={() => setEditDraft({ ...editDraft, image_url: '' })}
+          />
+
+          <WholesaleTiersEditor
+            idPrefix="edit-wholesale"
+            inputScale="cents"
+            tiers={editDraft.wholesale_tiers}
+            regularPriceCents={parseNonNegativeInt(editDraft.price) ?? 0}
+            onChange={(nextTiers) => setEditDraft({ ...editDraft, wholesale_tiers: nextTiers })}
           />
 
           <div className="flex gap-4 border-t border-slate-100 pt-3">

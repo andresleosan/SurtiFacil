@@ -24,6 +24,7 @@ import {
   getNotificationPermission,
   requestNotificationPermission,
 } from '../services/notificationService';
+import { getPrimaryWholesaleTier, resolveProductUnitPricing } from '../utils/wholesalePricing';
 
 const PAYMENT_OPTIONS: Array<{ value: PaymentMethod; label: string; emoji: string }> = [
   { value: 'cash', label: 'Efectivo', emoji: '💵' },
@@ -39,6 +40,20 @@ function normalize(value: string): string {
     .toLowerCase()
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '');
+}
+
+function buildSaleCartItem(product: Product, quantity: number): SaleItem {
+  const pricing = resolveProductUnitPricing(product, quantity);
+  return {
+    product_id: product.id,
+    product_name: product.name,
+    quantity,
+    price_cents: pricing.unit_price_cents,
+    subtotal: pricing.subtotal_cents,
+    regular_price_cents: pricing.regular_unit_price_cents,
+    applied_wholesale_tier: pricing.applied_tier,
+    wholesale_savings_cents: pricing.wholesale_savings_cents,
+  };
 }
 
 const CreateSale = () => {
@@ -64,13 +79,21 @@ const CreateSale = () => {
 
   const handleLoadOrderToCart = (order: CustomerOrder) => {
     const items = order.items || [];
-    const newCartItems: SaleItem[] = items.map((i) => ({
-      product_id: i.product_id,
-      product_name: i.product_name,
-      quantity: i.quantity,
-      price_cents: i.unit_price_cents,
-      subtotal: i.subtotal_cents || i.unit_price_cents * i.quantity,
-    }));
+    const newCartItems: SaleItem[] = items.map((i) => {
+      const matched = products.find((p) => p.id === i.product_id);
+      if (matched) {
+        return buildSaleCartItem(matched, i.quantity);
+      }
+      return {
+        product_id: i.product_id,
+        product_name: i.product_name,
+        quantity: i.quantity,
+        price_cents: i.unit_price_cents,
+        subtotal: i.subtotal_cents || i.unit_price_cents * i.quantity,
+        applied_wholesale_tier: i.applied_wholesale_tier ?? null,
+        wholesale_savings_cents: i.wholesale_savings_cents ?? 0,
+      };
+    });
     setCartItems(newCartItems);
     if (order.payment_method === 'credit') {
       setPaymentMethod('credit');
@@ -117,20 +140,10 @@ const CreateSale = () => {
         if (existingIdx >= 0) {
           const nextQty = updated[existingIdx].quantity + voiceItem.quantity;
           const cappedQty = Math.min(nextQty, prod.stock);
-          updated[existingIdx] = {
-            ...updated[existingIdx],
-            quantity: cappedQty,
-            subtotal: cappedQty * prod.price_cents,
-          };
+          updated[existingIdx] = buildSaleCartItem(prod, cappedQty);
         } else {
           const cappedQty = Math.min(voiceItem.quantity, prod.stock);
-          updated.push({
-            product_id: prod.id,
-            product_name: prod.name,
-            quantity: cappedQty,
-            price_cents: prod.price_cents,
-            subtotal: cappedQty * prod.price_cents,
-          });
+          updated.push(buildSaleCartItem(prod, cappedQty));
         }
       }
       return updated;
@@ -170,23 +183,13 @@ const CreateSale = () => {
       setError(`Stock insuficiente para ${product.name}. Disponible: ${product.stock}`);
       return false;
     }
+    const updatedItem = buildSaleCartItem(product, nextQuantity);
     setCartItems(
       existing
         ? cartItems.map((item) =>
-          item.product_id === product.id
-            ? { ...item, quantity: nextQuantity, subtotal: nextQuantity * item.price_cents }
-            : item,
-        )
-        : [
-          ...cartItems,
-          {
-            product_id: product.id,
-            product_name: product.name,
-            quantity,
-            price_cents: product.price_cents,
-            subtotal: quantity * product.price_cents,
-          },
-        ],
+            item.product_id === product.id ? updatedItem : item,
+          )
+        : [...cartItems, updatedItem],
     );
     return true;
   };
@@ -206,11 +209,13 @@ const CreateSale = () => {
       return;
     }
     setCartItems(
-      cartItems.map((item) =>
-        item.product_id === productId
-          ? { ...item, quantity: nextQuantity, subtotal: nextQuantity * item.price_cents }
-          : item,
-      ),
+      cartItems.map((item) => {
+        if (item.product_id !== productId) return item;
+        if (product) {
+          return buildSaleCartItem(product, nextQuantity);
+        }
+        return { ...item, quantity: nextQuantity, subtotal: nextQuantity * item.price_cents };
+      }),
     );
   };
 
@@ -299,6 +304,7 @@ const CreateSale = () => {
   const cartPanel = (
     <CartPanel
       items={cartItems}
+      products={products}
       total={total}
       unitCount={unitCount}
       paymentMethod={paymentMethod}
@@ -502,67 +508,85 @@ const CreateSale = () => {
                 </p>
               ) : isMobile ? (
                 <ul className="card divide-y divide-gray-100" aria-label="Productos disponibles">
-                  {availableProducts.map((product) => (
-                    <li key={product.id} className="flex items-center gap-3 px-3 py-2">
-                      <ProductImage
-                        src={product.image_url}
-                        alt={product.name}
-                        productName={product.name}
-                        barcode={product.barcode}
-                        category={product.category}
-                        showOfferBadge={false}
-                        containerClassName="h-11 w-11 shrink-0 rounded-xl bg-slate-50 p-1 border border-slate-200"
-                        className="h-full w-full object-contain"
-                        loading="lazy"
-                      />
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate font-medium text-sf-text">{product.name}</p>
-                        <p className="text-xs text-gray-500">
-                          {formatPrice(product.price_cents)} · {product.stock} disp.
-                        </p>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => addToCart(product, 1)}
-                        aria-label={`Agregar ${product.name}`}
-                        className="icon-btn bg-sf-primary text-white hover:bg-sf-dark"
-                      >
-                        <Icon name="plus" />
-                      </button>
-                    </li>
-                  ))}
+                  {availableProducts.map((product) => {
+                    const primaryWholesale = getPrimaryWholesaleTier(product);
+                    return (
+                      <li key={product.id} className="flex items-center gap-3 px-3 py-2">
+                        <ProductImage
+                          src={product.image_url}
+                          alt={product.name}
+                          productName={product.name}
+                          barcode={product.barcode}
+                          category={product.category}
+                          showOfferBadge={false}
+                          containerClassName="h-11 w-11 shrink-0 rounded-xl bg-slate-50 p-1 border border-slate-200"
+                          className="h-full w-full object-contain"
+                          loading="lazy"
+                        />
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate font-medium text-sf-text">{product.name}</p>
+                          <p className="text-xs text-gray-500">
+                            {formatPrice(product.price_cents)} · {product.stock} disp.
+                          </p>
+                          {primaryWholesale && (
+                            <span className="mt-0.5 inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-900">
+                              🏷️ {primaryWholesale.min_quantity}+ a {formatPrice(primaryWholesale.unit_price_cents)}
+                            </span>
+                          )}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => addToCart(product, 1)}
+                          aria-label={`Agregar ${product.name}`}
+                          className="icon-btn bg-sf-primary text-white hover:bg-sf-dark"
+                        >
+                          <Icon name="plus" />
+                        </button>
+                      </li>
+                    );
+                  })}
                 </ul>
               ) : (
                 <ul className="grid grid-cols-2 gap-3 xl:grid-cols-3" aria-label="Productos disponibles">
-                  {availableProducts.map((product) => (
-                    <li key={product.id}>
-                      <button
-                        type="button"
-                        onClick={() => addToCart(product, 1)}
-                        aria-label={`Agregar ${product.name}`}
-                        className="card flex min-h-[96px] w-full flex-col justify-between p-3 text-left transition hover:border-sf-primary hover:shadow-md active:scale-[0.99]"
-                      >
-                        <div className="flex items-start gap-2.5">
-                          <ProductImage
-                            src={product.image_url}
-                            alt={product.name}
-                            productName={product.name}
-                            barcode={product.barcode}
-                            category={product.category}
-                            showOfferBadge={false}
-                            containerClassName="h-11 w-11 shrink-0 rounded-lg bg-slate-50 p-1 border border-slate-200"
-                            className="h-full w-full object-contain"
-                            loading="lazy"
-                          />
-                          <span className="line-clamp-2 font-medium text-sf-text text-xs sm:text-sm">{product.name}</span>
-                        </div>
-                        <span className="mt-2 flex items-center justify-between text-sm pt-2 border-t border-slate-100">
-                          <span className="font-semibold text-sf-primary">{formatPrice(product.price_cents)}</span>
-                          <span className="text-xs text-gray-500">{product.stock} disp.</span>
-                        </span>
-                      </button>
-                    </li>
-                  ))}
+                  {availableProducts.map((product) => {
+                    const primaryWholesale = getPrimaryWholesaleTier(product);
+                    return (
+                      <li key={product.id}>
+                        <button
+                          type="button"
+                          onClick={() => addToCart(product, 1)}
+                          aria-label={`Agregar ${product.name}`}
+                          className="card flex min-h-[96px] w-full flex-col justify-between p-3 text-left transition hover:border-sf-primary hover:shadow-md active:scale-[0.99]"
+                        >
+                          <div className="flex items-start gap-2.5">
+                            <ProductImage
+                              src={product.image_url}
+                              alt={product.name}
+                              productName={product.name}
+                              barcode={product.barcode}
+                              category={product.category}
+                              showOfferBadge={false}
+                              containerClassName="h-11 w-11 shrink-0 rounded-lg bg-slate-50 p-1 border border-slate-200"
+                              className="h-full w-full object-contain"
+                              loading="lazy"
+                            />
+                            <div className="min-w-0 flex-1">
+                              <span className="line-clamp-2 font-medium text-sf-text text-xs sm:text-sm">{product.name}</span>
+                              {primaryWholesale && (
+                                <span className="mt-1 inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-900 tabular-nums">
+                                  🏷️ {primaryWholesale.min_quantity}+ a {formatPrice(primaryWholesale.unit_price_cents)}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                          <span className="mt-2 flex items-center justify-between text-sm pt-2 border-t border-slate-100">
+                            <span className="font-semibold text-sf-primary tabular-nums">{formatPrice(product.price_cents)}</span>
+                            <span className="text-xs text-gray-500">{product.stock} disp.</span>
+                          </span>
+                        </button>
+                      </li>
+                    );
+                  })}
                 </ul>
               )}
             </div>
@@ -631,6 +655,7 @@ interface CartPanelProps {
   creditCustomerId: string;
   onCreditCustomerChange: (customerId: string) => void;
   items: SaleItem[];
+  products: Product[];
   total: number;
   unitCount: number;
   paymentMethod: PaymentMethod;
@@ -649,6 +674,7 @@ function CartPanel({
   creditCustomerId,
   onCreditCustomerChange,
   items,
+  products,
   total,
   unitCount,
   paymentMethod,
@@ -661,6 +687,8 @@ function CartPanel({
   receivedCashCents,
   onReceivedCashChange,
 }: CartPanelProps) {
+  const wholesaleSavings = items.reduce((sum, item) => sum + (item.wholesale_savings_cents || 0), 0);
+
   return (
     <div className="space-y-4">
       {!compact && <h3 className="font-semibold text-sf-text">Carrito</h3>}
@@ -669,45 +697,58 @@ function CartPanel({
         <p className="py-6 text-center text-sm text-gray-500">El carrito está vacío</p>
       ) : (
         <ul className="divide-y divide-gray-100" aria-label="Artículos en el carrito">
-          {items.map((item) => (
-            <li key={item.product_id} className="flex items-center gap-2 py-2">
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-medium text-sf-text">{item.product_name}</p>
-                <p className="text-xs text-gray-500">
-                  {formatPrice(item.price_cents)} c/u · <span className="font-semibold text-sf-primary">{formatPrice(item.subtotal)}</span>
-                </p>
-              </div>
-              <div className="flex items-center rounded-lg border border-gray-300" role="group" aria-label={`Cantidad de ${item.product_name}`}>
+          {items.map((item) => {
+            const matchedProduct = products.find((p) => p.id === item.product_id);
+            const livePricing = matchedProduct ? resolveProductUnitPricing(matchedProduct, item.quantity) : null;
+            return (
+              <li key={item.product_id} className="flex items-center gap-2 py-2">
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-medium text-sf-text">{item.product_name}</p>
+                  <p className="text-xs text-gray-500 tabular-nums">
+                    {formatPrice(item.price_cents)} c/u · <span className="font-semibold text-sf-primary">{formatPrice(item.subtotal)}</span>
+                  </p>
+                  {item.applied_wholesale_tier ? (
+                    <span className="mt-0.5 inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-800">
+                      🏷️ Mayorista {item.applied_wholesale_tier.min_quantity}+ · Ahorras {formatPrice(item.wholesale_savings_cents || 0)}
+                    </span>
+                  ) : livePricing?.next_tier ? (
+                    <span className="mt-0.5 inline-flex items-center rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-800">
+                      +{livePricing.units_to_next_tier} para {livePricing.next_tier.min_quantity}+ a {formatPrice(livePricing.next_tier.unit_price_cents)} c/u
+                    </span>
+                  ) : null}
+                </div>
+                <div className="flex items-center rounded-lg border border-gray-300" role="group" aria-label={`Cantidad de ${item.product_name}`}>
+                  <button
+                    type="button"
+                    onClick={() => onChangeQuantity(item.product_id, -1)}
+                    aria-label={`Quitar uno de ${item.product_name}`}
+                    className="icon-btn h-10 w-10 text-sf-text hover:bg-gray-100"
+                  >
+                    <Icon name="minus" size={18} />
+                  </button>
+                  <span className="min-w-[2rem] text-center text-sm font-semibold" aria-live="polite">
+                    {item.quantity}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => onChangeQuantity(item.product_id, 1)}
+                    aria-label={`Agregar uno de ${item.product_name}`}
+                    className="icon-btn h-10 w-10 text-sf-text hover:bg-gray-100"
+                  >
+                    <Icon name="plus" size={18} />
+                  </button>
+                </div>
                 <button
                   type="button"
-                  onClick={() => onChangeQuantity(item.product_id, -1)}
-                  aria-label={`Quitar uno de ${item.product_name}`}
-                  className="icon-btn h-10 w-10 text-sf-text hover:bg-gray-100"
+                  onClick={() => onRemove(item.product_id)}
+                  aria-label={`Eliminar ${item.product_name} del carrito`}
+                  className="icon-btn h-10 w-10 text-red-600 hover:bg-red-50"
                 >
-                  <Icon name="minus" size={18} />
+                  <Icon name="trash" size={18} />
                 </button>
-                <span className="min-w-[2rem] text-center text-sm font-semibold" aria-live="polite">
-                  {item.quantity}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => onChangeQuantity(item.product_id, 1)}
-                  aria-label={`Agregar uno de ${item.product_name}`}
-                  className="icon-btn h-10 w-10 text-sf-text hover:bg-gray-100"
-                >
-                  <Icon name="plus" size={18} />
-                </button>
-              </div>
-              <button
-                type="button"
-                onClick={() => onRemove(item.product_id)}
-                aria-label={`Eliminar ${item.product_name} del carrito`}
-                className="icon-btn h-10 w-10 text-red-600 hover:bg-red-50"
-              >
-                <Icon name="trash" size={18} />
-              </button>
-            </li>
-          ))}
+              </li>
+            );
+          })}
         </ul>
       )}
 
@@ -716,9 +757,15 @@ function CartPanel({
           <span>Artículos</span>
           <span className="font-medium">{unitCount}</span>
         </div>
+        {wholesaleSavings > 0 && (
+          <div className="flex justify-between text-xs font-semibold text-emerald-700">
+            <span>Ahorro mayorista</span>
+            <span className="tabular-nums">-{formatPrice(wholesaleSavings)}</span>
+          </div>
+        )}
         <div className="flex justify-between text-lg font-bold">
           <span>Total</span>
-          <span className="text-sf-primary">{formatPrice(total)}</span>
+          <span className="text-sf-primary tabular-nums">{formatPrice(total)}</span>
         </div>
       </div>
 

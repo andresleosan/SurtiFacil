@@ -71,6 +71,7 @@ class MockD1Database implements D1Database {
           barcode: '7701234567890',
           visible_kiosco: 1,
           visible_tienda: 1,
+          wholesale_tiers_json: '[]',
         },
         {
           id: 'p-other-store',
@@ -85,6 +86,7 @@ class MockD1Database implements D1Database {
           barcode: '9999999999999',
           visible_kiosco: 1,
           visible_tienda: 1,
+          wholesale_tiers_json: '[]',
         },
       ],
       sales: [],
@@ -456,7 +458,7 @@ class MockD1Database implements D1Database {
           const [
             id, negocio_id, name, price_cents, stock, min_stock, unit, category, image_url,
             supplier_id, barcode, visible_kiosco, visible_tienda, en_oferta, precio_oferta_cents,
-            last_cost_cents, _lastCostSource, expiration_date,
+            wholesale_tiers_json, last_cost_cents, _lastCostSource, expiration_date,
           ] = boundValues;
           db.tables.products.push({
             id,
@@ -474,6 +476,7 @@ class MockD1Database implements D1Database {
             visible_tienda,
             en_oferta,
             precio_oferta_cents,
+            wholesale_tiers_json: wholesale_tiers_json ?? '[]',
             last_cost_cents,
             expiration_date: expiration_date ?? null,
           });
@@ -483,7 +486,7 @@ class MockD1Database implements D1Database {
           const [
             name, price_cents, stock, min_stock, unit, category, image_url,
             supplier_id, barcode, visible_kiosco, visible_tienda, en_oferta,
-            precio_oferta_cents, expiration_date, prodId, negId,
+            precio_oferta_cents, wholesale_tiers_json, expiration_date, prodId, negId,
           ] = boundValues;
           const prod = db.tables.products.find((p) => p.id === prodId && p.negocio_id === negId);
           if (prod) {
@@ -500,6 +503,7 @@ class MockD1Database implements D1Database {
             if (visible_tienda !== null) prod.visible_tienda = visible_tienda;
             if (en_oferta !== null) prod.en_oferta = en_oferta;
             if (precio_oferta_cents !== null) prod.precio_oferta_cents = precio_oferta_cents;
+            if (wholesale_tiers_json !== null) prod.wholesale_tiers_json = wholesale_tiers_json;
             prod.expiration_date = expiration_date;
           }
         }
@@ -1896,5 +1900,144 @@ describe('Cloudflare Pages Functions API (/api/*)', () => {
     const revertRes = await onRequest(revertCtx as any);
     expect(revertRes.status).toBe(200);
     expect(db.tables.products.find((p) => p.id === 'p-1')?.stock).toBe(20);
+  });
+
+  it('soporta escalas mayoristas en productos y calcula precios autoritativos en ventas y pedidos', async () => {
+    const db = new MockD1Database();
+
+    // 1. POST /api/products rechaza escala mayorista con precio >= precio normal (400)
+    const invalidProdCtx = createMockContext(
+      'POST',
+      'http://localhost/api/products',
+      { Authorization: 'Bearer mock:admin-1:admin@surtifacil.com:admin' },
+      {
+        name: 'Aceite Girasol 1L',
+        price_cents: 800000,
+        stock: 20,
+        wholesale_tiers: [{ min_quantity: 3, unit_price_cents: 800000 }],
+      },
+      db
+    );
+    const invalidProdRes = await onRequest(invalidProdCtx as any);
+    expect(invalidProdRes.status).toBe(400);
+
+    // 2. POST /api/products crea producto con múltiples escalas mayoristas y las ordena
+    const validProdCtx = createMockContext(
+      'POST',
+      'http://localhost/api/products',
+      { Authorization: 'Bearer mock:admin-1:admin@surtifacil.com:admin' },
+      {
+        name: 'Aceite Girasol 1L',
+        price_cents: 800000,
+        stock: 20,
+        category: 'Despensa',
+        wholesale_tiers: [
+          { min_quantity: 6, unit_price_cents: 700000 },
+          { min_quantity: 3, unit_price_cents: 750000 },
+        ],
+      },
+      db
+    );
+    const validProdRes = await onRequest(validProdCtx as any);
+    expect(validProdRes.status).toBe(201);
+    const createdProd = await validProdRes.json();
+    expect(createdProd.wholesale_tiers).toEqual([
+      { min_quantity: 3, unit_price_cents: 750000 },
+      { min_quantity: 6, unit_price_cents: 700000 },
+    ]);
+
+    // 3. PUT /api/products/p-1 actualiza escalas mayoristas y quedan visibles en tienda pública
+    const putProdCtx = createMockContext(
+      'PUT',
+      'http://localhost/api/products/p-1',
+      { Authorization: 'Bearer mock:admin-1:admin@surtifacil.com:admin' },
+      {
+        wholesale_tiers: [
+          { min_quantity: 3, unit_price_cents: 400000 },
+          { min_quantity: 6, unit_price_cents: 380000 },
+        ],
+      },
+      db
+    );
+    const putProdRes = await onRequest(putProdCtx as any);
+    expect(putProdRes.status).toBe(200);
+    expect((await putProdRes.json()).wholesale_tiers).toEqual([
+      { min_quantity: 3, unit_price_cents: 400000 },
+      { min_quantity: 6, unit_price_cents: 380000 },
+    ]);
+
+    const storeCtx = createMockContext(
+      'GET',
+      'http://localhost/api/public/store/surtifacil',
+      {},
+      null,
+      db
+    );
+    const storeRes = await onRequest(storeCtx as any);
+    expect(storeRes.status).toBe(200);
+    const storeData = await storeRes.json();
+    const publicP1 = storeData.products.find((p: any) => p.id === 'p-1');
+    expect(publicP1?.wholesale_tiers).toEqual([
+      { min_quantity: 3, unit_price_cents: 400000 },
+      { min_quantity: 6, unit_price_cents: 380000 },
+    ]);
+
+    // 4. POST /api/sales ignora precio manipulado del cliente y aplica tramo 3+ autoritativamente
+    const saleCtx = createMockContext(
+      'POST',
+      'http://localhost/api/sales',
+      { Authorization: 'Bearer mock:cashier-1:cajero@surtifacil.com:cashier' },
+      {
+        items: [{ product_id: 'p-1', quantity: 3, price_cents: 100 }],
+        payment_method: 'cash',
+      },
+      db
+    );
+    const saleRes = await onRequest(saleCtx as any);
+    expect(saleRes.status).toBe(201);
+    const createdSale = await saleRes.json();
+    expect(createdSale.total_cents).toBe(1200000);
+    expect(createdSale.items[0]).toMatchObject({
+      product_id: 'p-1',
+      quantity: 3,
+      price_cents: 400000,
+      subtotal_cents: 1200000,
+      regular_price_cents: 450000,
+      applied_wholesale_tier: { min_quantity: 3, unit_price_cents: 400000 },
+      wholesale_savings_cents: 150000,
+    });
+
+    // 5. POST /api/customer-orders aplica tramo 6+ en pedidos Kiosco/Tienda Web
+    const orderCtx = createMockContext(
+      'POST',
+      'http://localhost/api/customer-orders',
+      {},
+      {
+        slug: 'surtifacil',
+        source: 'web',
+        customer_name: 'Doña Patricia',
+        delivery_type: 'pickup_counter',
+        payment_method: 'cash',
+        items: [{ product_id: 'p-1', quantity: 6 }],
+      },
+      db
+    );
+    const orderRes = await onRequest(orderCtx as any);
+    expect(orderRes.status).toBe(201);
+    const orderData = await orderRes.json();
+    const createdOrder = orderData.order || orderData;
+    expect(createdOrder.total_cents).toBe(2280000);
+    const parsedOrderItems =
+      typeof createdOrder.items_json === 'string'
+        ? JSON.parse(createdOrder.items_json)
+        : createdOrder.items;
+    expect(parsedOrderItems[0]).toMatchObject({
+      product_id: 'p-1',
+      quantity: 6,
+      unit_price_cents: 380000,
+      subtotal_cents: 2280000,
+      applied_wholesale_tier: { min_quantity: 6, unit_price_cents: 380000 },
+      wholesale_savings_cents: 420000,
+    });
   });
 });
