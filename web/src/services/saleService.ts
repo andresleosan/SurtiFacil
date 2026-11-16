@@ -1,42 +1,17 @@
-import { getAuth } from 'firebase/auth';
 import { PaymentMethod, Product, SaleItem, Sale } from '../firebase/db';
 import { mockProducts, addLocalSale, getLocalSales, mockCreditCustomers, addLocalCreditEntry } from './mockData';
-import { refreshProducts } from './productService';
-import { apiClient, emitDataChange } from './apiClient';
+import { mapProductRow, refreshProducts } from './productService';
+import { apiClient, emitDataChange, hasAuthSession } from './apiClient';
 import {
   cacheProductsForTenant,
   enqueueOfflineSale,
   getCachedProductsForTenant,
   isOfflineModeActive,
 } from './offlineSyncService';
-import { parseWholesaleTiers, resolveProductUnitPricing } from '../utils/wholesalePricing';
+import { resolveProductUnitPricing } from '../utils/wholesalePricing';
 
 function isMockMode(): boolean {
   return import.meta.env.VITE_USE_MOCK_DATA === 'true';
-}
-
-function mapProduct(row: any): Product {
-  const wholesaleTiers = parseWholesaleTiers(row.wholesale_tiers ?? row.wholesale_tiers_json);
-  return {
-    id: row.id,
-    name: row.name,
-    price_cents: row.price_cents,
-    stock: row.stock ?? 0,
-    category: row.category || undefined,
-    barcode: row.barcode || undefined,
-    supplier_id: row.supplier_id || undefined,
-    createdAt: row.created_at || row.createdAt,
-    en_oferta: row.en_oferta !== undefined ? Boolean(row.en_oferta) : false,
-    precio_oferta_cents: row.precio_oferta_cents ?? undefined,
-    wholesale_tiers: wholesaleTiers,
-    wholesale_tiers_json:
-      typeof row.wholesale_tiers_json === 'string'
-        ? row.wholesale_tiers_json
-        : JSON.stringify(wholesaleTiers),
-    last_cost_cents: row.last_cost_cents ?? undefined,
-    last_cost_source: row.last_cost_source || undefined,
-    last_cost_updated_at: row.last_cost_updated_at || undefined,
-  };
 }
 
 function mapSale(row: any): Sale {
@@ -90,7 +65,7 @@ export async function getProducts(): Promise<Product[]> {
 
   try {
     const list = await apiClient.get<any[]>('/products');
-    const mapped = (list || []).map(mapProduct);
+    const mapped = (list || []).map(mapProductRow);
     void cacheProductsForTenant(mapped);
     return mapped;
   } catch {
@@ -128,15 +103,7 @@ export async function createSale(
     return createMockSale(cartItems, paymentMethod, creditCustomerId);
   }
 
-  let user = null;
-  try {
-    const auth = getAuth();
-    user = auth.currentUser;
-  } catch {
-    // Si auth no está disponible
-  }
-
-  if (!user) {
+  if (!hasAuthSession()) {
     throw new Error('Debes iniciar sesión para crear la venta');
   }
 

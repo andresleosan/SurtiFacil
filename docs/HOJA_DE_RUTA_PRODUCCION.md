@@ -468,9 +468,23 @@ Para maximizar la eficiencia de tokens y la precisión de razonamiento en cada s
        - **Build de Producción:** `npm run build:web` (`tsc && vite build`) completado sin errores en 4.88 s con Service Worker y 69 entradas (`1852.22 KiB`) en precaché PWA.
        - **Playwright E2E:** 30 pruebas aprobadas en 45.7 s (7 opcionales dependientes de credenciales QA omitidas según configuración), validando en [`qa/e2e/saas-production.spec.ts`](../qa/e2e/saas-production.spec.ts) (`10. Promociones Mayoristas (3+ a precio especial) en Inventario, Kiosco iPad, POS y Tienda Vecinal`) la edición en `#/inventory`, activación y reversión en Kiosco iPad, POS y Tienda Vecinal.
 
-- [ ] **Tarea 27 — Suite E2E de Certificación de Fase 6 (Rentabilidad Real: Caja Menor, Mermas y Mayoristas) y Despliegue en Vivo:**
+- [x] **Tarea 27 — Suite E2E de Certificación de Fase 6 (Rentabilidad Real: Caja Menor, Mermas y Mayoristas) y Despliegue en Vivo:**
   - **Nivel Recomendado:** `Argon (High)`
   - **Objetivo:** Certificar de extremo a extremo con Vitest y Playwright multi-dispositivo todos los flujos de rentabilidad real, mermas y precios por volumen de la Fase 6.
+  - **Resultado de Implementación:**
+    1. **Correcciones de Integración y Reglas Financieras/Seguridad Detectadas en Certificación:**
+       - [`web/src/services/productService.ts`](../web/src/services/productService.ts) y [`web/src/services/saleService.ts`](../web/src/services/saleService.ts): Exportado y reutilizado `mapProductRow(row)` en `getProducts()` para preservar `expiration_date`, `unit`, `min_stock`, `image_url`, `visible_kiosco`, `visible_tienda` y `wholesale_tiers` en POS/Dashboard/caché offline (`<StockAlerts />`), y habilitado `hasAuthSession()` en `createSale` para sesiones nativas D1 / Acceso Rápido.
+       - [`web/src/utils/sarinVoiceParser.ts`](../web/src/utils/sarinVoiceParser.ts) y [`web/src/components/SarinVoicePOS.tsx`](../web/src/components/SarinVoicePOS.tsx): Integrado `resolveProductUnitPricing(matchedProduct, qty)` en el analizador de voz POS para calcular tarifas mayoristas multi-tramo, ahorro mayorista (`wholesaleSavingsCents`) y vueltas exactas COP, mostrando el badge `🏷️ Mayorista X+` en la tarjeta de confirmación.
+    2. **Ergonomía Multi-Dispositivo (`Desktop`, `Pixel 7` Móvil y `iPad gen 7 landscape`):**
+       - [`web/src/components/layout/AppShell.tsx`](../web/src/components/layout/AppShell.tsx): Ajustado `DesktopTopBar` (ocultando etiquetas redundantes por debajo de `xl:` y añadiendo `shrink-0`/`whitespace-nowrap`) para eliminar desbordamiento horizontal en iPad landscape `1080px`.
+       - [`web/src/components/CreateSale.tsx`](../web/src/components/CreateSale.tsx) y [`web/src/components/CashChangeCalculator.tsx`](../web/src/components/CashChangeCalculator.tsx): Añadida holgura inferior `pb-24 md:pb-0` sobre la barra fija móvil, corregida la cuadrícula de billetes (`grid-cols-3` + `⚡ Exacto` en `col-span-3`) y normalizado el flujo de `CartPanel` en tablet/desktop, además de estandarizar `min-h-[44px]` en controles táctiles de `ShrinkageModal.tsx`, `Inventory.tsx`, `WholesaleTiersEditor.tsx`, `ThermalReceiptModal.tsx` y `Sales.tsx`.
+    3. **Harness Multi-Rol y Suite E2E Multi-Dispositivo (`chromium`, `mobile-chromium`, `tablet-chromium`):**
+       - Creados [`qa/e2e/productionHarness.ts`](../qa/e2e/productionHarness.ts) (extraído desde `saas-production.spec.ts` con mocks RBAC multi-rol `admin`/`cashier`, bloqueo `403` de mermas para `cashier`, Caja Menor, precios mayoristas y pedidos Kiosco/Web) y [`qa/e2e/phase6-certification.spec.ts`](../qa/e2e/phase6-certification.spec.ts) (`P6-1` Caja Menor/Arqueo/Tirilla de Cierre, `P6-2` Mermas/Vencimientos/Reversión/RBAC Cajero, `P6-3` Mayoristas Multi-Tramo 3+ a 6+/Sarin Voz/Tirilla/Tienda->POS/Kiosco/Offline FIFO), y extendido [`qa/playwright.config.ts`](../qa/playwright.config.ts) para correr `phase6-certification.spec.ts` en los 3 dispositivos.
+    4. **100% de Pruebas en Verde tras la Edición Final:**
+       - **Vitest (`npm test`):** 60 archivos de prueba y 456 tests aprobados al 100% en 22.43 s (incluyendo nuevos casos en `saleService.test.ts` y `sarinVoicePOS.test.tsx`).
+       - **Build de Producción (`npm run build:web`):** `tsc && vite build` completado sin errores en 5.29 s con Service Worker y 70 entradas (`1853.09 KiB`) en precaché PWA.
+       - **Playwright E2E (`npm run test:e2e`):** 39 pruebas aprobadas y 0 fallidas en 1.3 m (9/9 en `phase6-certification.spec.ts` en `chromium`, `mobile-chromium` y `tablet-chromium`; 10/10 en `saas-production.spec.ts`; 4/4 en `access-roles.spec.ts`; más suites de humo/canales públicos; las 7 omitidas corresponden exclusivamente a credenciales opcionales `QA_USER_EMAIL` no suministradas).
+
 
 
 

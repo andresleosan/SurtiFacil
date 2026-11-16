@@ -424,14 +424,14 @@ function DesktopTopBar({
             </button>
           </span>
         ) : (
-          <span className="hidden rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-600 lg:inline-flex items-center gap-1.5">
+          <span className="hidden rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-600 xl:inline-flex items-center gap-1.5">
             <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
             Sede Central Medellín
           </span>
         )}
       </div>
 
-      <div className="flex items-center gap-3">
+      <div className="flex shrink-0 items-center gap-1.5 lg:gap-2.5">
         {/* Indicador de Estado Online / Cola Offline FIFO */}
         {onOpenOfflineModal && <OfflineStatusPill onOpenModal={onOpenOfflineModal} />}
 
@@ -439,25 +439,26 @@ function DesktopTopBar({
         <button
           type="button"
           onClick={onOpenCopilot}
-          className="flex min-h-[40px] items-center gap-2 rounded-lg border border-slate-200 bg-white px-3.5 py-2 text-xs font-bold text-slate-700 shadow-2xs hover:border-sf-primary hover:text-sf-primary transition active:scale-95"
+          className="flex min-h-[40px] items-center gap-2 rounded-lg border border-slate-200 bg-white px-2.5 xl:px-3.5 py-2 text-xs font-bold text-slate-700 shadow-2xs hover:border-sf-primary hover:text-sf-primary transition active:scale-95"
           aria-label="Abrir Sarin Copiloto Gerencial"
         >
           <span className="text-base">🤖</span>
-          <span className="hidden sm:inline">Copiloto Sarin</span>
+          <span className="hidden xl:inline">Copiloto Sarin</span>
         </button>
 
         {isSuperAdmin && (
           <button
             type="button"
             onClick={() => onNavigate('super-admin')}
-            className={`flex min-h-[38px] items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-bold transition border ${
+            aria-label="SuperAdmin"
+            className={`flex min-h-[38px] items-center gap-1.5 rounded-lg px-2.5 lg:px-3 py-1.5 text-xs font-bold whitespace-nowrap transition border ${
               page === 'super-admin'
                 ? 'bg-purple-600 text-white border-purple-600 shadow-2xs'
                 : 'bg-purple-50 text-purple-700 border-purple-200 hover:bg-purple-100'
             }`}
           >
             <Icon name="crown" size={16} />
-            <span>SuperAdmin</span>
+            <span className="hidden lg:inline">SuperAdmin</span>
           </button>
         )}
 
@@ -465,7 +466,7 @@ function DesktopTopBar({
         <button
           type="button"
           onClick={() => onNavigate('create-sale')}
-          className="flex min-h-[40px] items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-700 active:scale-95"
+          className="flex min-h-[40px] items-center gap-2 rounded-lg bg-emerald-600 px-3 xl:px-4 py-2 text-sm font-semibold whitespace-nowrap text-white shadow-sm transition hover:bg-emerald-700 active:scale-95"
         >
           <Icon name="cart" size={18} />
           <span>+ Nueva Venta</span>
@@ -478,12 +479,12 @@ function DesktopTopBar({
             onClick={() => setProfileOpen(!profileOpen)}
             aria-expanded={profileOpen}
             aria-label="Menú de usuario"
-            className="flex items-center gap-2.5 rounded-lg border border-slate-200 p-1.5 pl-2 text-left transition hover:bg-slate-50"
+            className="flex items-center gap-2 rounded-lg border border-slate-200 p-1.5 pl-2 text-left transition hover:bg-slate-50"
           >
             <span className="flex h-8 w-8 items-center justify-center rounded-full bg-sf-primary text-xs font-bold text-white">
               {initials(user)}
             </span>
-            <div className="hidden min-w-0 sm:block">
+            <div className="hidden min-w-0 max-w-[140px] xl:block">
               <p className="truncate text-xs font-bold text-slate-800">{user.displayName || user.email}</p>
               <p className="truncate text-[10px] text-slate-500">{ROLE_LABELS[user.role]}</p>
             </div>

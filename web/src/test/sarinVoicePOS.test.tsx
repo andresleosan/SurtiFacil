@@ -121,6 +121,32 @@ describe('Sarin Voice POS - Parsing & Financial Logic', () => {
     const finalizeResult = parseSarinSaleCommand('Sarin, cobrar', MOCK_CATALOG);
     expect(finalizeResult.intent).toBe('FINALIZE_SALE');
   });
+
+  it('applies wholesale tier pricing and calculates exact savings and change when dictating 3+ units', () => {
+    const wholesaleCatalog: Product[] = [
+      {
+        ...MOCK_CATALOG[0],
+        wholesale_tiers: [
+          { min_quantity: 3, unit_price_cents: 400000 },
+          { min_quantity: 6, unit_price_cents: 380000 },
+        ],
+      },
+    ];
+
+    const result = parseSarinSaleCommand(
+      'Sarin, agrega 3 leches colanta, pagan con 20 mil',
+      wholesaleCatalog
+    );
+
+    expect(result.intent).toBe('ADD_ITEMS');
+    expect(result.items[0].unitPriceCents).toBe(400000);
+    expect(result.items[0].subtotalCents).toBe(1200000); // 3 * $4.000 = $12.000
+    expect(result.items[0].appliedWholesaleTier).toEqual({ min_quantity: 3, unit_price_cents: 400000 });
+    expect(result.items[0].wholesaleSavingsCents).toBe(150000);
+    expect(result.totalCents).toBe(1200000);
+    expect(result.changeCents).toBe(800000); // $20.000 - $12.000 = $8.000
+    expect(result.spokenFeedback).toContain('Ahorro mayorista');
+  });
 });
 
 describe('SarinVoicePOS Component Interaction', () => {
@@ -155,5 +181,26 @@ describe('SarinVoicePOS Component Interaction', () => {
     fireEvent.click(screen.getByRole('button', { name: /Aplicar productos al carrito/i }));
     expect(onApply).toHaveBeenCalledTimes(1);
     expect(onApply.mock.calls[0][0].totalCents).toBe(900000); // 2 * $4.500 = $9.000 COP
+  });
+
+  it('muestra badge de escala mayorista en la tarjeta didáctica de voz al dictar 3+ unidades', () => {
+    const onApply = vi.fn();
+    const wholesaleCatalog: Product[] = [
+      {
+        ...MOCK_CATALOG[0],
+        wholesale_tiers: [{ min_quantity: 3, unit_price_cents: 400000 }],
+      },
+    ];
+    render(<SarinVoicePOS products={wholesaleCatalog} onApplyCommand={onApply} />);
+
+    fireEvent.click(screen.getByText(/Escribir \/ Simular comando/i));
+    fireEvent.change(screen.getByPlaceholderText(/Sarin, dos leches/i), {
+      target: { value: 'Sarin, 3 leches colanta, pagan con 20 mil' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /Interpretar Comando/i }));
+
+    expect(screen.getByText(/🏷️ Mayorista 3\+/i)).toBeDefined();
+    expect(screen.getAllByText('$ 12.000').length).toBeGreaterThanOrEqual(2);
+    expect(screen.getByText('$ 8.000')).toBeDefined();
   });
 });

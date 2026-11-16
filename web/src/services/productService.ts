@@ -39,7 +39,7 @@ function sortByName(products: Product[]): Product[] {
   return [...products].sort((a, b) => (a.name || '').localeCompare(b.name || '', 'es'));
 }
 
-function mapProduct(row: any): Product {
+export function mapProductRow(row: any): Product {
   const wholesaleTiers = parseWholesaleTiers(row.wholesale_tiers ?? row.wholesale_tiers_json);
   return {
     id: row.id,
@@ -105,7 +105,7 @@ export function subscribeToProducts(onData: ProductsListener, onError: ProductsE
     try {
       const data = await apiClient.get<any[]>('/products');
       if (!active) return;
-      const mapped = (data || []).map(mapProduct);
+      const mapped = (data || []).map(mapProductRow);
       const sorted = sortByName(mapped);
       void cacheProductsForTenant(sorted);
       onData(sorted);
@@ -183,7 +183,7 @@ export async function addProduct(input: NewProductInput): Promise<Product> {
   try {
     const created = await apiClient.post<any>('/products', payload);
     emitDataChange('products');
-    return mapProduct(created);
+    return mapProductRow(created);
   } catch {
     console.error('Error adding product.');
     throw new Error('Error al agregar producto');

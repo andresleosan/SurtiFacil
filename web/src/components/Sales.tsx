@@ -287,7 +287,7 @@ function SaleDetails({ sale, onViewReceipt }: { sale: Sale; onViewReceipt: (sale
         <button
           type="button"
           onClick={() => onViewReceipt(sale)}
-          className="btn-primary min-h-[38px] px-3 text-xs flex items-center gap-1.5"
+          className="btn-primary min-h-[44px] px-3 text-xs flex items-center gap-1.5"
         >
           <Icon name="receipt" size={16} />
           <span>🖨️ Ver Tirilla Térmica</span>

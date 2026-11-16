@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { apiClient } from '../services/apiClient';
+import { apiClient, setStoredAuthToken } from '../services/apiClient';
 import { mockProducts } from '../services/mockData';
 import {
   createSale,
@@ -22,6 +22,7 @@ describe('saleService', () => {
   });
 
   afterEach(() => {
+    setStoredAuthToken(null);
     vi.unstubAllEnvs();
   });
 
@@ -85,11 +86,31 @@ describe('saleService', () => {
 
     it('mantiene el resultado de una lectura exitosa de productos en D1', async () => {
       vi.spyOn(apiClient, 'get').mockResolvedValueOnce([
-        { id: 'product-1', name: 'Producto D1', price_cents: 500, stock: 8 },
+        {
+          id: 'product-1',
+          name: 'Leche Entera 1L',
+          price_cents: 450000,
+          stock: 8,
+          unit: 'litro',
+          min_stock: 5,
+          expiration_date: '2026-11-20',
+          image_url: '/images/products/leche-colanta-1l.svg',
+          wholesale_tiers_json: JSON.stringify([{ min_quantity: 3, unit_price_cents: 400000 }]),
+        },
       ]);
 
       await expect(getProducts()).resolves.toEqual([
-        expect.objectContaining({ id: 'product-1', name: 'Producto D1', price_cents: 500, stock: 8 }),
+        expect.objectContaining({
+          id: 'product-1',
+          name: 'Leche Entera 1L',
+          price_cents: 450000,
+          stock: 8,
+          unit: 'litro',
+          min_stock: 5,
+          expiration_date: '2026-11-20',
+          image_url: '/images/products/leche-colanta-1l.svg',
+          wholesale_tiers: [{ min_quantity: 3, unit_price_cents: 400000 }],
+        }),
       ]);
     });
 
@@ -145,6 +166,19 @@ describe('saleService', () => {
       await expect(createSale([{
         product_id: 'p1', product_name: 'Producto', quantity: 1, price_cents: 250, subtotal: 250,
       }], 'cash')).rejects.toThrow('Debes iniciar sesión para crear la venta');
+    });
+
+    it('permite crear venta en modo D1 cuando existe token de sesión nativo D1 (Acceso Rápido)', async () => {
+      setStoredAuthToken('d1:user-cashier:cajero@surtifacil.com:cashier:surtifacil');
+      const postSpy = vi.spyOn(apiClient, 'post').mockResolvedValueOnce({ id: 'sale-d1-1', saleId: 'sale-d1-1' });
+
+      await expect(createSale([{
+        product_id: 'p1', product_name: 'Leche', quantity: 3, price_cents: 400000, subtotal: 1200000,
+      }], 'cash')).resolves.toBe('sale-d1-1');
+      expect(postSpy).toHaveBeenCalledWith('/sales', {
+        items: [{ product_id: 'p1', quantity: 3 }],
+        payment_method: 'cash',
+      });
     });
 
     it('preserva el error seguro del backend sin devolver datos mock', async () => {

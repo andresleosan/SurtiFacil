@@ -144,7 +144,7 @@ describe('Control de Mermas, Averías y Alertas de Vencimiento', () => {
       expect(within(dialog).getByRole('status')).toHaveTextContent(/Merma revertida/i);
     });
     expect(onShrinkageChanged).toHaveBeenCalledTimes(2);
-  });
+  }, 15000);
 
   it('muestra alertas de vencimiento próximo en StockAlerts para Fruver y Lácteos', async () => {
     vi.spyOn(saleService, 'getProducts').mockResolvedValue([

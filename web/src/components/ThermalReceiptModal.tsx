@@ -141,7 +141,7 @@ export function ThermalReceiptModal({
             <button
               type="button"
               onClick={() => setWidth('58mm')}
-              className={`min-h-[36px] px-3 text-xs font-semibold rounded-md transition ${
+              className={`min-h-[44px] px-3 text-xs font-semibold rounded-md transition ${
                 width === '58mm' ? 'bg-white text-sf-primary shadow-sm' : 'text-slate-600 hover:text-slate-900'
               }`}
             >
@@ -150,7 +150,7 @@ export function ThermalReceiptModal({
             <button
               type="button"
               onClick={() => setWidth('80mm')}
-              className={`min-h-[36px] px-3 text-xs font-semibold rounded-md transition ${
+              className={`min-h-[44px] px-3 text-xs font-semibold rounded-md transition ${
                 width === '80mm' ? 'bg-white text-sf-primary shadow-sm' : 'text-slate-600 hover:text-slate-900'
               }`}
             >
@@ -159,7 +159,7 @@ export function ThermalReceiptModal({
             <button
               type="button"
               onClick={() => setShowQR((prev) => !prev)}
-              className={`min-h-[36px] px-2.5 text-xs font-semibold rounded-md transition ${
+              className={`min-h-[44px] px-2.5 text-xs font-semibold rounded-md transition ${
                 showQR ? 'bg-emerald-50 text-emerald-800 border border-emerald-300' : 'text-slate-500 hover:text-slate-900'
               }`}
               aria-pressed={showQR}
@@ -174,14 +174,14 @@ export function ThermalReceiptModal({
             <button
               type="button"
               onClick={() => setShowPhonePrompt((prev) => !prev)}
-              className="btn-success min-h-[40px] px-3 text-xs"
+              className="btn-success min-h-[44px] px-3 text-xs"
             >
               <span>📲 WhatsApp</span>
             </button>
             <button
               type="button"
               onClick={handlePrint}
-              className="btn-primary min-h-[40px] px-3 text-xs"
+              className="btn-primary min-h-[44px] px-3 text-xs"
             >
               <Icon name="receipt" size={16} />
               <span>🖨️ Imprimir</span>

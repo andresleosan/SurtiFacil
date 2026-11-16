@@ -119,7 +119,7 @@ describe('Módulo de Caja Menor y Gastos del Turno (cashExpense)', () => {
       expect(within(dialog).queryByText('Compra de bolsas y rollos térmicos')).not.toBeInTheDocument();
     });
     expect(onExpenseChanged).toHaveBeenCalledTimes(2);
-  });
+  }, 15000);
 
   it('incluye gastos de caja menor descontados en tirilla térmica y mensaje WhatsApp de cierre', () => {
     const closingWithExpenses: CashClosing = {

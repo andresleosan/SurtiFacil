@@ -116,7 +116,7 @@ export function WholesaleTiersEditor({
               key={qty}
               type="button"
               onClick={() => handleAddTier(qty)}
-              className="min-h-[36px] rounded-lg border border-amber-300 bg-white px-2.5 py-1 text-xs font-bold text-amber-900 hover:bg-amber-100 transition"
+              className="min-h-[44px] rounded-lg border border-amber-300 bg-white px-3 py-1 text-xs font-bold text-amber-900 hover:bg-amber-100 transition"
             >
               +{qty} uds
             </button>

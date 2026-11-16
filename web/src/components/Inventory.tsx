@@ -672,7 +672,7 @@ const Inventory = () => {
               type="button"
               onClick={() => setQuickFilter(quickFilter === 'expiring' ? 'all' : 'expiring')}
               aria-pressed={quickFilter === 'expiring'}
-              className={`min-h-[40px] rounded-lg border px-3 py-1.5 text-xs font-semibold transition ${
+              className={`min-h-[44px] rounded-lg border px-3 py-1.5 text-xs font-semibold transition ${
                 quickFilter === 'expiring'
                   ? 'border-amber-700 bg-amber-700 text-white'
                   : 'border-amber-300 bg-white text-amber-900 hover:bg-amber-100'
@@ -684,7 +684,7 @@ const Inventory = () => {
               <button
                 type="button"
                 onClick={() => openShrinkage(expiringAlerts[0]?.productId)}
-                className="min-h-[40px] rounded-lg bg-red-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-red-700"
+                className="min-h-[44px] rounded-lg bg-red-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-red-700"
               >
                 📉 Dar de baja merma
               </button>

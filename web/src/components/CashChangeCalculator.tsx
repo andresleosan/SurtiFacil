@@ -101,14 +101,14 @@ export function CashChangeCalculator({
         <p className="mb-1.5 text-xs font-medium text-slate-500">
           Denominaciones rápidas del cliente:
         </p>
-        <div className="grid grid-cols-3 gap-1.5 sm:grid-cols-4" role="group" aria-label="Billetes colombianos">
+        <div className="grid grid-cols-3 gap-1.5" role="group" aria-label="Billetes colombianos">
           {/* Botón Pago Exacto */}
           <button
             type="button"
             onClick={handleExact}
             aria-pressed={isExact}
             aria-label={`Pago exacto de ${formatPrice(totalCents)}`}
-            className={`flex min-h-[44px] col-span-3 sm:col-span-1 items-center justify-center gap-1.5 rounded-xl border px-2 py-2 text-xs font-bold transition shadow-xs ${
+            className={`flex min-h-[44px] col-span-3 min-w-0 flex-wrap items-center justify-center gap-1.5 rounded-xl border px-2 py-2 text-xs font-bold transition shadow-xs ${
               isExact
                 ? 'border-emerald-500 bg-emerald-600 text-white shadow-emerald-200'
                 : 'border-emerald-200 bg-emerald-50/80 text-emerald-800 hover:bg-emerald-100'

@@ -264,10 +264,17 @@ export const SarinVoicePOS: React.FC<SarinVoicePOSProps> = ({
             <div className="space-y-2">
               <ul className="divide-y divide-slate-800 rounded-xl bg-slate-950/60 p-2.5 text-sm">
                 {lastCommand.items.map((item, idx) => (
-                  <li key={idx} className="flex items-center justify-between py-1.5 px-1">
-                    <span className="font-medium text-slate-200">
-                      {item.quantity}× {item.product.name}
-                    </span>
+                  <li key={idx} className="flex items-center justify-between gap-2 py-1.5 px-1">
+                    <div className="flex flex-wrap items-center gap-1.5 font-medium text-slate-200">
+                      <span>
+                        {item.quantity}× {item.product.name}
+                      </span>
+                      {item.appliedWholesaleTier && (
+                        <span className="inline-flex items-center rounded-full bg-amber-400/20 border border-amber-400/40 px-2 py-0.5 text-[10px] font-bold text-amber-300 tabular-nums">
+                          🏷️ Mayorista {item.appliedWholesaleTier.min_quantity}+
+                        </span>
+                      )}
+                    </div>
                     <span className="font-bold text-emerald-400 tabular-nums">
                       {item.subtotalCents ? `$ ${(item.subtotalCents / 100).toLocaleString('es-CO')}` : '$ 0'}
                     </span>
@@ -330,7 +337,7 @@ export const SarinVoicePOS: React.FC<SarinVoicePOSProps> = ({
               type="button"
               onClick={handleRepeatVoice}
               aria-label="Repetir confirmación por voz"
-              className="flex min-h-[40px] items-center gap-1.5 rounded-xl bg-slate-800 px-3 text-xs font-semibold text-slate-200 hover:bg-slate-700"
+              className="flex min-h-[44px] items-center gap-1.5 rounded-xl bg-slate-800 px-3 text-xs font-semibold text-slate-200 hover:bg-slate-700"
             >
               <span>🔄 Repetir por Voz</span>
             </button>
@@ -339,7 +346,7 @@ export const SarinVoicePOS: React.FC<SarinVoicePOSProps> = ({
               type="button"
               onClick={handleUndo}
               aria-label="Deshacer comando"
-              className="flex min-h-[40px] items-center gap-1.5 rounded-xl bg-slate-800 px-3 text-xs font-semibold text-slate-300 hover:bg-slate-700"
+              className="flex min-h-[44px] items-center gap-1.5 rounded-xl bg-slate-800 px-3 text-xs font-semibold text-slate-300 hover:bg-slate-700"
             >
               <span>↩️ Deshacer</span>
             </button>
@@ -349,7 +356,7 @@ export const SarinVoicePOS: React.FC<SarinVoicePOSProps> = ({
                 type="button"
                 onClick={handleApply}
                 aria-label="Aplicar productos al carrito"
-                className="flex min-h-[40px] items-center gap-2 rounded-xl bg-emerald-600 px-4 text-sm font-bold text-white hover:bg-emerald-500 shadow-sm active:scale-95"
+                className="flex min-h-[44px] items-center gap-2 rounded-xl bg-emerald-600 px-4 text-sm font-bold text-white hover:bg-emerald-500 shadow-sm active:scale-95"
               >
                 <span>✅ Aplicar a la Venta</span>
               </button>

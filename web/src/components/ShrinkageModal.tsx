@@ -366,7 +366,7 @@ export const ShrinkageModal: React.FC<ShrinkageModalProps> = ({
                     key={alert.productId}
                     type="button"
                     onClick={() => handleSelectProduct(alert.productId)}
-                    className={`min-h-[38px] rounded-full border px-3 py-1 text-xs font-medium transition ${
+                    className={`min-h-[44px] rounded-full border px-3 py-1 text-xs font-medium transition ${
                       isSelected
                         ? 'border-sf-primary bg-sf-primary text-white shadow-sm'
                         : alert.severity === 'expired'
@@ -533,7 +533,7 @@ export const ShrinkageModal: React.FC<ShrinkageModalProps> = ({
                       type="button"
                       disabled={preset > selectedProduct.stock || submitting}
                       onClick={() => setQuantityInput(String(preset))}
-                      className="min-h-[34px] rounded-lg border border-slate-200 bg-slate-50 px-2.5 text-xs font-semibold text-slate-700 hover:bg-slate-100 disabled:opacity-40 tabular-nums"
+                      className="min-h-[44px] min-w-[44px] rounded-lg border border-slate-200 bg-slate-50 px-3 text-xs font-semibold text-slate-700 hover:bg-slate-100 disabled:opacity-40 tabular-nums"
                     >
                       {preset}
                     </button>
@@ -542,7 +542,7 @@ export const ShrinkageModal: React.FC<ShrinkageModalProps> = ({
                     type="button"
                     disabled={submitting}
                     onClick={() => setQuantityInput(String(selectedProduct.stock))}
-                    className="min-h-[34px] rounded-lg border border-amber-200 bg-amber-50 px-2.5 text-xs font-semibold text-amber-800 hover:bg-amber-100 tabular-nums"
+                    className="min-h-[44px] rounded-lg border border-amber-200 bg-amber-50 px-3 text-xs font-semibold text-amber-800 hover:bg-amber-100 tabular-nums"
                   >
                     Todo ({selectedProduct.stock})
                   </button>
@@ -636,7 +636,7 @@ export const ShrinkageModal: React.FC<ShrinkageModalProps> = ({
               <button
                 type="button"
                 onClick={() => setHistoryFilter('all')}
-                className={`min-h-[34px] rounded-full px-3 text-xs font-semibold transition ${
+                className={`min-h-[44px] rounded-full px-3 text-xs font-semibold transition ${
                   historyFilter === 'all'
                     ? 'bg-sf-primary text-white'
                     : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
@@ -649,7 +649,7 @@ export const ShrinkageModal: React.FC<ShrinkageModalProps> = ({
                   key={r.id}
                   type="button"
                   onClick={() => setHistoryFilter(r.id)}
-                  className={`min-h-[34px] rounded-full px-2.5 text-xs font-medium transition ${
+                  className={`min-h-[44px] rounded-full px-3 text-xs font-medium transition ${
                     historyFilter === r.id
                       ? 'bg-sf-primary text-white'
                       : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
@@ -735,7 +735,7 @@ export const ShrinkageModal: React.FC<ShrinkageModalProps> = ({
                             type="button"
                             disabled={isReverting}
                             onClick={() => void handleRevertEntry(entry.id)}
-                            className="min-h-[40px] rounded-lg bg-red-600 px-2.5 text-xs font-semibold text-white hover:bg-red-700 disabled:opacity-50"
+                            className="min-h-[44px] rounded-lg bg-red-600 px-3 text-xs font-semibold text-white hover:bg-red-700 disabled:opacity-50"
                           >
                             {isReverting ? 'Revirtiendo...' : `Devolver +${entry.quantity}`}
                           </button>
@@ -743,7 +743,7 @@ export const ShrinkageModal: React.FC<ShrinkageModalProps> = ({
                             type="button"
                             disabled={isReverting}
                             onClick={() => setConfirmRevertId(null)}
-                            className="min-h-[40px] rounded-lg border border-slate-200 px-2.5 text-xs font-medium text-slate-600 hover:bg-slate-50"
+                            className="min-h-[44px] rounded-lg border border-slate-200 px-3 text-xs font-medium text-slate-600 hover:bg-slate-50"
                           >
                             Cancelar
                           </button>
@@ -753,7 +753,7 @@ export const ShrinkageModal: React.FC<ShrinkageModalProps> = ({
                           type="button"
                           onClick={() => setConfirmRevertId(entry.id)}
                           aria-label={`Revertir merma de ${entry.product_name}`}
-                          className="min-h-[40px] rounded-lg border border-slate-200 px-2.5 text-xs font-semibold text-slate-600 hover:bg-slate-50 hover:text-sf-dark"
+                          className="min-h-[44px] rounded-lg border border-slate-200 px-3 text-xs font-semibold text-slate-600 hover:bg-slate-50 hover:text-sf-dark"
                         >
                           ↩️ Revertir
                         </button>

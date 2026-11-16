@@ -1,11 +1,14 @@
 import type { Product, PaymentMethod } from '../firebase/db';
 import { formatCentsCOP } from './currency';
+import { resolveProductUnitPricing, type WholesaleTier } from './wholesalePricing';
 
 export interface ParsedVoiceItem {
   product: Product;
   quantity: number;
   unitPriceCents: number;
   subtotalCents: number;
+  appliedWholesaleTier?: WholesaleTier | null;
+  wholesaleSavingsCents?: number;
 }
 
 export interface VoiceSaleCommandResult {
@@ -292,18 +295,23 @@ export function parseSarinSaleCommand(transcript: string, catalog: Product[]): V
       matchProductInCatalog(clause, catalog);
 
     if (matchedProduct) {
-      const unitPriceCents = matchedProduct.price_cents;
-      const subtotalCents = unitPriceCents * qty;
+      const pricing = resolveProductUnitPricing(matchedProduct, qty);
       matchedItems.push({
         product: matchedProduct,
         quantity: qty,
-        unitPriceCents,
-        subtotalCents,
+        unitPriceCents: pricing.unit_price_cents,
+        subtotalCents: pricing.subtotal_cents,
+        appliedWholesaleTier: pricing.applied_tier,
+        wholesaleSavingsCents: pricing.wholesale_savings_cents,
       });
     }
   }
 
   const totalCents = matchedItems.reduce((acc, item) => acc + item.subtotalCents, 0);
+  const totalWholesaleSavingsCents = matchedItems.reduce(
+    (acc, item) => acc + (item.wholesaleSavingsCents || 0),
+    0
+  );
   const totalCOP = formatCentsCOP(totalCents);
 
   if (isExactPayment && totalCents > 0) {
@@ -338,6 +346,9 @@ export function parseSarinSaleCommand(transcript: string, catalog: Product[]): V
       (i) => `${i.quantity} ${i.product.name}`
     );
     spokenFeedback = `Agregado: ${itemSummaries.join(', ')}. Total: ${totalCOP}.`;
+    if (totalWholesaleSavingsCents > 0) {
+      spokenFeedback += ` Ahorro mayorista: ${formatCentsCOP(totalWholesaleSavingsCents)}.`;
+    }
 
     if (paymentMethod === 'credit') {
       spokenFeedback += ` Registrado como fiado${creditCustomerName ? ` a ${creditCustomerName}` : ''}.`;

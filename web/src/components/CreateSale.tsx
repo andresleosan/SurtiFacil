@@ -328,7 +328,7 @@ const CreateSale = () => {
   );
 
   return (
-    <section className="space-y-4">
+    <section className="space-y-4 pb-24 md:pb-0">
       <PageHeader
         title="Nueva venta"
         description={isMobile ? undefined : 'Toca un producto para agregarlo al carrito o atiende pedidos en vivo.'}
@@ -444,14 +444,14 @@ const CreateSale = () => {
                     <button
                       type="button"
                       onClick={() => setReceiptModalOpen(true)}
-                      className="btn-primary min-h-[38px] px-3 text-xs font-semibold"
+                      className="btn-primary min-h-[44px] px-3 text-xs font-semibold"
                     >
                       🖨️ Tirilla Térmica
                     </button>
                     <button
                       type="button"
                       onClick={() => setReceiptModalOpen(true)}
-                      className="btn-success min-h-[38px] px-3 text-xs font-semibold"
+                      className="btn-success min-h-[44px] px-3 text-xs font-semibold"
                     >
                       📲 Enviar WhatsApp
                     </button>
@@ -593,7 +593,7 @@ const CreateSale = () => {
 
             {!isMobile && (
               <aside className="lg:col-span-2">
-                <div className="card sticky top-4 p-4">{cartPanel}</div>
+                <div className="card p-4">{cartPanel}</div>
               </aside>
             )}
           </div>
