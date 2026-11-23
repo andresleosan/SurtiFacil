@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import {
   formatCOP,
   extractStoreDeliveryConfig,
+  ensureWhatsAppTables,
   executeConsultarCatalogo,
   executeModificarCanasta,
   executeConfirmarPedido,
@@ -290,6 +291,29 @@ describe('Sarin Customer Orchestrator & DeepSeek Engine', () => {
     expect(setSix.canasta[0].priceCents).toBe(380000);
     expect(setSix.canasta[0].subtotalCents).toBe(2280000);
     expect(setSix.canasta[0].wholesaleSavingsCents).toBe(420000);
+  });
+
+  it('ensureWhatsAppTables ejecuta DDL compatibles con D1 vía prepare().run() sin usar db.exec multilínea', async () => {
+    const executedStatements: string[] = [];
+    const execSpy = vi.fn();
+    const mockDb: any = {
+      exec: execSpy,
+      prepare: (sql: string) => ({
+        run: async () => {
+          executedStatements.push(sql);
+          return { success: true };
+        },
+      }),
+    };
+
+    await ensureWhatsAppTables(mockDb);
+
+    expect(execSpy).not.toHaveBeenCalled();
+    expect(executedStatements).toHaveLength(4);
+    expect(executedStatements[0]).toContain('CREATE TABLE IF NOT EXISTS whatsapp_conversations');
+    expect(executedStatements[1]).toContain('CREATE TABLE IF NOT EXISTS whatsapp_messages');
+    expect(executedStatements[2]).toContain('CREATE INDEX IF NOT EXISTS idx_whatsapp_conv_negocio');
+    expect(executedStatements[3]).toContain('CREATE INDEX IF NOT EXISTS idx_whatsapp_msg_conv');
   });
 });
 

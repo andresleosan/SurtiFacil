@@ -645,44 +645,48 @@ export async function executeConsultarEstadoOEscalar(
   };
 }
 
+const WHATSAPP_DDL_STATEMENTS = [
+  `CREATE TABLE IF NOT EXISTS whatsapp_conversations (
+    id TEXT PRIMARY KEY,
+    negocio_id TEXT NOT NULL DEFAULT 'surtifacil' REFERENCES negocios(id) ON DELETE CASCADE,
+    phone_number TEXT NOT NULL,
+    customer_name TEXT NOT NULL,
+    status TEXT NOT NULL CHECK(status IN ('active', 'paused', 'archived')) DEFAULT 'active',
+    bot_active INTEGER NOT NULL DEFAULT 1,
+    paused_until TEXT,
+    cart_json TEXT DEFAULT '[]',
+    delivery_mode TEXT DEFAULT 'counter',
+    delivery_address TEXT,
+    delivery_neighborhood TEXT,
+    last_message_text TEXT,
+    last_message_at TEXT DEFAULT (datetime('now')),
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now'))
+  )`,
+  `CREATE TABLE IF NOT EXISTS whatsapp_messages (
+    id TEXT PRIMARY KEY,
+    conversation_id TEXT NOT NULL REFERENCES whatsapp_conversations(id) ON DELETE CASCADE,
+    negocio_id TEXT NOT NULL DEFAULT 'surtifacil' REFERENCES negocios(id) ON DELETE CASCADE,
+    direction TEXT NOT NULL CHECK(direction IN ('inbound', 'outbound')) DEFAULT 'inbound',
+    sender TEXT NOT NULL,
+    message_text TEXT NOT NULL,
+    message_type TEXT NOT NULL DEFAULT 'text',
+    metadata_json TEXT DEFAULT '{}',
+    created_at TEXT DEFAULT (datetime('now'))
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_whatsapp_conv_negocio ON whatsapp_conversations(negocio_id, phone_number)`,
+  `CREATE INDEX IF NOT EXISTS idx_whatsapp_msg_conv ON whatsapp_messages(conversation_id, created_at)`,
+];
+
 /**
  * Asegura que las tablas whatsapp_conversations y whatsapp_messages existan en D1.
+ * Ejecuta cada DDL por separado vía prepare().run() para evitar D1_EXEC_ERROR con SQL multilínea.
  */
 export async function ensureWhatsAppTables(db: D1Database): Promise<void> {
-  await db.exec(`
-    CREATE TABLE IF NOT EXISTS whatsapp_conversations (
-      id TEXT PRIMARY KEY,
-      negocio_id TEXT NOT NULL DEFAULT 'surtifacil' REFERENCES negocios(id) ON DELETE CASCADE,
-      phone_number TEXT NOT NULL,
-      customer_name TEXT NOT NULL,
-      status TEXT NOT NULL CHECK(status IN ('active', 'paused', 'archived')) DEFAULT 'active',
-      bot_active INTEGER NOT NULL DEFAULT 1,
-      paused_until TEXT,
-      cart_json TEXT DEFAULT '[]',
-      delivery_mode TEXT DEFAULT 'counter',
-      delivery_address TEXT,
-      delivery_neighborhood TEXT,
-      last_message_text TEXT,
-      last_message_at TEXT DEFAULT (datetime('now')),
-      created_at TEXT DEFAULT (datetime('now')),
-      updated_at TEXT DEFAULT (datetime('now'))
-    );
-
-    CREATE TABLE IF NOT EXISTS whatsapp_messages (
-      id TEXT PRIMARY KEY,
-      conversation_id TEXT NOT NULL REFERENCES whatsapp_conversations(id) ON DELETE CASCADE,
-      negocio_id TEXT NOT NULL DEFAULT 'surtifacil' REFERENCES negocios(id) ON DELETE CASCADE,
-      direction TEXT NOT NULL CHECK(direction IN ('inbound', 'outbound')) DEFAULT 'inbound',
-      sender TEXT NOT NULL,
-      message_text TEXT NOT NULL,
-      message_type TEXT NOT NULL DEFAULT 'text',
-      metadata_json TEXT DEFAULT '{}',
-      created_at TEXT DEFAULT (datetime('now'))
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_whatsapp_conv_negocio ON whatsapp_conversations(negocio_id, phone_number);
-    CREATE INDEX IF NOT EXISTS idx_whatsapp_msg_conv ON whatsapp_messages(conversation_id, created_at);
-  `);
+  if (!db) return;
+  for (const sql of WHATSAPP_DDL_STATEMENTS) {
+    await db.prepare(sql).run();
+  }
 }
 
 /**
