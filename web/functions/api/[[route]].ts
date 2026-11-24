@@ -1,7 +1,15 @@
 import { PagesFunction, Env, D1Database } from '../types';
 import { jsonResponse, errorResponse, handleOptions } from '../_lib/response';
 import { authenticateRequest, AuthContext } from '../_lib/authMiddleware';
-import { ensureDatabaseSchema, hashPassword } from '../_lib/dbSchema';
+import { ensureDatabaseSchema, hashPassword, verifyPasswordHash } from '../_lib/dbSchema';
+import {
+  checkRateLimit,
+  clearRateLimit,
+  isDevOrTestAuthAllowed,
+  resolveSessionSigningSecret,
+  signD1SessionToken,
+  verifyWhatsAppWebhookSignature,
+} from '../_lib/securityCrypto';
 import { processSarinCustomerMessage, ensureWhatsAppTables } from '../_lib/sarinCustomerOrchestrator';
 import { processSarinCopilotMessage } from '../_lib/sarinCopilotOrchestrator';
 import {
@@ -10,6 +18,51 @@ import {
   validateWholesaleTiersInput,
   WholesaleTier,
 } from '../_lib/wholesalePricing';
+
+const VALID_STAFF_ROLES = new Set(['admin', 'manager', 'cashier']);
+
+function getClientIp(request: Request): string {
+  const cfIp = request.headers.get('CF-Connecting-IP') || request.headers.get('cf-connecting-ip');
+  if (cfIp && cfIp.trim()) return cfIp.trim();
+  const forwarded = request.headers.get('X-Forwarded-For') || request.headers.get('x-forwarded-for');
+  if (forwarded && forwarded.trim()) return forwarded.split(',')[0].trim();
+  return 'local';
+}
+
+async function getDemoSecurityConfig(
+  db: D1Database | undefined,
+  request: Request,
+  env: Env
+): Promise<{ demo_quick_access_enabled: boolean; superadmin_quick_access_enabled: boolean }> {
+  const envDisabled = String(env.DISABLE_DEMO_ACCESS || '').trim().toLowerCase() === 'true';
+  let demoQuickAccessEnabled = !envDisabled;
+
+  if (!envDisabled && db) {
+    try {
+      const row = await db
+        .prepare('SELECT secret_value FROM _system_secrets WHERE secret_key = ?')
+        .bind('demo_quick_access_enabled')
+        .first<{ secret_value?: string }>();
+      if (row?.secret_value === 'false') {
+        demoQuickAccessEnabled = false;
+      } else if (row?.secret_value === 'true') {
+        demoQuickAccessEnabled = true;
+      }
+    } catch {
+      // Fallback al valor por defecto según variable de entorno
+    }
+  }
+
+  const allowSuperAdminQuick =
+    demoQuickAccessEnabled &&
+    (isDevOrTestAuthAllowed(request, env) ||
+      String(env.ALLOW_SUPERADMIN_QUICK_DEMO || '').trim().toLowerCase() === 'true');
+
+  return {
+    demo_quick_access_enabled: demoQuickAccessEnabled,
+    superadmin_quick_access_enabled: allowSuperAdminQuick,
+  };
+}
 
 function enrichProductRow<T extends Record<string, any> | null | undefined>(row: T): T {
   if (!row) return row;
@@ -147,8 +200,29 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       });
     }
 
+    // 2.05 Configuración Pública de Seguridad y Modo Demo (/auth/public-config)
+    if (path === '/auth/public-config' && method === 'GET') {
+      const demoConfig = await getDemoSecurityConfig(env.DB, request, env);
+      return jsonResponse({
+        demo_quick_access_enabled: demoConfig.demo_quick_access_enabled,
+        superadmin_quick_access_enabled: demoConfig.superadmin_quick_access_enabled,
+        token_signing: 'HMAC-SHA256',
+        password_hashing: 'PBKDF2-SHA256',
+      });
+    }
+
     // 2.1 Registro Público de Nuevas Tiendas (/registro-negocio)
     if (path === '/registro-negocio' && method === 'POST') {
+      const clientIp = getClientIp(request);
+      const rate = checkRateLimit(`register:${clientIp}`, 10, 10 * 60_000, true);
+      if (!rate.allowed) {
+        return jsonResponse(
+          { error: 'Demasiados registros desde esta red. Intenta nuevamente en unos minutos.', status: 429 },
+          429,
+          { 'Retry-After': String(rate.retryAfterSeconds) }
+        );
+      }
+
       const body = (await request.json()) as any;
       const nombre = (body.nombre || '').trim();
       let slug = (body.slug || '')
@@ -174,9 +248,24 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       const barrio = (body.barrio || 'Medellín').trim();
       const direccion = (body.direccion || '').trim();
       const planId = body.plan_id || 'prueba_3d';
+      const rawPassword = body.password !== undefined && body.password !== null ? String(body.password).trim() : '';
 
       if (!nombre || !slug || !email || !phone) {
         return errorResponse('Nombre de tienda, identificador (slug), correo y WhatsApp son obligatorios.', 400);
+      }
+
+      if (rawPassword.length > 0 && rawPassword.length < 6) {
+        return errorResponse('La contraseña de administrador debe tener al menos 6 caracteres.', 400);
+      }
+
+      // Verificar que el correo electrónico no esté ya activo en otro local
+      const existingEmailUser = await env.DB.prepare(
+        'SELECT id FROM users WHERE lower(email) = ? AND deleted_at IS NULL'
+      )
+        .bind(email)
+        .first();
+      if (existingEmailUser) {
+        return errorResponse('Este correo electrónico ya está registrado en SurtiFácil.', 409);
       }
 
       // Asegurar tabla negocios en D1
@@ -248,9 +337,9 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         )
         .run();
 
-      // Crear usuario administrador en users con contraseña cifrada
+      // Crear usuario administrador en users con contraseña cifrada PBKDF2-SHA256
       const userId = `user-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
-      const pwdHash = body.password ? await hashPassword(String(body.password)) : null;
+      const pwdHash = rawPassword ? await hashPassword(rawPassword) : null;
 
       await env.DB.prepare(
         `INSERT OR REPLACE INTO users (id, negocio_id, email, display_name, role, is_super_admin, active, password_hash, created_at, last_login)
@@ -330,7 +419,11 @@ export const onRequest: PagesFunction<Env> = async (context) => {
           .catch(() => {});
       }
 
-      const sessionToken = `d1:${userId}:${email}:admin:${negocioId}`;
+      const signingSecret = await resolveSessionSigningSecret(env);
+      const sessionToken = await signD1SessionToken(
+        { uid: userId, email, role: 'admin', negocioId, isSuperAdmin: false },
+        signingSecret
+      );
 
       return jsonResponse({
         success: true,
@@ -433,6 +526,21 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         return jsonResponse({ authenticated: false, error: 'Correo electrónico requerido.' }, 200);
       }
 
+      const clientIp = getClientIp(request);
+      const loginBucket = `login:${clientIp}:${email}`;
+      const rateState = checkRateLimit(loginBucket, 10, 5 * 60_000, false);
+      if (!rateState.allowed) {
+        return jsonResponse(
+          {
+            authenticated: false,
+            error: `Demasiados intentos fallidos. Espera ${rateState.retryAfterSeconds}s antes de intentar nuevamente.`,
+            status: 429,
+          },
+          429,
+          { 'Retry-After': String(rateState.retryAfterSeconds) }
+        );
+      }
+
       const userRow = await env.DB.prepare(
         'SELECT id, negocio_id, email, display_name, role, is_super_admin, active, password_hash, deleted_at FROM users WHERE lower(email) = ?'
       )
@@ -450,6 +558,7 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         }>();
 
       if (!userRow || userRow.active !== 1 || userRow.deleted_at) {
+        checkRateLimit(loginBucket, 10, 5 * 60_000, true);
         return jsonResponse({ authenticated: false, error: 'Usuario no encontrado o inactivo.' }, 200);
       }
 
@@ -463,19 +572,56 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       ]);
 
       const isSeedEmail = DEMO_SEED_EMAILS.has(email);
+      const demoConfig = await getDemoSecurityConfig(env.DB, request, env);
 
-      if (!body.quick_access || !isSeedEmail) {
+      if (body.quick_access === true) {
+        if (!demoConfig.demo_quick_access_enabled) {
+          return errorResponse('El acceso rápido de demostración está deshabilitado en este entorno.', 403);
+        }
+        if (email === 'andres.san1404@gmail.com' && !demoConfig.superadmin_quick_access_enabled) {
+          return errorResponse(
+            'El acceso rápido de SuperAdmin está bloqueado en producción. Inicia sesión con Google.',
+            403
+          );
+        }
+        if (!isSeedEmail) {
+          checkRateLimit(loginBucket, 10, 5 * 60_000, true);
+          return errorResponse('El acceso rápido solo está permitido para cuentas demo oficiales.', 403);
+        }
+      } else {
         if (!password || password.length < 4) {
+          checkRateLimit(loginBucket, 10, 5 * 60_000, true);
           return jsonResponse({ authenticated: false, error: 'Contraseña inválida.' }, 200);
         }
 
         if (userRow.password_hash) {
-          const incomingHash = await hashPassword(password);
-          if (incomingHash !== userRow.password_hash) {
+          const { valid, needsRehash } = await verifyPasswordHash(password, userRow.password_hash);
+          if (!valid) {
+            checkRateLimit(loginBucket, 10, 5 * 60_000, true);
+            return jsonResponse({ authenticated: false, error: 'Credenciales inválidas.' }, 200);
+          }
+          if (needsRehash) {
+            const upgradedHash = await hashPassword(password);
+            await env.DB.prepare('UPDATE users SET password_hash = ? WHERE id = ?')
+              .bind(upgradedHash, userRow.id)
+              .run()
+              .catch(() => {});
+          }
+        } else {
+          // Solo cuentas demo no-SuperAdmin sin contraseña fijada pueden usar clave demo cuando el modo demo está activo
+          const allowSeedPasswordFallback =
+            isSeedEmail &&
+            email !== 'andres.san1404@gmail.com' &&
+            demoConfig.demo_quick_access_enabled &&
+            password.length >= 6;
+          if (!allowSeedPasswordFallback) {
+            checkRateLimit(loginBucket, 10, 5 * 60_000, true);
             return jsonResponse({ authenticated: false, error: 'Credenciales inválidas.' }, 200);
           }
         }
       }
+
+      clearRateLimit(loginBucket);
 
       await env.DB.prepare("UPDATE users SET last_login = datetime('now') WHERE id = ?")
         .bind(userRow.id)
@@ -488,7 +634,17 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         | 'cashier';
       const negocioId = userRow.negocio_id || 'surtifacil';
       const isSuperAdmin = userRow.is_super_admin === 1 || email === 'andres.san1404@gmail.com';
-      const token = `d1:${userRow.id}:${userRow.email}:${role}:${negocioId}`;
+      const signingSecret = await resolveSessionSigningSecret(env);
+      const token = await signD1SessionToken(
+        {
+          uid: userRow.id,
+          email: userRow.email,
+          role,
+          negocioId,
+          isSuperAdmin,
+        },
+        signingSecret
+      );
 
       const negocio = await env.DB.prepare(
         'SELECT id, slug, nombre, barrio, ciudad, telefono_whatsapp, direccion, horario, estado, plan_id, suscripcion_vence_en, cuota_ia_total, cuota_ia_usada, costo_domicilio_cents, datos_pago_offline, config_json FROM negocios WHERE id = ?'
@@ -517,27 +673,59 @@ export const onRequest: PagesFunction<Env> = async (context) => {
     }
 
     if (path === '/auth/provision-user' && method === 'POST') {
-      // Provisión de staff desde authService
+      // Provisión segura de staff desde authService (solo admin / SuperAdmin)
       const auth = await authenticateRequest(request, env);
+      if (auth.user.role !== 'admin' && !auth.user.isSuperAdmin) {
+        return errorResponse('Acceso denegado: solo el administrador puede aprovisionar empleados.', 403);
+      }
+
       const body = (await request.json()) as {
         email: string;
         password?: string;
         displayName?: string;
         role?: string;
       };
-      const role = body.role || 'cashier';
+      const cleanEmail = (body.email || '').trim().toLowerCase();
+      if (!cleanEmail) {
+        return errorResponse('El correo electrónico es obligatorio.', 400);
+      }
+
+      const role = (body.role || 'cashier').trim();
+      if (!VALID_STAFF_ROLES.has(role)) {
+        return errorResponse('Rol de usuario no válido. Permitidos: admin, manager, cashier.', 400);
+      }
+
+      const rawPassword = body.password !== undefined && body.password !== null ? String(body.password).trim() : '';
+      if (rawPassword.length > 0 && rawPassword.length < 6) {
+        return errorResponse('La contraseña del empleado debe tener al menos 6 caracteres.', 400);
+      }
+
+      const existingEmail = await env.DB.prepare(
+        'SELECT id, negocio_id FROM users WHERE lower(email) = ? AND deleted_at IS NULL'
+      )
+        .bind(cleanEmail)
+        .first<{ id: string; negocio_id: string }>();
+      if (existingEmail) {
+        return errorResponse(
+          existingEmail.negocio_id !== auth.negocioId
+            ? 'Este correo ya pertenece a otra tienda registrada.'
+            : 'Este correo ya está registrado en el personal de esta tienda.',
+          409
+        );
+      }
+
       const newId = `user-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
-      const pwdHash = body.password ? await hashPassword(String(body.password)) : null;
+      const pwdHash = rawPassword ? await hashPassword(rawPassword) : null;
 
       await env.DB.prepare(
-        "INSERT OR REPLACE INTO users (id, negocio_id, email, display_name, role, is_super_admin, active, password_hash, created_at) VALUES (?, ?, ?, ?, ?, 0, 1, ?, datetime('now'))"
+        "INSERT INTO users (id, negocio_id, email, display_name, role, is_super_admin, active, password_hash, created_at) VALUES (?, ?, ?, ?, ?, 0, 1, ?, datetime('now'))"
       )
-        .bind(newId, auth.negocioId, body.email.toLowerCase(), body.displayName || null, role, pwdHash)
+        .bind(newId, auth.negocioId, cleanEmail, body.displayName || null, role, pwdHash)
         .run();
 
       return jsonResponse({
         id: newId,
-        email: body.email.toLowerCase(),
+        email: cleanEmail,
         displayName: body.displayName || null,
         role,
         active: true,
@@ -766,6 +954,46 @@ export const onRequest: PagesFunction<Env> = async (context) => {
 
         return jsonResponse({ success: true, id: comboId });
       }
+    }
+
+    // 3.25 Control de Seguridad Global por SuperAdmin (/super-admin/security-config)
+    if (path === '/super-admin/security-config' && method === 'PUT') {
+      const auth = await authenticateRequest(request, env);
+      if (!auth.user.isSuperAdmin && auth.user.email.toLowerCase() !== 'andres.san1404@gmail.com') {
+        return errorResponse('Acceso denegado: solo el SuperAdmin de SurtiFácil puede modificar la seguridad.', 403);
+      }
+
+      const body = (await request.json().catch(() => ({}))) as { demo_quick_access_enabled?: boolean };
+      if (typeof body.demo_quick_access_enabled !== 'boolean') {
+        return errorResponse('El campo demo_quick_access_enabled (boolean) es obligatorio.', 400);
+      }
+
+      await env.DB.prepare(
+        `CREATE TABLE IF NOT EXISTS _system_secrets (
+          secret_key TEXT PRIMARY KEY,
+          secret_value TEXT NOT NULL,
+          updated_at TEXT DEFAULT (datetime('now'))
+        )`
+      )
+        .run()
+        .catch(() => {});
+
+      await env.DB.prepare(
+        `INSERT INTO _system_secrets (secret_key, secret_value, updated_at)
+         VALUES ('demo_quick_access_enabled', ?, datetime('now'))
+         ON CONFLICT(secret_key) DO UPDATE SET
+           secret_value = excluded.secret_value,
+           updated_at = datetime('now')`
+      )
+        .bind(body.demo_quick_access_enabled ? 'true' : 'false')
+        .run();
+
+      const demoConfig = await getDemoSecurityConfig(env.DB, request, env);
+      return jsonResponse({
+        success: true,
+        demo_quick_access_enabled: demoConfig.demo_quick_access_enabled,
+        superadmin_quick_access_enabled: demoConfig.superadmin_quick_access_enabled,
+      });
     }
 
     // 3.3 Centro de Control SuperAdmin (/super-admin/negocios)
@@ -2528,17 +2756,42 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       }
 
       if (method === 'POST') {
-        const body = (await request.json()) as { email: string; display_name?: string; role?: string };
-        if (!body.email) {
+        const body = (await request.json()) as {
+          email: string;
+          display_name?: string;
+          role?: string;
+          password?: string;
+        };
+        const cleanEmail = (body.email || '').trim().toLowerCase();
+        if (!cleanEmail) {
           return errorResponse('El correo electrónico es obligatorio.', 400);
         }
+        const role = (body.role || 'cashier').trim();
+        if (!VALID_STAFF_ROLES.has(role)) {
+          return errorResponse('Rol de empleado no válido.', 400);
+        }
+        const rawPassword = body.password !== undefined && body.password !== null ? String(body.password).trim() : '';
+        if (rawPassword.length > 0 && rawPassword.length < 6) {
+          return errorResponse('La contraseña debe tener al menos 6 caracteres.', 400);
+        }
+
+        const existingUser = await env.DB.prepare(
+          'SELECT id, negocio_id FROM users WHERE lower(email) = ? AND deleted_at IS NULL'
+        )
+          .bind(cleanEmail)
+          .first<{ id: string; negocio_id: string }>();
+        if (existingUser) {
+          return errorResponse('Este correo electrónico ya está registrado.', 409);
+        }
+
         const id = `user-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+        const pwdHash = rawPassword ? await hashPassword(rawPassword) : null;
         await env.DB.prepare(
           `INSERT INTO users (
-            id, negocio_id, email, display_name, role, is_super_admin, active, created_at
-          ) VALUES (?, ?, ?, ?, ?, 0, 1, datetime('now'))`
+            id, negocio_id, email, display_name, role, is_super_admin, active, password_hash, created_at
+          ) VALUES (?, ?, ?, ?, ?, 0, 1, ?, datetime('now'))`
         )
-          .bind(id, auth.negocioId, body.email.toLowerCase(), body.display_name || null, body.role || 'cashier')
+          .bind(id, auth.negocioId, cleanEmail, body.display_name || null, role, pwdHash)
           .run();
 
         const created = await env.DB.prepare('SELECT id, negocio_id, email, display_name, role, active FROM users WHERE id = ?')
@@ -2549,25 +2802,43 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       }
 
       if (method === 'PUT' && targetUserId) {
-        const body = (await request.json()) as { role?: string; active?: boolean; display_name?: string };
+        const body = (await request.json()) as {
+          role?: string;
+          active?: boolean;
+          display_name?: string;
+          password?: string;
+        };
+        if (body.role !== undefined && !VALID_STAFF_ROLES.has(body.role)) {
+          return errorResponse('Rol de empleado no válido.', 400);
+        }
+        const rawPassword = body.password !== undefined && body.password !== null ? String(body.password).trim() : '';
+        if (rawPassword.length > 0 && rawPassword.length < 6) {
+          return errorResponse('La contraseña debe tener al menos 6 caracteres.', 400);
+        }
+        const pwdHash = rawPassword ? await hashPassword(rawPassword) : null;
+
         await env.DB.prepare(
           `UPDATE users SET
             role = COALESCE(?, role),
             active = COALESCE(?, active),
-            display_name = COALESCE(?, display_name)
+            display_name = COALESCE(?, display_name),
+            password_hash = COALESCE(?, password_hash)
           WHERE id = ? AND negocio_id = ?`
         )
           .bind(
             body.role || null,
             body.active !== undefined ? (body.active ? 1 : 0) : null,
             body.display_name || null,
+            pwdHash,
             targetUserId,
             auth.negocioId
           )
           .run();
 
-        const updated = await env.DB.prepare('SELECT id, email, display_name, role, active FROM users WHERE id = ?')
-          .bind(targetUserId)
+        const updated = await env.DB.prepare(
+          'SELECT id, email, display_name, role, active FROM users WHERE id = ? AND negocio_id = ?'
+        )
+          .bind(targetUserId, auth.negocioId)
           .first();
 
         return jsonResponse(updated);
@@ -2974,8 +3245,11 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         const token = url.searchParams.get('hub.verify_token');
         const challenge = url.searchParams.get('hub.challenge');
 
-        const expectedToken = (env.WHATSAPP_VERIFY_TOKEN as string) || 'surtifacil-webhook-secret';
-        if (mode === 'subscribe' && token === expectedToken && challenge) {
+        const configuredToken =
+          typeof env.WHATSAPP_VERIFY_TOKEN === 'string' ? env.WHATSAPP_VERIFY_TOKEN.trim() : '';
+        const expectedToken =
+          configuredToken || (isDevOrTestAuthAllowed(request, env) ? 'surtifacil-webhook-secret' : '');
+        if (mode === 'subscribe' && expectedToken && token === expectedToken && challenge) {
           return new Response(challenge, {
             status: 200,
             headers: { 'Content-Type': 'text/plain; charset=utf-8' },
@@ -2984,9 +3258,26 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         return errorResponse('Verificación de webhook fallida.', 403);
       }
 
-      // 11.2 Recepción de Mensajes Entrantes (Meta POST)
+      // 11.2 Recepción de Mensajes Entrantes (Meta POST con verificación HMAC X-Hub-Signature-256)
       if (method === 'POST') {
-        const body = (await request.json().catch(() => ({}))) as any;
+        const rawBody = await request.text();
+        const appSecret =
+          typeof env.WHATSAPP_APP_SECRET === 'string' ? env.WHATSAPP_APP_SECRET.trim() : '';
+        if (appSecret.length > 0) {
+          const signatureHeader =
+            request.headers.get('X-Hub-Signature-256') || request.headers.get('x-hub-signature-256');
+          const validSignature = await verifyWhatsAppWebhookSignature(rawBody, signatureHeader, appSecret);
+          if (!validSignature) {
+            return errorResponse('Firma HMAC de webhook WhatsApp inválida.', 401);
+          }
+        }
+
+        let body: any = {};
+        try {
+          body = rawBody ? JSON.parse(rawBody) : {};
+        } catch {
+          return errorResponse('Payload JSON inválido en webhook de WhatsApp.', 400);
+        }
         const entry = body?.entry?.[0];
         const change = entry?.changes?.[0];
         const value = change?.value;
@@ -3264,8 +3555,14 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       // 14.1 GET /api/integrations/status
       if (method === 'GET' && (subPath === 'status' || subPath === '')) {
         const hasDeepSeekKey = Boolean(env.DEEPSEEK_API_KEY && String(env.DEEPSEEK_API_KEY).trim().length > 10);
-        const hasWhatsAppToken = Boolean(env.WHATSAPP_TOKEN && String(env.WHATSAPP_TOKEN).trim().length > 10);
+        const rawWhatsAppToken = env.WHATSAPP_TOKEN || env.WHATSAPP_ACCESS_TOKEN;
+        const hasWhatsAppToken = Boolean(rawWhatsAppToken && String(rawWhatsAppToken).trim().length > 10);
         const hasWhatsAppPhoneId = Boolean(env.WHATSAPP_PHONE_ID && String(env.WHATSAPP_PHONE_ID).trim().length > 5);
+        const hasWhatsAppAppSecret = Boolean(
+          env.WHATSAPP_APP_SECRET && String(env.WHATSAPP_APP_SECRET).trim().length > 8
+        );
+        const demoConfig = await getDemoSecurityConfig(env.DB, request, env);
+        const hasEnvJwtSecret = Boolean(env.JWT_SECRET && String(env.JWT_SECRET).trim().length >= 16);
 
         return jsonResponse({
           deepseek: {
@@ -3282,11 +3579,20 @@ export const onRequest: PagesFunction<Env> = async (context) => {
               : null,
             webhook_url: 'https://surtifacil.pages.dev/api/webhooks/whatsapp',
             verify_token_configured: Boolean(env.WHATSAPP_VERIFY_TOKEN),
+            app_secret_configured: hasWhatsAppAppSecret,
           },
           database: {
             status: 'connected',
             engine: 'Cloudflare D1 (SQLite Edge)',
             multi_tenant: true,
+          },
+          security: {
+            session_signing: 'HMAC-SHA256',
+            jwt_secret_source: hasEnvJwtSecret ? 'cloudflare_env' : 'd1_auto_managed',
+            password_hashing: 'PBKDF2-SHA256 (100.000 iteraciones)',
+            mock_tokens_blocked_in_prod: true,
+            whatsapp_hmac_configured: hasWhatsAppAppSecret,
+            demo_quick_access_enabled: demoConfig.demo_quick_access_enabled,
           },
         });
       }
@@ -3354,9 +3660,15 @@ export const onRequest: PagesFunction<Env> = async (context) => {
   } catch (error: any) {
     console.error('Error en Pages Functions API:', error);
     const message = error?.message || 'Error interno en el servidor.';
-    const status = message.includes('token') || message.includes('autorización') || message.includes('denegado')
-      ? 401
-      : 500;
+    const lowerMsg = message.toLowerCase();
+    const status =
+      lowerMsg.includes('token') ||
+      lowerMsg.includes('autorización') ||
+      lowerMsg.includes('denegado') ||
+      lowerMsg.includes('expirado') ||
+      lowerMsg.includes('firma')
+        ? 401
+        : 500;
     return errorResponse(message, status);
   }
 };

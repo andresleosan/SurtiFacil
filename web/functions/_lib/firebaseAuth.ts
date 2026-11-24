@@ -1,5 +1,11 @@
-// Verificador de JWT RS256 de Firebase Auth usando Web Crypto API
+// Verificador de JWT RS256 de Firebase Auth y sesiones HMAC-SHA256 de Cloudflare D1
 // Compatible con Cloudflare Workers / Pages Functions en el Edge.
+import { Env } from '../types';
+import {
+  isDevOrTestAuthAllowed,
+  resolveSessionSigningSecret,
+  verifyD1SessionToken,
+} from './securityCrypto';
 
 const GOOGLE_JWKS_URL =
   'https://www.googleapis.com/service_accounts/v1/jwk/securetoken@system.gserviceaccount.com';
@@ -101,24 +107,47 @@ async function fetchGooglePublicKeys(): Promise<{ [kid: string]: CryptoKey }> {
 }
 
 /**
- * Valida y decodifica un ID Token emitido por Firebase Authentication.
- * Soporta tokens mockeados para testing local cuando comienzan con 'mock:' o 'test:'.
+ * Valida y decodifica un ID Token emitido por Firebase Authentication o un token firmado D1 (`d1s.*`).
+ * Los tokens sin firma (`d1:`, `mock:`, `test-`, `token`) solo se permiten en desarrollo/pruebas locales.
  */
 export async function verifyFirebaseIdToken(
   token: string,
-  projectId = 'surtifacilapp'
+  projectId = 'surtifacilapp',
+  options?: { env?: Env; request?: Request }
 ): Promise<DecodedFirebaseToken> {
   if (!token || typeof token !== 'string') {
     throw new Error('Token de autenticación no proporcionado o inválido.');
   }
 
-  // Soporte para tokens de sesión nativa D1 ('d1:'), pruebas y desarrollo local ('mock:')
+  // Sesiones nativas D1 firmadas criptográficamente con HMAC-SHA256
+  if (token.startsWith('d1s.')) {
+    const secret = await resolveSessionSigningSecret(options?.env);
+    const verified = await verifyD1SessionToken(token, secret);
+    return {
+      uid: verified.uid,
+      sub: verified.uid,
+      email: verified.email,
+      role: verified.role,
+      negocioId: verified.negocioId,
+      isSuperAdmin: Boolean(verified.isSuperAdmin),
+      name: verified.email.split('@')[0] || 'Usuario SurtiFácil',
+      iss: 'surtifacil:d1-hmac',
+      aud: projectId,
+      iat: verified.iat,
+      exp: verified.exp,
+    };
+  }
+
+  // Soporte restringido de tokens sin firma para pruebas unitarias / desarrollo local
   if (
     token.startsWith('d1:') ||
     token.startsWith('mock:') ||
     token.startsWith('test-') ||
     token === 'token'
   ) {
+    if (!isDevOrTestAuthAllowed(options?.request, options?.env)) {
+      throw new Error('Token sin firma criptográfica o de prueba rechazado en producción.');
+    }
     return parseMockToken(token, projectId);
   }
 

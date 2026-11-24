@@ -103,6 +103,7 @@ async function setupMultiRoleBackendMocks(page: Page) {
   ];
 
   const customerOrders: any[] = [];
+  let demoQuickAccessEnabled = true;
 
   await page.route('**/api/**', async (route) => {
     const req = route.request();
@@ -110,8 +111,42 @@ async function setupMultiRoleBackendMocks(page: Page) {
     const path = url.pathname.replace(/^\/api/, '');
     const method = req.method().toUpperCase();
 
+    if (path === '/auth/public-config' && method === 'GET') {
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          demo_quick_access_enabled: demoQuickAccessEnabled,
+          superadmin_quick_access_enabled: demoQuickAccessEnabled,
+          token_signing: 'HMAC-SHA256',
+          password_hashing: 'PBKDF2-SHA256',
+        }),
+      });
+    }
+
+    if (path === '/super-admin/security-config' && method === 'PUT') {
+      const body = JSON.parse(req.postData() || '{}');
+      demoQuickAccessEnabled = Boolean(body.demo_quick_access_enabled);
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          success: true,
+          demo_quick_access_enabled: demoQuickAccessEnabled,
+          superadmin_quick_access_enabled: demoQuickAccessEnabled,
+        }),
+      });
+    }
+
     if (path === '/auth/login' && method === 'POST') {
       const body = JSON.parse(req.postData() || '{}');
+      if (body.quick_access && !demoQuickAccessEnabled) {
+        return route.fulfill({
+          status: 403,
+          contentType: 'application/json',
+          body: JSON.stringify({ error: 'Acceso rápido deshabilitado.' }),
+        });
+      }
       const email = String(body.email || '').trim().toLowerCase();
       const found = users.find((u) => u.email === email);
       if (!found) {
@@ -317,6 +352,33 @@ async function setupMultiRoleBackendMocks(page: Page) {
       });
     }
 
+    if (path === '/integrations/status' && method === 'GET') {
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          deepseek: { configured: false, mode: 'simulated_heuristic', model: 'deepseek-chat', provider: 'DeepSeek Edge' },
+          whatsapp: {
+            configured: false,
+            mode: 'simulated_local',
+            phone_id: null,
+            webhook_url: 'https://surtifacil.pages.dev/api/webhooks/whatsapp',
+            verify_token_configured: true,
+            app_secret_configured: true,
+          },
+          database: { status: 'connected', engine: 'Cloudflare D1', multi_tenant: true },
+          security: {
+            session_signing: 'HMAC-SHA256',
+            jwt_secret_source: 'cloudflare_env',
+            password_hashing: 'PBKDF2-SHA256 (100.000 iteraciones)',
+            mock_tokens_blocked_in_prod: true,
+            whatsapp_hmac_configured: true,
+            demo_quick_access_enabled: demoQuickAccessEnabled,
+          },
+        }),
+      });
+    }
+
     return route.fulfill({
       status: 200,
       contentType: 'application/json',
@@ -409,5 +471,37 @@ test.describe('Certificación de Acceso Real Multi-Rol (Cliente, Cajero, Gerente
     await page.getByRole('link', { name: /Vista Cliente Kiosco/i }).click();
     await expect(page).toHaveURL(/#\/kiosco\/surtifacil/);
     await expect(page.getByText('Leche Entera Alquería 1L')).toBeVisible();
+  });
+
+  test('5. SuperAdmin controla Modo Demo en Login, StoreSettings muestra Blindaje Criptográfico y oculta acceso rápido al desactivarlo', async ({ page }) => {
+    await setupMultiRoleBackendMocks(page);
+
+    await page.goto('/#/login');
+    await page.getByRole('button', { name: /Entrar como SuperAdmin/i }).click();
+    await expect(page).toHaveURL(/#\/super-admin/);
+
+    const secBanner = page.getByTestId('superadmin-security-banner');
+    await expect(secBanner).toBeVisible();
+    await expect(secBanner.getByText('Activo (Pruebas / Demo)')).toBeVisible();
+
+    await secBanner.getByRole('button', { name: /Desactivar Modo Demo/i }).click();
+    await expect(secBanner.getByText('Cerrado Comercial')).toBeVisible();
+
+    await page.goto('/#/settings');
+    const securityCard = page.getByTestId('security-hardening-card');
+    await expect(securityCard).toBeVisible();
+    await expect(securityCard.getByText('Sesiones D1: HMAC-SHA256')).toBeVisible();
+    await expect(securityCard.getByText(/PBKDF2-SHA256/)).toBeVisible();
+    await expect(securityCard.getByText('Tokens Mock: Bloqueados en Prod')).toBeVisible();
+    await expect(securityCard.getByText('Firma HMAC Meta: Configurada')).toBeVisible();
+
+    const sidebar = page.getByRole('complementary', { name: 'Menú principal' });
+    await sidebar.getByRole('button', { name: 'Cerrar sesión' }).click();
+    await expect(page.getByRole('heading', { name: 'Iniciar sesión' })).toBeVisible();
+
+    await expect(page.getByTestId('demo-access-disabled-notice')).toBeVisible();
+    await expect(page.getByRole('button', { name: /Entrar como Admin/i })).toBeHidden();
+    await expect(page.getByRole('button', { name: /Entrar como Cajero/i })).toBeHidden();
+    await expect(page.getByRole('button', { name: /Entrar como SuperAdmin/i })).toBeHidden();
   });
 });

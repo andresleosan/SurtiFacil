@@ -9,6 +9,14 @@ import SubscriptionBanner from '../components/SubscriptionBanner';
 const mockTenantService = vi.hoisted(() => ({
   registerStore: vi.fn(),
   getSuperAdminData: vi.fn(),
+  getPublicSecurityConfig: vi.fn(async () => ({
+    demo_quick_access_enabled: true,
+    superadmin_quick_access_enabled: true,
+  })),
+  updateDemoSecurityConfig: vi.fn(async (enabled: boolean) => ({
+    demo_quick_access_enabled: enabled,
+    superadmin_quick_access_enabled: enabled,
+  })),
   renovarNegocio: vi.fn(),
   updateNegocio: vi.fn(),
   operateStore: vi.fn(),

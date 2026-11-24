@@ -26,6 +26,12 @@ const authMock = vi.hoisted(() => ({
   toggleUserActive: vi.fn(),
   deleteUser: vi.fn(),
   registerUser: vi.fn(),
+  isLocalDevOrigin: vi.fn(() => true),
+  getPublicAuthConfig: vi.fn(async () => ({
+    demo_quick_access_enabled: true,
+    superadmin_quick_access_enabled: true,
+  })),
+  loginWithQuickRole: vi.fn(),
 }));
 
 vi.mock('../services/authService', () => authMock);

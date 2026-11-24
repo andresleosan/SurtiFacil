@@ -485,6 +485,62 @@ Para maximizar la eficiencia de tokens y la precisión de razonamiento en cada s
        - **Build de Producción (`npm run build:web`):** `tsc && vite build` completado sin errores en 5.29 s con Service Worker y 70 entradas (`1853.09 KiB`) en precaché PWA.
        - **Playwright E2E (`npm run test:e2e`):** 39 pruebas aprobadas y 0 fallidas en 1.3 m (9/9 en `phase6-certification.spec.ts` en `chromium`, `mobile-chromium` y `tablet-chromium`; 10/10 en `saas-production.spec.ts`; 4/4 en `access-roles.spec.ts`; más suites de humo/canales públicos; las 7 omitidas corresponden exclusivamente a credenciales opcionales `QA_USER_EMAIL` no suministradas).
 
+---
+
+## Fase 7 — Blindaje de Seguridad Comercial, Fidelización Vecinal, Finanzas Reales y Venta a Granel
+
+- [x] **Tarea 28 — Hardening de Seguridad Comercial Pre-Lanzamiento (JWT D1 Firmado HMAC-SHA256, PBKDF2-SHA256 por Usuario, Bloqueo de Tokens Mock en Producción, Firma HMAC Meta WhatsApp y Control de Modo Demo):**
+  - **Nivel Recomendado:** `Argon (Medium)`
+  - **Estado:** ✅ Completada y Desplegada
+  - **Evidencia Técnica de Implementación:**
+    1. **Primitivas Criptográficas y Rate Limiting en Edge ([`web/functions/_lib/securityCrypto.ts`](../web/functions/_lib/securityCrypto.ts) y [`web/functions/types.d.ts`](../web/functions/types.d.ts)):**
+       - Implementado hashing **PBKDF2-SHA256** (`hashPasswordPBKDF2`) con salt aleatorio de 16 bytes por usuario a `100.000` iteraciones (respetando el límite de Cloudflare Workers) y verificación en tiempo constante (`timingSafeEqualStrings`, `verifyPasswordHash`) con detección automática `needsRehash` para migrar hashes SHA-256 legados sin afectar contraseñas existentes.
+       - Implementados tokens de sesión D1 firmados con **HMAC-SHA256** (`d1s.<payload>.<sig>`, `signD1SessionToken`, `verifyD1SessionToken`), secreto resuelto desde `env.JWT_SECRET` o tabla persistente `_system_secrets` en [`docs/schema-d1.sql`](schema-d1.sql) y [`web/functions/_lib/dbSchema.ts`](../web/functions/_lib/dbSchema.ts).
+       - Política estricta de entorno (`isDevOrTestAuthAllowed`), verificación HMAC `X-Hub-Signature-256` de webhooks Meta WhatsApp (`verifyWhatsAppWebhookSignature`) y limitador de intentos por ventana deslizante (`checkRateLimit`).
+    2. **Verificación JWT y Aislamiento Multi-Tenant en Middleware ([`web/functions/_lib/firebaseAuth.ts`](../web/functions/_lib/firebaseAuth.ts) y [`web/functions/_lib/authMiddleware.ts`](../web/functions/_lib/authMiddleware.ts)):**
+       - `verifyFirebaseIdToken` valida criptográficamente tokens `d1s.*` y rechaza con HTTP `401` cualquier token sin firma (`mock:`, `d1:`, `test-`, `token`) en producción (`ENVIRONMENT === 'production'` u orígenes públicos como `surtifacil.pages.dev`), manteniendo compatibilidad en desarrollo/pruebas locales.
+       - Cuentas externas nuevas de Google/Firebase sin fila previa reciben automáticamente su propio local aislado `tienda-<uid>` (jamás el local insignia `'surtifacil'`).
+    3. **Blindaje de Endpoints Serverless ([`web/functions/api/[[route]].ts`](../web/functions/api/[[route]].ts)):**
+       - Nuevos endpoints `GET /api/auth/public-config` y `PUT /api/super-admin/security-config` (exclusivo SuperAdmin) para activar/cerrar comercialmente el Acceso Rápido Demo en Login.
+       - Endurecidos `POST /api/registro-negocio` (rate-limit, unicidad de correo y emisión de `d1s.*`), `POST /api/auth/login` (migración transparente a PBKDF2, rate-limit de fallos `429` y bloqueo de `quick_access` de SuperAdmin en producción), `POST /api/auth/provision-user` y `/api/users` (RBAC estricto y anti-colisión multi-tenant), `/api/webhooks/whatsapp` (firma HMAC obligatoria cuando `WHATSAPP_APP_SECRET` está presente) y `/api/integrations/status` (telemetría `security`).
+    4. **Frontend Seguro y Auditoría Visual ([`authService.ts`](../web/src/services/authService.ts), [`Login.tsx`](../web/src/components/Login.tsx), [`integrationService.ts`](../web/src/services/integrationService.ts), [`StoreSettings.tsx`](../web/src/components/StoreSettings.tsx), [`tenantService.ts`](../web/src/services/tenantService.ts) y [`SuperAdminStores.tsx`](../web/src/components/SuperAdminStores.tsx)):**
+       - Eliminado fallback local silencioso cuando el servidor rechaza credenciales o bloquea el modo demo, soporte en `registerUser` para sesiones D1 firmadas, ocultamiento automático de `Entrar como SuperAdmin` fuera de orígenes locales y control en tiempo real en `SuperAdminStores.tsx` + tarjeta `Blindaje Criptográfico Comercial` en `StoreSettings.tsx`.
+    5. **100% de Pruebas en Verde tras la Edición Final:**
+       - **Vitest (`npm test`):** 61 archivos de prueba y 468 tests aprobados al 100% en 24.75 s (incluyendo nueva suite [`web/src/test/securityHardening.test.ts`](../web/src/test/securityHardening.test.ts) y pruebas de integración en [`web/src/test/apiFunctions.test.ts`](../web/src/test/apiFunctions.test.ts)).
+       - **Build de Producción (`npm run build:web`):** `tsc && vite build` completado sin errores en 5.54 s con Service Worker y 70 entradas (`1858.99 KiB`) en precaché PWA.
+       - **Playwright E2E (`npm run test:e2e`):** 40 pruebas aprobadas y 0 fallidas en 1.7 m (incluyendo escenario 5 de [`qa/e2e/access-roles.spec.ts`](../qa/e2e/access-roles.spec.ts) y las suites multi-dispositivo en `chromium`, `mobile-chromium` y `tablet-chromium`; 7 pruebas condicionales sin credenciales `QA_USER_EMAIL` omitidas según configuración).
+
+- [ ] **Tarea 29 — Fidelización Vecinal ("Club de Puntos del Barrio" por Celular en POS, Kiosco iPad y Tienda Vecinal + Canje en COP + Cupones de Descuento por WhatsApp):**
+  - **Nivel Recomendado:** `3.8 Flash (High)`
+  - **Objetivo:** Retener a los vecinos del barrio premiando sus compras frecuentes por número de celular con puntos acumulables, redención autoritativa en pesos COP desde el servidor y cupones promocionales compartibles por WhatsApp.
+  - **Alcance Planificado:**
+    - Tablas multi-tenant `loyalty_accounts`, `loyalty_movements` y `discount_coupons` aisladas por `negocio_id` en Cloudflare D1 (`docs/schema-d1.sql` y `dbSchema.ts`).
+    - Acumulación automática por cada venta o pedido web/kiosco completado, redención parcial/total en COP validada atómicamente en servidor (`POST /api/sales` y `POST /api/customer-orders`), y validación de cupones porcentuales o monto fijo COP.
+    - Integración de consulta/canje rápido por celular en `CreateSale.tsx` (POS), `KioskMode.tsx` y `PublicStorefront.tsx`, gestor de Club de Puntos y Cupones en panel administrativo y envío de saldo/cupón por WhatsApp.
+
+- [ ] **Tarea 30 — Anulación/Devolución Atómica de Ventas con Reintegro de Stock, Pagos Mixtos (Efectivo + Transferencia / Fiado) y Estado de Resultados de Utilidad Neta Real:**
+  - **Nivel Recomendado:** `Argon (Medium)`
+  - **Objetivo:** Dotar al mostrador y reportes gerenciales de trazabilidad contable completa: reversión segura de ventas erróneas o devueltas, cobros divididos entre medios de pago y cálculo de utilidad neta real tras descontar mermas y gastos de caja menor.
+  - **Alcance Planificado:**
+    - Endpoint transaccional `POST /api/sales/:id/void` (protegido por rol `admin`/`manager`) con reintegro atómico en `env.DB.batch` de inventario, reversión de deuda en `credit_customers`/`credit_entries` si la venta incluyó fiado, registro de motivo y auditoría en `Sales.tsx`.
+    - Soporte de pagos mixtos (`payment_breakdown` en `sales` y `CreateSale.tsx`) permitiendo dividir un cobro entre **Efectivo** + **Transferencia Nequi/Bancolombia** o pasar el saldo restante a **Fiado**, actualizando arqueo de caja y tirilla térmica 58mm/80mm.
+    - Integración de pérdidas por Mermas (`inventory_shrinkage`) y Gastos Operativos de Caja Menor (`cash_expenses`) en `Reports.tsx` y `MarginReports.tsx` para presentar Margen Bruto, Deducciones y Utilidad Neta Real del período en `formatCOP`.
+
+- [ ] **Tarea 31 — Venta a Granel por Peso / Valor COP en Fruver, Granos y Carnes + Kardex Trazable de Inventario por Producto:**
+  - **Nivel Recomendado:** `3.8 Flash (High)`
+  - **Objetivo:** Permitir vender fracciones exactas por peso (ej. media libra, 0.25 kg o "deme \$ 3.000 de papa") sin descuadrar la báscula ni las finanzas, y ofrecer un historial auditable (Kardex) de cada movimiento de inventario.
+  - **Alcance Planificado:**
+    - Soporte de productos pesables/fraccionables (`allow_fractional` / `stock_grams_or_milli` o unidades decimales seguras) con calculadora rápida peso ⇄ valor COP en `CreateSale.tsx`, `KioskMode.tsx` y `PublicStorefront.tsx` y redondeo financiero entero en servidor D1.
+    - Tabla `inventory_kardex` aislada por `negocio_id` alimentada automáticamente en ventas, anulaciones, recepciones de órdenes de compra, mermas y ajustes de catálogo, con visor de historial trazable por producto en `Inventory.tsx`.
+
+- [ ] **Tarea 32 — Suite E2E Multi-Dispositivo de Certificación Total de Fase 7 y Despliegue en Vivo:**
+  - **Nivel Recomendado:** `Argon (High)`
+  - **Objetivo:** Certificar de extremo a extremo con Vitest y Playwright multi-dispositivo (`chromium`, `mobile-chromium` y `tablet-chromium`) todos los flujos de seguridad comercial, fidelización/cupones, devoluciones/pagos mixtos/utilidad neta real y venta a granel/Kardex de la Fase 7.
+  - **Alcance Planificado:**
+    - Suite `qa/e2e/phase7-certification.spec.ts` cubriendo Club de Puntos/Cupones omnicanal, pagos divididos y anulación de venta con reintegro de stock, Utilidad Neta Real en reportes, venta fraccionada con Kardex y endurecimiento de acceso comercial.
+    - Verificación limpia de `npm test`, `npm run build:web` y `npm run test:e2e` al 100 % y despliegue final en producción (`https://surtifacil.pages.dev`).
+
+
 
 
 

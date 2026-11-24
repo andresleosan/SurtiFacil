@@ -220,3 +220,42 @@ export function getOperatingStoreId(): string | null {
   return getActiveNegocioId();
 }
 
+export interface PlatformSecurityConfig {
+  demo_quick_access_enabled: boolean;
+  superadmin_quick_access_enabled: boolean;
+}
+
+export async function getPublicSecurityConfig(): Promise<PlatformSecurityConfig> {
+  try {
+    const res = await apiClient.get<PlatformSecurityConfig>('/auth/public-config');
+    if (res && typeof res.demo_quick_access_enabled === 'boolean') {
+      return {
+        demo_quick_access_enabled: res.demo_quick_access_enabled,
+        superadmin_quick_access_enabled: Boolean(res.superadmin_quick_access_enabled),
+      };
+    }
+  } catch {
+    // Fallback controlado si la API no está disponible
+  }
+  return {
+    demo_quick_access_enabled: true,
+    superadmin_quick_access_enabled: true,
+  };
+}
+
+export async function updateDemoSecurityConfig(
+  demoQuickAccessEnabled: boolean
+): Promise<PlatformSecurityConfig> {
+  const res = await apiClient.put<{
+    success?: boolean;
+    demo_quick_access_enabled: boolean;
+    superadmin_quick_access_enabled: boolean;
+  }>('/super-admin/security-config', {
+    demo_quick_access_enabled: demoQuickAccessEnabled,
+  });
+  return {
+    demo_quick_access_enabled: Boolean(res.demo_quick_access_enabled),
+    superadmin_quick_access_enabled: Boolean(res.superadmin_quick_access_enabled),
+  };
+}
+

@@ -256,8 +256,30 @@ export async function setupProductionE2EHarness(page: Page) {
     },
   ];
 
+  let demoQuickAccessEnabled = true;
+
   const resolveActorFromAuthHeader = (authHeader?: string): HarnessUser => {
     const raw = (authHeader || '').replace(/^Bearer\s+/i, '').trim();
+    if (raw.startsWith('d1s.')) {
+      try {
+        const payloadB64 = raw.split('.')[1] || '';
+        const base64 = payloadB64.replace(/-/g, '+').replace(/_/g, '/');
+        const payload = JSON.parse(Buffer.from(base64, 'base64').toString('utf8'));
+        const email = String(payload.email || '').toLowerCase();
+        const matched = DEFAULT_USERS.find((u) => u.email.toLowerCase() === email);
+        if (matched) return matched;
+        return {
+          id: payload.uid || 'd1s-user',
+          email: email || adminUser.email,
+          displayName: email || 'Usuario D1',
+          role: (payload.role as HarnessUser['role']) || 'admin',
+          isSuperAdmin: Boolean(payload.isSuperAdmin) || email === adminUser.email,
+          negocioId: payload.negocioId || 'surtifacil',
+        };
+      } catch {
+        return adminUser;
+      }
+    }
     if (raw.startsWith('d1:')) {
       const parts = raw.split(':');
       const email = (parts[2] || '').toLowerCase();
@@ -374,8 +396,24 @@ export async function setupProductionE2EHarness(page: Page) {
       }
     }
 
+    // Configuración Pública de Seguridad
+    if (pathname === '/auth/public-config' && method === 'GET') {
+      return jsonResponse({
+        demo_quick_access_enabled: demoQuickAccessEnabled,
+        superadmin_quick_access_enabled: demoQuickAccessEnabled,
+        token_signing: 'HMAC-SHA256',
+        password_hashing: 'PBKDF2-SHA256',
+      });
+    }
+
     // Login Nativo D1 / Acceso Rápido Multi-Rol
     if (pathname === '/auth/login' && method === 'POST') {
+      if (body.quick_access && !demoQuickAccessEnabled) {
+        return jsonResponse(
+          { error: 'El acceso rápido de demostración está deshabilitado en este entorno.' },
+          403
+        );
+      }
       const email = String(body.email || '').trim().toLowerCase();
       const matched = DEFAULT_USERS.find((u) => u.email.toLowerCase() === email);
       if (!matched) {
@@ -840,6 +878,18 @@ export async function setupProductionE2EHarness(page: Page) {
     }
 
     // SuperAdmin Multi-Tenant
+    if (pathname === '/super-admin/security-config' && method === 'PUT') {
+      if (!actor.isSuperAdmin) {
+        return jsonResponse({ error: 'Acceso denegado.' }, 403);
+      }
+      demoQuickAccessEnabled = Boolean(body.demo_quick_access_enabled);
+      return jsonResponse({
+        success: true,
+        demo_quick_access_enabled: demoQuickAccessEnabled,
+        superadmin_quick_access_enabled: demoQuickAccessEnabled,
+      });
+    }
+
     if (pathname === '/super-admin/negocios' && method === 'GET') {
       return jsonResponse({
         kpis: {
@@ -877,11 +927,20 @@ export async function setupProductionE2EHarness(page: Page) {
           phone_id: '***1234',
           webhook_url: 'https://surtifacil.pages.dev/api/webhooks/whatsapp',
           verify_token_configured: true,
+          app_secret_configured: true,
         },
         database: {
           status: 'connected',
           engine: 'Cloudflare D1 (SQLite Edge)',
           multi_tenant: true,
+        },
+        security: {
+          session_signing: 'HMAC-SHA256',
+          jwt_secret_source: 'cloudflare_env',
+          password_hashing: 'PBKDF2-SHA256 (100.000 iteraciones)',
+          mock_tokens_blocked_in_prod: true,
+          whatsapp_hmac_configured: true,
+          demo_quick_access_enabled: demoQuickAccessEnabled,
         },
       });
     }

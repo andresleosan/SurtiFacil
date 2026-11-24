@@ -668,13 +668,55 @@ const StoreSettings = () => {
                   <button
                     type="button"
                     onClick={handleCopyWebhook}
-                    className="btn-secondary min-h-[38px] px-3 text-xs font-bold text-slate-700"
+                    className="btn-secondary min-h-[44px] px-3 text-xs font-bold text-slate-700"
                   >
                     {copiedWebhook ? '¡Copiado!' : 'Copiar URL'}
                   </button>
                 </div>
               </div>
             </div>
+          </div>
+
+          {/* Tarjeta de Blindaje Criptográfico Comercial */}
+          <div
+            className="rounded-xl border border-slate-200 bg-slate-50/80 p-4 space-y-3"
+            data-testid="security-hardening-card"
+          >
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span className="font-bold text-slate-800 text-sm flex items-center gap-1.5">
+                <span>🔐 Blindaje Criptográfico Comercial</span>
+              </span>
+              <span className="chip bg-emerald-100 text-emerald-800 text-xs font-bold">
+                Activo en Edge
+              </span>
+            </div>
+
+            <div className="flex flex-wrap gap-2">
+              <span className="chip bg-blue-100 text-sf-primary text-xs font-semibold">
+                Sesiones D1: {integrations?.security?.session_signing || 'HMAC-SHA256'}
+              </span>
+              <span className="chip bg-indigo-100 text-indigo-800 text-xs font-semibold">
+                Claves: {integrations?.security?.password_hashing || 'PBKDF2-SHA256'}
+              </span>
+              <span className="chip bg-emerald-100 text-emerald-800 text-xs font-semibold">
+                Tokens Mock: Bloqueados en Prod
+              </span>
+              {integrations?.security?.whatsapp_hmac_configured ||
+              integrations?.whatsapp?.app_secret_configured ? (
+                <span className="chip bg-emerald-100 text-emerald-800 text-xs font-semibold">
+                  Firma HMAC Meta: Configurada
+                </span>
+              ) : (
+                <span className="chip bg-amber-100 text-amber-800 text-xs font-semibold">
+                  Firma HMAC Meta: Pendiente WHATSAPP_APP_SECRET
+                </span>
+              )}
+            </div>
+
+            <p className="text-xs text-slate-500">
+              Origen del secreto JWT: {integrations?.security?.jwt_secret_source === 'cloudflare_env' ? 'Variable JWT_SECRET en Cloudflare' : 'Llave autogestionada en D1'} · Acceso rápido demo:{' '}
+              {integrations?.security?.demo_quick_access_enabled === false ? 'Deshabilitado' : 'Habilitado'}.
+            </p>
           </div>
         </div>
 

@@ -1,6 +1,8 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
+  getPublicAuthConfig,
   getSafeAuthErrorMessage,
+  isLocalDevOrigin,
   loginUser,
   loginWithGoogle,
   loginWithQuickRole,
@@ -26,6 +28,22 @@ const Login = () => {
   const [googleLoading, setGoogleLoading] = useState(false);
   const [quickLoadingRole, setQuickLoadingRole] = useState<string | null>(null);
   const [error, setError] = useState('');
+  const [demoQuickAccessEnabled, setDemoQuickAccessEnabled] = useState(true);
+  const [superAdminQuickAccessEnabled, setSuperAdminQuickAccessEnabled] = useState(() =>
+    isLocalDevOrigin()
+  );
+
+  useEffect(() => {
+    let active = true;
+    void getPublicAuthConfig().then((cfg) => {
+      if (!active) return;
+      setDemoQuickAccessEnabled(cfg.demo_quick_access_enabled);
+      setSuperAdminQuickAccessEnabled(cfg.superadmin_quick_access_enabled);
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -247,64 +265,78 @@ const Login = () => {
             </form>
 
             <div className="mt-6 border-t border-slate-200 pt-5 space-y-3" data-testid="quick-access-panel">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-bold uppercase tracking-wider text-slate-500">
-                  ⚡ Acceso Rápido de Prueba (1 Clic)
-                </span>
-                <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-700">
-                  Multi-Rol Activo
-                </span>
-              </div>
+              {demoQuickAccessEnabled ? (
+                <>
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold uppercase tracking-wider text-slate-500">
+                      ⚡ Acceso Rápido de Prueba (1 Clic)
+                    </span>
+                    <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-700">
+                      Multi-Rol Activo
+                    </span>
+                  </div>
 
-              <div className="grid grid-cols-2 gap-2">
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={() => handleQuickAccess('admin', '#/dashboard')}
-                  className="min-h-[44px] rounded-xl border border-blue-200 bg-blue-50/70 px-3 py-2 text-left hover:bg-blue-100/80 transition disabled:opacity-50"
-                >
-                  <span className="block text-xs font-bold text-sf-primary">
-                    {quickLoadingRole === 'admin' ? 'Entrando...' : '🏪 Entrar como Admin'}
-                  </span>
-                  <span className="block text-[10px] text-slate-500 truncate">admin@surtifacil.com</span>
-                </button>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => handleQuickAccess('admin', '#/dashboard')}
+                      className="min-h-[44px] rounded-xl border border-blue-200 bg-blue-50/70 px-3 py-2 text-left hover:bg-blue-100/80 transition disabled:opacity-50"
+                    >
+                      <span className="block text-xs font-bold text-sf-primary">
+                        {quickLoadingRole === 'admin' ? 'Entrando...' : '🏪 Entrar como Admin'}
+                      </span>
+                      <span className="block text-[10px] text-slate-500 truncate">admin@surtifacil.com</span>
+                    </button>
 
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={() => handleQuickAccess('cashier', '#/create-sale')}
-                  className="min-h-[44px] rounded-xl border border-emerald-200 bg-emerald-50/70 px-3 py-2 text-left hover:bg-emerald-100/80 transition disabled:opacity-50"
-                >
-                  <span className="block text-xs font-bold text-emerald-800">
-                    {quickLoadingRole === 'cashier' ? 'Entrando...' : '🛒 Entrar como Cajero'}
-                  </span>
-                  <span className="block text-[10px] text-slate-500 truncate">cajero@surtifacil.com</span>
-                </button>
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => handleQuickAccess('cashier', '#/create-sale')}
+                      className="min-h-[44px] rounded-xl border border-emerald-200 bg-emerald-50/70 px-3 py-2 text-left hover:bg-emerald-100/80 transition disabled:opacity-50"
+                    >
+                      <span className="block text-xs font-bold text-emerald-800">
+                        {quickLoadingRole === 'cashier' ? 'Entrando...' : '🛒 Entrar como Cajero'}
+                      </span>
+                      <span className="block text-[10px] text-slate-500 truncate">cajero@surtifacil.com</span>
+                    </button>
 
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={() => handleQuickAccess('manager', '#/inventory')}
-                  className="min-h-[44px] rounded-xl border border-amber-200 bg-amber-50/70 px-3 py-2 text-left hover:bg-amber-100/80 transition disabled:opacity-50"
-                >
-                  <span className="block text-xs font-bold text-amber-900">
-                    {quickLoadingRole === 'manager' ? 'Entrando...' : '📦 Entrar como Gerente'}
-                  </span>
-                  <span className="block text-[10px] text-slate-500 truncate">gerente@surtifacil.com</span>
-                </button>
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => handleQuickAccess('manager', '#/inventory')}
+                      className="min-h-[44px] rounded-xl border border-amber-200 bg-amber-50/70 px-3 py-2 text-left hover:bg-amber-100/80 transition disabled:opacity-50"
+                    >
+                      <span className="block text-xs font-bold text-amber-900">
+                        {quickLoadingRole === 'manager' ? 'Entrando...' : '📦 Entrar como Gerente'}
+                      </span>
+                      <span className="block text-[10px] text-slate-500 truncate">gerente@surtifacil.com</span>
+                    </button>
 
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={() => handleQuickAccess('superadmin', '#/super-admin')}
-                  className="min-h-[44px] rounded-xl border border-purple-200 bg-purple-50/70 px-3 py-2 text-left hover:bg-purple-100/80 transition disabled:opacity-50"
+                    {superAdminQuickAccessEnabled && (
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={() => handleQuickAccess('superadmin', '#/super-admin')}
+                        className="min-h-[44px] rounded-xl border border-purple-200 bg-purple-50/70 px-3 py-2 text-left hover:bg-purple-100/80 transition disabled:opacity-50"
+                      >
+                        <span className="block text-xs font-bold text-purple-900">
+                          {quickLoadingRole === 'superadmin' ? 'Entrando...' : '👑 Entrar como SuperAdmin'}
+                        </span>
+                        <span className="block text-[10px] text-slate-500 truncate">andres.san1404@gmail.com</span>
+                      </button>
+                    )}
+                  </div>
+                </>
+              ) : (
+                <div
+                  className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs text-slate-600 flex items-center justify-between gap-2"
+                  data-testid="demo-access-disabled-notice"
                 >
-                  <span className="block text-xs font-bold text-purple-900">
-                    {quickLoadingRole === 'superadmin' ? 'Entrando...' : '👑 Entrar como SuperAdmin'}
-                  </span>
-                  <span className="block text-[10px] text-slate-500 truncate">andres.san1404@gmail.com</span>
-                </button>
-              </div>
+                  <span className="font-semibold">🔒 Modo Demo Comercial Cerrado</span>
+                  <span className="text-[11px] text-slate-500">Acceso solo con credenciales reales</span>
+                </div>
+              )}
 
               <div className="grid grid-cols-2 gap-2 pt-1">
                 <a

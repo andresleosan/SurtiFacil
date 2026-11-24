@@ -42,7 +42,7 @@ export async function authenticateRequest(
 
   const token = authHeader.substring(7).trim();
   const projectId = (env.FIREBASE_PROJECT_ID as string) || 'surtifacilapp';
-  const decoded = await verifyFirebaseIdToken(token, projectId);
+  const decoded = await verifyFirebaseIdToken(token, projectId, { env, request });
 
   const db: D1Database = env.DB;
   if (!db) {
@@ -76,7 +76,8 @@ export async function authenticateRequest(
     }
   }
 
-  // 3. Auto-aprovisionamiento para SuperAdmin (andres.san1404@gmail.com) o cualquier cuenta autenticada válida (Google / Firebase / D1)
+  // 3. Auto-aprovisionamiento seguro: SuperAdmin va a 'surtifacil'; tokens D1/dev mantienen su negocioId;
+  // cuentas externas nuevas de Google/Firebase reciben su propio local de prueba aislado (jamás 'surtifacil').
   if (!userRow && decoded.email) {
     const normalizedEmail = decoded.email.toLowerCase();
     const isSuper = normalizedEmail === 'andres.san1404@gmail.com' ? 1 : 0;
@@ -84,10 +85,40 @@ export async function authenticateRequest(
       typeof decoded.role === 'string' && ['admin', 'manager', 'cashier'].includes(decoded.role)
         ? (decoded.role as 'admin' | 'manager' | 'cashier')
         : 'admin';
-    const assignedNegocio =
-      typeof decoded.negocioId === 'string' && decoded.negocioId.trim()
-        ? decoded.negocioId.trim()
-        : 'surtifacil';
+
+    let assignedNegocio = '';
+    if (isSuper === 1) {
+      assignedNegocio = 'surtifacil';
+    } else if (typeof decoded.negocioId === 'string' && decoded.negocioId.trim()) {
+      assignedNegocio = decoded.negocioId.trim();
+    } else {
+      const sanitizedUid = decoded.uid
+        .toLowerCase()
+        .replace(/[^a-z0-9]/g, '')
+        .slice(0, 24) || Date.now().toString(36);
+      assignedNegocio = `tienda-${sanitizedUid}`;
+      const expiresAt = new Date(Date.now() + 3 * 86400000).toISOString();
+      const storeDisplayName = decoded.name
+        ? `Tienda de ${decoded.name}`
+        : `Tienda ${normalizedEmail.split('@')[0]}`;
+
+      await db
+        .prepare(
+          `INSERT OR IGNORE INTO negocios (
+            id, slug, nombre, barrio, ciudad, estado, plan_id, suscripcion_vence_en, cuota_ia_total, cuota_ia_usada, costo_domicilio_cents, config_json, created_at, updated_at
+          ) VALUES (?, ?, ?, 'Medellín', 'Medellín', 'activo', 'prueba_3d', ?, 300, 0, 0, ?, datetime('now'), datetime('now'))`
+        )
+        .bind(
+          assignedNegocio,
+          assignedNegocio,
+          storeDisplayName,
+          expiresAt,
+          JSON.stringify({ permite_domicilio: true, permite_retiro: true })
+        )
+        .run()
+        .catch(() => {});
+    }
+
     const displayName =
       decoded.name ||
       (isSuper ? 'Andrés Sánchez (SuperAdmin)' : normalizedEmail.split('@')[0] || 'Tendero SurtiFácil');

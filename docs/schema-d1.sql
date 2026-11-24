@@ -309,6 +309,13 @@ CREATE TABLE IF NOT EXISTS inventory_shrinkage (
 
 CREATE INDEX IF NOT EXISTS idx_inventory_shrinkage_negocio_date ON inventory_shrinkage(negocio_id, created_at DESC);
 
+-- 10.4 Secretos internos y configuración de seguridad SaaS en Edge
+CREATE TABLE IF NOT EXISTS _system_secrets (
+  secret_key TEXT PRIMARY KEY,
+  secret_value TEXT NOT NULL,
+  updated_at TEXT DEFAULT (datetime('now'))
+);
+
 -- ==============================================================================
 -- 11. Semillas Iniciales (Negocio Insignia y SuperAdmin de la Plataforma)
 -- ==============================================================================

@@ -13,11 +13,20 @@ export interface IntegrationStatus {
     phone_id?: string | null;
     webhook_url: string;
     verify_token_configured: boolean;
+    app_secret_configured?: boolean;
   };
   database: {
     status: string;
     engine: string;
     multi_tenant: boolean;
+  };
+  security?: {
+    session_signing: string;
+    jwt_secret_source: string;
+    password_hashing: string;
+    mock_tokens_blocked_in_prod: boolean;
+    whatsapp_hmac_configured: boolean;
+    demo_quick_access_enabled: boolean;
   };
 }
 
@@ -39,11 +48,20 @@ export async function getIntegrationStatus(): Promise<IntegrationStatus> {
         phone_id: null,
         webhook_url: 'https://surtifacil.pages.dev/api/webhooks/whatsapp',
         verify_token_configured: true,
+        app_secret_configured: false,
       },
       database: {
         status: 'connected',
         engine: 'Cloudflare D1 (SQLite Edge)',
         multi_tenant: true,
+      },
+      security: {
+        session_signing: 'HMAC-SHA256',
+        jwt_secret_source: 'd1_auto_managed',
+        password_hashing: 'PBKDF2-SHA256 (100.000 iteraciones)',
+        mock_tokens_blocked_in_prod: true,
+        whatsapp_hmac_configured: false,
+        demo_quick_access_enabled: true,
       },
     };
   }

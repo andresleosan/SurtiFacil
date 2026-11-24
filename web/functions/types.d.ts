@@ -31,10 +31,17 @@ export interface D1Database {
 export interface Env {
   DB: D1Database;
   FIREBASE_PROJECT_ID?: string;
+  JWT_SECRET?: string;
   DEEPSEEK_API_KEY?: string;
   WHATSAPP_VERIFY_TOKEN?: string;
   WHATSAPP_ACCESS_TOKEN?: string;
+  WHATSAPP_TOKEN?: string;
+  WHATSAPP_PHONE_ID?: string;
+  WHATSAPP_APP_SECRET?: string;
   ENVIRONMENT?: string;
+  ALLOW_MOCK_TOKENS?: string;
+  DISABLE_DEMO_ACCESS?: string;
+  ALLOW_SUPERADMIN_QUICK_DEMO?: string;
   [key: string]: unknown;
 }
 

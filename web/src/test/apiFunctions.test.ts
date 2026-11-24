@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { onRequest } from '../../functions/api/[[route]]';
+import { hashPasswordLegacySHA256, resetRateLimitsForTests } from '../../functions/_lib/securityCrypto';
 import { D1Database, D1PreparedStatement, D1Result, Env } from '../../functions/types';
 
 // Simulador en memoria de Cloudflare D1 para pruebas unitarias
@@ -22,6 +23,7 @@ class MockD1Database implements D1Database {
     cash_closings: any[];
     cash_expenses: any[];
     inventory_shrinkage: any[];
+    _system_secrets: Array<{ secret_key: string; secret_value: string; updated_at?: string }>;
   };
 
   constructor() {
@@ -134,6 +136,7 @@ class MockD1Database implements D1Database {
       cash_closings: [],
       cash_expenses: [],
       inventory_shrinkage: [],
+      _system_secrets: [],
     };
   }
 
@@ -159,13 +162,23 @@ class MockD1Database implements D1Database {
           return { results: [{ alive: 1 } as unknown as T], success: true };
         }
 
-        if (q.startsWith('SELECT id, negocio_id, email') && q.includes('FROM users WHERE id = ?')) {
+        if (q.includes('FROM _system_secrets WHERE secret_key = ?')) {
+          const sec = db.tables._system_secrets.find((s) => s.secret_key === boundValues[0]);
+          return { results: sec ? [sec as T] : [], success: true };
+        }
+
+        if (q.includes('FROM users WHERE id = ?')) {
           const user = db.tables.users.find((u) => u.id === boundValues[0]);
           return { results: user ? [user as T] : [], success: true };
         }
 
-        if (q.startsWith('SELECT id, negocio_id, email') && q.includes('FROM users WHERE email = ?')) {
-          const user = db.tables.users.find((u) => u.email === boundValues[0]);
+        if (q.includes('FROM users WHERE email = ?') || q.includes('FROM users WHERE lower(email) = ?')) {
+          const targetEmail = String(boundValues[0] || '').toLowerCase();
+          const user = db.tables.users.find(
+            (u) =>
+              String(u.email || '').toLowerCase() === targetEmail &&
+              (!q.includes('deleted_at IS NULL') || !u.deleted_at)
+          );
           return { results: user ? [user as T] : [], success: true };
         }
 
@@ -664,6 +677,29 @@ class MockD1Database implements D1Database {
           );
         }
 
+        if (q.includes('CREATE TABLE IF NOT EXISTS _system_secrets')) {
+          return { success: true };
+        }
+
+        if (q.startsWith('INSERT OR IGNORE INTO _system_secrets')) {
+          const [secretKey, secretValue] = boundValues;
+          if (!db.tables._system_secrets.some((s) => s.secret_key === secretKey)) {
+            db.tables._system_secrets.push({ secret_key: secretKey, secret_value: secretValue });
+          }
+          return { success: true };
+        }
+
+        if (q.includes('INTO _system_secrets') && q.includes('ON CONFLICT(secret_key)')) {
+          const secretValue = boundValues[0];
+          const existing = db.tables._system_secrets.find((s) => s.secret_key === 'demo_quick_access_enabled');
+          if (existing) {
+            existing.secret_value = secretValue;
+          } else {
+            db.tables._system_secrets.push({ secret_key: 'demo_quick_access_enabled', secret_value: secretValue });
+          }
+          return { success: true };
+        }
+
         if (q.startsWith('CREATE TABLE IF NOT EXISTS combos') || q.startsWith('CREATE TABLE IF NOT EXISTS negocios')) {
           return { success: true };
         }
@@ -688,8 +724,9 @@ class MockD1Database implements D1Database {
           });
         }
 
-        if (q.startsWith('INSERT INTO users')) {
-          const [id, negocio_id, email, display_name] = boundValues;
+        if (q.startsWith('INSERT OR REPLACE INTO users')) {
+          const [id, negocio_id, email, display_name, password_hash] = boundValues;
+          db.tables.users = db.tables.users.filter((u) => u.id !== id);
           db.tables.users.push({
             id,
             negocio_id,
@@ -698,7 +735,41 @@ class MockD1Database implements D1Database {
             role: 'admin',
             is_super_admin: 0,
             active: 1,
+            password_hash: password_hash ?? null,
           });
+        }
+
+        if (q.startsWith('INSERT INTO users')) {
+          if (q.includes('password_hash')) {
+            const [id, negocio_id, email, display_name, role, password_hash] = boundValues;
+            db.tables.users.push({
+              id,
+              negocio_id,
+              email,
+              display_name,
+              role: role || 'cashier',
+              is_super_admin: 0,
+              active: 1,
+              password_hash: password_hash ?? null,
+            });
+          } else {
+            const [id, negocio_id, email, display_name] = boundValues;
+            db.tables.users.push({
+              id,
+              negocio_id,
+              email,
+              display_name,
+              role: 'admin',
+              is_super_admin: 0,
+              active: 1,
+            });
+          }
+        }
+
+        if (q.startsWith('UPDATE users SET password_hash = ? WHERE id = ?')) {
+          const [pwdHash, uid] = boundValues;
+          const usr = db.tables.users.find((u) => u.id === uid);
+          if (usr) usr.password_hash = pwdHash;
         }
 
         if (q.includes('suscripcion_vence_en = ?') && q.includes('UPDATE negocios')) {
@@ -933,15 +1004,19 @@ function createMockContext(
   url: string,
   headers: Record<string, string> = {},
   body: any = null,
-  db: MockD1Database
+  db: MockD1Database,
+  envOverrides: Partial<Env> = {}
 ) {
   const reqInit: RequestInit = {
     method,
     headers: new Headers(headers),
   };
   if (body) {
-    reqInit.body = JSON.stringify(body);
-    headers['Content-Type'] = 'application/json';
+    reqInit.body = typeof body === 'string' ? body : JSON.stringify(body);
+    if (!headers['Content-Type']) {
+      headers['Content-Type'] = 'application/json';
+      (reqInit.headers as Headers).set('Content-Type', 'application/json');
+    }
   }
 
   const req = new Request(url, reqInit);
@@ -949,6 +1024,7 @@ function createMockContext(
   const env: Env = {
     DB: db,
     FIREBASE_PROJECT_ID: 'surtifacilapp',
+    ...envOverrides,
   };
 
   return {
@@ -966,6 +1042,7 @@ describe('Cloudflare Pages Functions API (/api/*)', () => {
   let db: MockD1Database;
 
   beforeEach(() => {
+    resetRateLimitsForTests();
     db = new MockD1Database();
   });
 
@@ -2039,5 +2116,199 @@ describe('Cloudflare Pages Functions API (/api/*)', () => {
       applied_wholesale_tier: { min_quantity: 6, unit_price_cents: 380000 },
       wholesale_savings_cents: 420000,
     });
+  });
+
+  it('POST /api/registro-negocio emite token d1s. firmado, cifra clave PBKDF2 y autentica en origen de producción', async () => {
+    const regCtx = createMockContext(
+      'POST',
+      'https://surtifacil.pages.dev/api/registro-negocio',
+      {},
+      {
+        nombre: 'Abastos Blindados',
+        slug: 'abastos-blindados',
+        owner_name: 'Sofía Vélez',
+        email: 'sofia@abastosblindados.co',
+        password: 'ClaveSegura2026!',
+        telefono_whatsapp: '3007778899',
+        barrio: 'Envigado',
+        plan_id: 'prueba_3d',
+      },
+      db,
+      { ENVIRONMENT: 'production', JWT_SECRET: 'secreto-super-largo-de-produccion-32chars' }
+    );
+
+    const regRes = await onRequest(regCtx as any);
+    expect(regRes.status).toBe(201);
+    const regData = await regRes.json();
+    expect(regData.token).toMatch(/^d1s\./);
+
+    const createdUser = db.tables.users.find((u) => u.email === 'sofia@abastosblindados.co');
+    expect(createdUser?.password_hash).toMatch(/^pbkdf2\$sha256\$100000\$/);
+
+    // El token firmado funciona en dominio productivo mientras los tokens sin firma son rechazados con 401
+    const prodCtx = createMockContext(
+      'GET',
+      'https://surtifacil.pages.dev/api/products',
+      { Authorization: `Bearer ${regData.token}` },
+      null,
+      db,
+      { ENVIRONMENT: 'production', JWT_SECRET: 'secreto-super-largo-de-produccion-32chars' }
+    );
+    const prodRes = await onRequest(prodCtx as any);
+    expect(prodRes.status).toBe(200);
+
+    const mockAttackCtx = createMockContext(
+      'GET',
+      'https://surtifacil.pages.dev/api/products',
+      { Authorization: 'Bearer mock:admin-1:admin@surtifacil.com:admin' },
+      null,
+      db,
+      { ENVIRONMENT: 'production', JWT_SECRET: 'secreto-super-largo-de-produccion-32chars' }
+    );
+    const mockAttackRes = await onRequest(mockAttackCtx as any);
+    expect(mockAttackRes.status).toBe(401);
+  });
+
+  it('POST /api/auth/login migra hash SHA-256 legado a PBKDF2-SHA256 y bloquea quick_access de SuperAdmin en producción', async () => {
+    const legacyHash = await hashPasswordLegacySHA256('ClaveLegada99');
+    db.tables.users.push({
+      id: 'user-legacy-1',
+      negocio_id: 'surtifacil',
+      email: 'legado@tienda.co',
+      display_name: 'Don Legado',
+      role: 'admin',
+      is_super_admin: 0,
+      active: 1,
+      password_hash: legacyHash,
+    });
+    db.tables.users.push({
+      id: 'admin-andres-san1404',
+      negocio_id: 'surtifacil',
+      email: 'andres.san1404@gmail.com',
+      display_name: 'Andrés Sánchez (SuperAdmin)',
+      role: 'admin',
+      is_super_admin: 1,
+      active: 1,
+      password_hash: null,
+    });
+
+    const loginCtx = createMockContext(
+      'POST',
+      'https://surtifacil.pages.dev/api/auth/login',
+      {},
+      { email: 'legado@tienda.co', password: 'ClaveLegada99' },
+      db,
+      { ENVIRONMENT: 'production' }
+    );
+    const loginRes = await onRequest(loginCtx as any);
+    expect(loginRes.status).toBe(200);
+    const loginData = await loginRes.json();
+    expect(loginData.authenticated).toBe(true);
+    expect(loginData.token).toMatch(/^d1s\./);
+
+    const migratedUser = db.tables.users.find((u) => u.id === 'user-legacy-1');
+    expect(migratedUser?.password_hash).toMatch(/^pbkdf2\$sha256\$100000\$/);
+
+    // Bloqueo obligatorio del acceso rápido de SuperAdmin en origen de producción
+    const superQuickCtx = createMockContext(
+      'POST',
+      'https://surtifacil.pages.dev/api/auth/login',
+      {},
+      { email: 'andres.san1404@gmail.com', quick_access: true },
+      db,
+      { ENVIRONMENT: 'production' }
+    );
+    const superQuickRes = await onRequest(superQuickCtx as any);
+    expect(superQuickRes.status).toBe(403);
+  });
+
+  it('POST /api/auth/provision-user rechaza escalamiento de privilegios por cajero con 403', async () => {
+    const ctx = createMockContext(
+      'POST',
+      'http://localhost/api/auth/provision-user',
+      { Authorization: 'Bearer mock:cashier-1:cajero@surtifacil.com:cashier' },
+      { email: 'nuevo@tienda.co', password: 'Password123', role: 'admin' },
+      db
+    );
+    const res = await onRequest(ctx as any);
+    expect(res.status).toBe(403);
+  });
+
+  it('POST /api/webhooks/whatsapp exige firma HMAC X-Hub-Signature-256 válida cuando WHATSAPP_APP_SECRET está configurado', async () => {
+    const appSecret = 'meta_app_secret_test_123456';
+    const rawPayload = JSON.stringify({ entry: [] });
+
+    const unsignedCtx = createMockContext(
+      'POST',
+      'https://surtifacil.pages.dev/api/webhooks/whatsapp',
+      {},
+      rawPayload,
+      db,
+      { ENVIRONMENT: 'production', WHATSAPP_APP_SECRET: appSecret }
+    );
+    const unsignedRes = await onRequest(unsignedCtx as any);
+    expect(unsignedRes.status).toBe(401);
+
+    const key = await crypto.subtle.importKey(
+      'raw',
+      new TextEncoder().encode(appSecret),
+      { name: 'HMAC', hash: 'SHA-256' },
+      false,
+      ['sign']
+    );
+    const digest = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(rawPayload));
+    const sigHex = Array.from(new Uint8Array(digest))
+      .map((b) => b.toString(16).padStart(2, '0'))
+      .join('');
+
+    const signedCtx = createMockContext(
+      'POST',
+      'https://surtifacil.pages.dev/api/webhooks/whatsapp',
+      { 'X-Hub-Signature-256': `sha256=${sigHex}` },
+      rawPayload,
+      db,
+      { ENVIRONMENT: 'production', WHATSAPP_APP_SECRET: appSecret }
+    );
+    const signedRes = await onRequest(signedCtx as any);
+    expect(signedRes.status).toBe(200);
+  });
+
+  it('PUT /api/super-admin/security-config desactiva modo demo y bloquea quick_access en /api/auth/login', async () => {
+    db.tables.users.push({
+      id: 'admin-andres-san1404',
+      negocio_id: 'surtifacil',
+      email: 'andres.san1404@gmail.com',
+      display_name: 'Andrés Sánchez (SuperAdmin)',
+      role: 'admin',
+      is_super_admin: 1,
+      active: 1,
+    });
+
+    const toggleCtx = createMockContext(
+      'PUT',
+      'http://localhost/api/super-admin/security-config',
+      { Authorization: 'Bearer mock:admin-1:andres.san1404@gmail.com:admin' },
+      { demo_quick_access_enabled: false },
+      db
+    );
+    const toggleRes = await onRequest(toggleCtx as any);
+    expect(toggleRes.status).toBe(200);
+    const toggleData = await toggleRes.json();
+    expect(toggleData.demo_quick_access_enabled).toBe(false);
+
+    const pubCtx = createMockContext('GET', 'http://localhost/api/auth/public-config', {}, null, db);
+    const pubRes = await onRequest(pubCtx as any);
+    const pubData = await pubRes.json();
+    expect(pubData.demo_quick_access_enabled).toBe(false);
+
+    const quickLoginCtx = createMockContext(
+      'POST',
+      'http://localhost/api/auth/login',
+      {},
+      { email: 'admin@surtifacil.com', quick_access: true },
+      db
+    );
+    const quickLoginRes = await onRequest(quickLoginCtx as any);
+    expect(quickLoginRes.status).toBe(403);
   });
 });

@@ -1,7 +1,9 @@
 import { useEffect, useState, useMemo } from 'react';
 import {
   getSuperAdminData,
+  getPublicSecurityConfig,
   renovarNegocio,
+  updateDemoSecurityConfig,
   updateNegocio,
   operateStore,
   getOperatingStoreId,
@@ -23,6 +25,8 @@ export default function SuperAdminStores() {
   const [editingStore, setEditingStore] = useState<Negocio | null>(null);
   const [actionLoadingId, setActionLoadingId] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [demoAccessEnabled, setDemoAccessEnabled] = useState<boolean>(true);
+  const [updatingSecurity, setUpdatingSecurity] = useState<boolean>(false);
 
   const activeOperatedId = getOperatingStoreId();
 
@@ -30,12 +34,33 @@ export default function SuperAdminStores() {
     try {
       setLoading(true);
       setError(null);
-      const res = await getSuperAdminData();
+      const [res, secCfg] = await Promise.all([getSuperAdminData(), getPublicSecurityConfig()]);
       setData(res);
+      setDemoAccessEnabled(secCfg.demo_quick_access_enabled);
     } catch (err: any) {
       setError(err?.message || 'Error cargando datos de SuperAdmin.');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleToggleDemoMode = async () => {
+    const nextValue = !demoAccessEnabled;
+    try {
+      setUpdatingSecurity(true);
+      setError(null);
+      const updated = await updateDemoSecurityConfig(nextValue);
+      setDemoAccessEnabled(updated.demo_quick_access_enabled);
+      setSuccessMessage(
+        updated.demo_quick_access_enabled
+          ? 'Modo Demo de Acceso Rápido activado en Login.'
+          : 'Modo Demo desactivado: acceso comercial cerrado en Login.'
+      );
+      setTimeout(() => setSuccessMessage(null), 3500);
+    } catch (err: any) {
+      setError(err?.message || 'No se pudo actualizar la configuración de seguridad.');
+    } finally {
+      setUpdatingSecurity(false);
     }
   };
 
@@ -146,6 +171,49 @@ export default function SuperAdminStores() {
           {error}
         </div>
       )}
+
+      {/* Barra Ejecutiva de Seguridad Global (Modo Demo en Login) */}
+      <section
+        className="rounded-2xl border border-slate-200 bg-white p-4 shadow-2xs flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+        data-testid="superadmin-security-banner"
+      >
+        <div className="space-y-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-sm font-bold text-slate-800">
+              🔐 Modo Demo de Acceso Rápido en Login:
+            </span>
+            {demoAccessEnabled ? (
+              <span className="chip bg-emerald-100 text-emerald-800 text-xs font-bold">
+                Activo (Pruebas / Demo)
+              </span>
+            ) : (
+              <span className="chip bg-slate-200 text-slate-800 text-xs font-bold">
+                Cerrado Comercial
+              </span>
+            )}
+          </div>
+          <p className="text-xs text-slate-500">
+            Controla en tiempo real si la pantalla de inicio de sesión muestra los botones de acceso rápido de demostración o exige credenciales reales cifradas con PBKDF2-SHA256.
+          </p>
+        </div>
+
+        <button
+          type="button"
+          onClick={() => void handleToggleDemoMode()}
+          disabled={updatingSecurity}
+          className={`min-h-[44px] px-4 rounded-xl text-xs font-bold transition shrink-0 ${
+            demoAccessEnabled
+              ? 'border border-amber-300 bg-amber-50 text-amber-900 hover:bg-amber-100'
+              : 'bg-sf-primary text-white hover:bg-sf-dark'
+          } disabled:opacity-60`}
+        >
+          {updatingSecurity
+            ? 'Actualizando...'
+            : demoAccessEnabled
+              ? '🔒 Desactivar Modo Demo'
+              : '⚡ Activar Modo Demo'}
+        </button>
+      </section>
 
       {/* 4 KPIs de Plataforma Multi-Tenant */}
       {data && (

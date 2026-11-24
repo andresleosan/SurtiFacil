@@ -1,17 +1,16 @@
 import { D1Database } from '../types';
+import { hashPasswordPBKDF2, verifyPasswordHash } from './securityCrypto';
+
+export { verifyPasswordHash };
 
 let schemaMigrated = false;
 
 /**
- * Calcula un hash SHA-256 hexadecimal determinístico usando Web Crypto API
+ * Calcula un hash seguro PBKDF2-SHA256 con salt único por usuario usando Web Crypto API.
  * Compatible con Cloudflare Workers / Pages Functions y navegadores modernos.
  */
 export async function hashPassword(password: string): Promise<string> {
-  const normalized = password.trim();
-  const data = new TextEncoder().encode(`surtifacil_salt_v1:${normalized}`);
-  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-  const hashArray = Array.from(new Uint8Array(hashBuffer));
-  return hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
+  return hashPasswordPBKDF2(password);
 }
 
 /**
@@ -331,6 +330,15 @@ export async function ensureDatabaseSchema(db: D1Database, force = false): Promi
       created_by_uid TEXT NOT NULL DEFAULT 'system',
       created_by_name TEXT,
       created_at TEXT DEFAULT (datetime('now'))
+    )`
+  );
+
+  await safeRun(
+    db,
+    `CREATE TABLE IF NOT EXISTS _system_secrets (
+      secret_key TEXT PRIMARY KEY,
+      secret_value TEXT NOT NULL,
+      updated_at TEXT DEFAULT (datetime('now'))
     )`
   );
 

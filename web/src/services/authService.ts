@@ -12,8 +12,10 @@ import { User, UserRole } from '../firebase/db';
 import '../firebase/config';
 import {
   apiClient,
+  ApiError,
   emitDataChange,
   getStoredAuthToken,
+  hasAuthSession,
   setActiveNegocioId,
   setStoredAuthToken,
 } from './apiClient';
@@ -326,7 +328,7 @@ export async function registerUser(
 
   try {
     const firebaseUser = auth.currentUser;
-    if (!firebaseUser) throw new Error('No hay una sesion administrativa activa.');
+    if (!firebaseUser && !hasAuthSession()) throw new Error('No hay una sesion administrativa activa.');
 
     const userData = await apiClient.post<any>('/auth/provision-user', {
       email,
@@ -427,6 +429,40 @@ export function establishDirectSession(params: {
   return mappedUser;
 }
 
+export interface PublicAuthConfig {
+  demo_quick_access_enabled: boolean;
+  superadmin_quick_access_enabled: boolean;
+  token_signing?: string;
+  password_hashing?: string;
+}
+
+export function isLocalDevOrigin(): boolean {
+  if (typeof window === 'undefined' || !window.location) return false;
+  const host = window.location.hostname.toLowerCase();
+  return host === 'localhost' || host === '127.0.0.1';
+}
+
+export async function getPublicAuthConfig(): Promise<PublicAuthConfig> {
+  const localOrigin = isLocalDevOrigin();
+  try {
+    const res = await apiClient.get<PublicAuthConfig>('/auth/public-config');
+    if (res && typeof res.demo_quick_access_enabled === 'boolean') {
+      return {
+        demo_quick_access_enabled: res.demo_quick_access_enabled,
+        superadmin_quick_access_enabled: Boolean(res.superadmin_quick_access_enabled),
+        token_signing: res.token_signing,
+        password_hashing: res.password_hashing,
+      };
+    }
+  } catch {
+    // Fallback controlado si el endpoint público no está disponible
+  }
+  return {
+    demo_quick_access_enabled: true,
+    superadmin_quick_access_enabled: localOrigin,
+  };
+}
+
 async function tryD1NativeLogin(
   email: string,
   password: string,
@@ -462,22 +498,36 @@ async function tryD1NativeLogin(
         negocioId: res.user.negocioId || res.negocio?.id || 'surtifacil',
       });
     }
-  } catch {
-    // Si el endpoint no está disponible (modo offline o dev local sin Pages Functions),
-    // permitir fallback determinístico para las cuentas demo oficiales
-  }
 
-  const demoEntry = Object.values(QUICK_DEMO_ACCOUNTS).find((acc) => acc.email === cleanEmail);
-  if (demoEntry && (quickAccess || (password && password.length >= 4))) {
-    const fallbackToken = `d1:${demoEntry.id}:${demoEntry.email}:${demoEntry.role}:${demoEntry.negocioId}`;
-    return establishDirectSession({
-      token: fallbackToken,
-      user: demoEntry,
-      negocioId: demoEntry.negocioId,
-    });
-  }
+    // Si el servidor respondió rechazando explícitamente la autenticación, jamás hacer fallback local
+    if (quickAccess) {
+      throw createAuthStateError('unauthenticated');
+    }
+    return null;
+  } catch (err) {
+    // Si es un rechazo del servidor (401/403/429) o AuthStateError, no hacer fallback
+    if (err instanceof ApiError || (typeof err === 'object' && err !== null && 'code' in err && (err as AuthStateError).name === 'AuthStateError')) {
+      if (quickAccess) {
+        throw createAuthStateError('unauthenticated');
+      }
+      return null;
+    }
 
-  return null;
+    // Solo permitir fallback local de demostración ante fallo real de red en localhost/127.0.0.1
+    if (isLocalDevOrigin()) {
+      const demoEntry = Object.values(QUICK_DEMO_ACCOUNTS).find((acc) => acc.email === cleanEmail);
+      if (demoEntry && (quickAccess || (password && password.length >= 4))) {
+        const fallbackToken = `d1:${demoEntry.id}:${demoEntry.email}:${demoEntry.role}:${demoEntry.negocioId}`;
+        return establishDirectSession({
+          token: fallbackToken,
+          user: demoEntry,
+          negocioId: demoEntry.negocioId,
+        });
+      }
+    }
+
+    return null;
+  }
 }
 
 /**
@@ -505,12 +555,16 @@ export async function loginWithQuickRole(
   const d1User = await tryD1NativeLogin(account.email, 'SurtiDemo2026!', true);
   if (d1User) return d1User;
 
-  const fallbackToken = `d1:${account.id}:${account.email}:${account.role}:${account.negocioId}`;
-  return establishDirectSession({
-    token: fallbackToken,
-    user: account,
-    negocioId: account.negocioId,
-  });
+  if (isLocalDevOrigin()) {
+    const fallbackToken = `d1:${account.id}:${account.email}:${account.role}:${account.negocioId}`;
+    return establishDirectSession({
+      token: fallbackToken,
+      user: account,
+      negocioId: account.negocioId,
+    });
+  }
+
+  throw createAuthStateError('unauthenticated');
 }
 
 /**
