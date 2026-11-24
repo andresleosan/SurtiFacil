@@ -1,4 +1,5 @@
 import type { WholesaleTier } from '../utils/wholesalePricing';
+import type { LoyaltyConfig } from '../utils/loyaltyEngine';
 
 export type CustomerOrderSource = 'kiosk' | 'web' | 'whatsapp';
 
@@ -34,6 +35,14 @@ export interface CustomerOrder {
   payment_method: CustomerOrderPaymentMethod;
   items_json: string; // Serializado en D1
   items?: CustomerOrderItem[]; // Parseado en frontend
+  subtotal_cents?: number;
+  coupon_code?: string | null;
+  coupon_discount_cents?: number;
+  loyalty_account_id?: string | null;
+  loyalty_points_redeemed?: number;
+  loyalty_discount_cents?: number;
+  loyalty_points_earned?: number;
+  loyalty_settled?: number;
   total_cents: number;
   status: CustomerOrderStatus;
   tracking_token?: string | null;
@@ -51,6 +60,8 @@ export interface CreateCustomerOrderInput {
   delivery_address?: string;
   delivery_neighborhood?: string;
   payment_method: CustomerOrderPaymentMethod;
+  coupon_code?: string;
+  loyalty_points_redeemed?: number;
   items: Array<{
     product_id: string;
     product_name?: string;
@@ -81,8 +92,10 @@ export interface PublicStoreData {
     permite_retiro?: boolean;
     allow_kiosk?: boolean;
     allow_whatsapp?: boolean;
+    loyalty?: LoyaltyConfig;
     [key: string]: unknown;
   };
+  loyalty_config?: LoyaltyConfig;
   products: Array<{
     id: string;
     name: string;

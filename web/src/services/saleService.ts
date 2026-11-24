@@ -1,7 +1,7 @@
 import { PaymentMethod, Product, SaleItem, Sale } from '../firebase/db';
 import { mockProducts, addLocalSale, getLocalSales, mockCreditCustomers, addLocalCreditEntry } from './mockData';
 import { mapProductRow, refreshProducts } from './productService';
-import { apiClient, emitDataChange, hasAuthSession } from './apiClient';
+import { apiClient, ApiError, emitDataChange, hasAuthSession } from './apiClient';
 import {
   cacheProductsForTenant,
   enqueueOfflineSale,
@@ -9,6 +9,18 @@ import {
   isOfflineModeActive,
 } from './offlineSyncService';
 import { resolveProductUnitPricing } from '../utils/wholesalePricing';
+import {
+  isValidLoyaltyPhone,
+  normalizeCouponCode,
+  normalizeLoyaltyPhone,
+  settleOrderLoyaltyAndCoupon,
+} from '../utils/loyaltyEngine';
+import {
+  getMockCouponsSnapshot,
+  getMockLoyaltyAccountsSnapshot,
+  getMockLoyaltyConfigSnapshot,
+} from './loyaltyService';
+import type { CreateSaleLoyaltyOptions } from '../types/loyalty';
 
 function isMockMode(): boolean {
   return import.meta.env.VITE_USE_MOCK_DATA === 'true';
@@ -24,6 +36,14 @@ function mapSale(row: any): Sale {
       toISOString: () => createdDate.toISOString(),
     },
     total: row.total_cents ?? row.total,
+    subtotal_cents: row.subtotal_cents ?? undefined,
+    coupon_code: row.coupon_code ?? undefined,
+    coupon_discount_cents: row.coupon_discount_cents ?? undefined,
+    loyalty_account_id: row.loyalty_account_id ?? undefined,
+    loyalty_phone: row.loyalty_phone ?? undefined,
+    loyalty_points_redeemed: row.loyalty_points_redeemed ?? undefined,
+    loyalty_discount_cents: row.loyalty_discount_cents ?? undefined,
+    loyalty_points_earned: row.loyalty_points_earned ?? undefined,
     total_cost_cents: row.total_cost_cents ?? 0,
     payment_method: row.payment_method,
     credit_customer_id: row.credit_customer_id || undefined,
@@ -85,6 +105,7 @@ export async function createSale(
   cartItems: SaleItem[],
   paymentMethod: PaymentMethod,
   creditCustomerId?: string,
+  loyaltyOptions?: CreateSaleLoyaltyOptions,
 ): Promise<string> {
   if (!cartItems || cartItems.length === 0) {
     throw new Error('El carrito está vacío');
@@ -94,13 +115,19 @@ export async function createSale(
   }
 
   if (isOfflineModeActive()) {
-    const queued = await enqueueOfflineSale(cartItems, paymentMethod, creditCustomerId);
+    const queued = await enqueueOfflineSale(
+      cartItems,
+      paymentMethod,
+      creditCustomerId,
+      undefined,
+      loyaltyOptions,
+    );
     return queued.id;
   }
 
   if (isMockMode()) {
     console.log('ℹ️ Creando venta en datos mock (Firebase no configurado)');
-    return createMockSale(cartItems, paymentMethod, creditCustomerId);
+    return createMockSale(cartItems, paymentMethod, creditCustomerId, loyaltyOptions);
   }
 
   if (!hasAuthSession()) {
@@ -108,10 +135,27 @@ export async function createSale(
   }
 
   try {
-    const payload = {
+    const normalizedPhone = loyaltyOptions?.loyalty_phone
+      ? normalizeLoyaltyPhone(loyaltyOptions.loyalty_phone)
+      : '';
+    const normalizedCoupon = loyaltyOptions?.coupon_code
+      ? normalizeCouponCode(loyaltyOptions.coupon_code)
+      : '';
+    const pointsRedeemed =
+      loyaltyOptions?.loyalty_points_redeemed && loyaltyOptions.loyalty_points_redeemed > 0
+        ? Math.round(loyaltyOptions.loyalty_points_redeemed)
+        : 0;
+
+    const payload: Record<string, unknown> = {
       items: cartItems.map(({ product_id, quantity }) => ({ product_id, quantity })),
       payment_method: paymentMethod,
       ...(paymentMethod === 'credit' ? { credit_customer_id: creditCustomerId } : {}),
+      ...(normalizedPhone ? { loyalty_phone: normalizedPhone } : {}),
+      ...(loyaltyOptions?.loyalty_customer_name?.trim()
+        ? { loyalty_customer_name: loyaltyOptions.loyalty_customer_name.trim() }
+        : {}),
+      ...(pointsRedeemed > 0 ? { loyalty_points_redeemed: pointsRedeemed } : {}),
+      ...(normalizedCoupon ? { coupon_code: normalizedCoupon } : {}),
     };
 
     const result = await apiClient.post<{ id?: string; saleId?: string }>('/sales', payload);
@@ -125,9 +169,15 @@ export async function createSale(
     if (paymentMethod === 'credit') {
       emitDataChange('credits');
     }
+    if (normalizedPhone || normalizedCoupon || pointsRedeemed > 0) {
+      emitDataChange('loyalty');
+    }
 
     return saleId;
   } catch (error: unknown) {
+    if (error instanceof ApiError && error.status >= 400 && error.status < 500) {
+      throw error;
+    }
     const message = error instanceof Error ? error.message : '';
     const safeMessages = new Set([
       'Debes iniciar sesión para crear la venta',
@@ -149,6 +199,7 @@ function createMockSale(
   cartItems: SaleItem[],
   paymentMethod: PaymentMethod,
   creditCustomerId?: string,
+  loyaltyOptions?: CreateSaleLoyaltyOptions,
 ): string {
   const creditCustomer = paymentMethod === 'credit'
     ? mockCreditCustomers.find((candidate) => candidate.id === creditCustomerId && candidate.active)
@@ -192,14 +243,64 @@ function createMockSale(
       category: product.category?.trim() || 'Sin categoría',
     };
   });
-  const total = snapshotItems.reduce((sum, item) => sum + item.subtotal, 0);
+  const subtotal = snapshotItems.reduce((sum, item) => sum + item.subtotal, 0);
   const totalCost = snapshotItems.reduce((sum, item) => sum + (item.cost_subtotal_cents || 0), 0);
+  const normalizedPhone = loyaltyOptions?.loyalty_phone
+    ? normalizeLoyaltyPhone(loyaltyOptions.loyalty_phone)
+    : '';
+  const hasValidPhone = Boolean(normalizedPhone && isValidLoyaltyPhone(normalizedPhone));
+  const normalizedCoupon = loyaltyOptions?.coupon_code
+    ? normalizeCouponCode(loyaltyOptions.coupon_code)
+    : '';
+  const mockCoupon = normalizedCoupon
+    ? getMockCouponsSnapshot().find((c) => c.code === normalizedCoupon) || null
+    : null;
+  const mockAcc = hasValidPhone
+    ? getMockLoyaltyAccountsSnapshot().find((a) => a.phone === normalizedPhone) || null
+    : null;
+  const settlement = settleOrderLoyaltyAndCoupon({
+    itemsSubtotalCents: subtotal,
+    deliveryFeeCents: 0,
+    config: getMockLoyaltyConfigSnapshot(),
+    coupon: mockCoupon,
+    couponCodeRequested: normalizedCoupon || null,
+    hasValidPhone,
+    accountPointsBalance: mockAcc?.points_balance ?? 0,
+    pointsToRedeemRequested: loyaltyOptions?.loyalty_points_redeemed ?? 0,
+  });
+  if (!settlement.ok) {
+    throw new Error(settlement.error);
+  }
+  const total = settlement.final_total_cents;
   const saleId = `sale_${Date.now()}`;
+
+  if (mockAcc) {
+    mockAcc.points_balance = Math.max(
+      0,
+      mockAcc.points_balance - settlement.points_redeemed + settlement.points_earned,
+    );
+    mockAcc.lifetime_points_earned += settlement.points_earned;
+    mockAcc.lifetime_points_redeemed += settlement.points_redeemed;
+    mockAcc.total_purchases_count += 1;
+    mockAcc.total_spent_cents += total;
+  }
+  if (mockCoupon && settlement.coupon_code) {
+    mockCoupon.used_count += 1;
+  }
 
   const newSale: Sale = {
     id: saleId,
     date: new Date(),
     total,
+    subtotal_cents: subtotal,
+    coupon_code: settlement.coupon_code,
+    coupon_discount_cents: settlement.coupon_discount_cents,
+    loyalty_account_id: mockAcc?.id ?? null,
+    loyalty_phone: hasValidPhone ? normalizedPhone : null,
+    loyalty_points_redeemed: settlement.points_redeemed,
+    loyalty_discount_cents: settlement.points_discount_cents,
+    loyalty_points_earned: settlement.points_earned,
+    loyalty_balance_after: mockAcc?.points_balance ?? null,
     total_cost_cents: totalCost,
     payment_method: paymentMethod,
     items: snapshotItems,

@@ -75,6 +75,15 @@ export interface Sale {
   id: string;
   date: any; // Firestore Timestamp
   total: number; // Total en centavos
+  subtotal_cents?: number;
+  coupon_code?: string | null;
+  coupon_discount_cents?: number;
+  loyalty_account_id?: string | null;
+  loyalty_phone?: string | null;
+  loyalty_points_redeemed?: number;
+  loyalty_discount_cents?: number;
+  loyalty_points_earned?: number;
+  loyalty_balance_after?: number | null;
   payment_method: PaymentMethod;
   items: SaleItem[];
   credit_customer_id?: string;

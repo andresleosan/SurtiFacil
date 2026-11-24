@@ -27,6 +27,7 @@ export const NAV_ITEMS: readonly NavItem[] = [
   { page: 'suppliers', label: 'Proveedores', icon: 'truck' },
   { page: 'orders', label: 'Pedidos', icon: 'clipboard' },
   { page: 'whatsapp', label: 'WhatsApp', icon: 'chat' },
+  { page: 'loyalty', label: 'Club de Puntos', icon: 'gift' },
   { page: 'employees', label: 'Empleados', icon: 'users' },
   { page: 'settings', label: 'Configuración', icon: 'settings' },
   { page: 'super-admin', label: 'SuperAdmin', icon: 'crown' },
@@ -62,7 +63,7 @@ export const NAV_GROUPS: readonly NavGroup[] = [
     id: 'channels',
     label: 'Canales y Vecinos',
     icon: '💬',
-    pages: ['whatsapp'],
+    pages: ['whatsapp', 'loyalty'],
   },
   {
     id: 'settings',

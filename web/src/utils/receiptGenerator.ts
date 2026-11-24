@@ -142,6 +142,24 @@ export function generateSaleReceiptText(
   if (totalWholesaleSavings > 0) {
     lines.push(formatTwoColumns('Ahorro Mayorista:', formatCentsCOP(totalWholesaleSavings), colWidth));
   }
+  if (sale.coupon_code && (sale.coupon_discount_cents || 0) > 0) {
+    lines.push(
+      formatTwoColumns(
+        `Cupón ${sale.coupon_code}:`,
+        `-${formatCentsCOP(sale.coupon_discount_cents || 0)}`,
+        colWidth
+      )
+    );
+  }
+  if ((sale.loyalty_points_redeemed || 0) > 0 && (sale.loyalty_discount_cents || 0) > 0) {
+    lines.push(
+      formatTwoColumns(
+        `Canje Puntos (${sale.loyalty_points_redeemed} pts):`,
+        `-${formatCentsCOP(sale.loyalty_discount_cents || 0)}`,
+        colWidth
+      )
+    );
+  }
 
   const paymentMethodLabels: Record<string, string> = {
     cash: 'Efectivo',
@@ -158,6 +176,14 @@ export function generateSaleReceiptText(
       ? sale.change_cents
       : Math.max(0, sale.received_cash_cents - sale.total);
     lines.push(formatTwoColumns('Vueltas a Entregar:', formatCentsCOP(change), colWidth));
+  }
+
+  if ((sale.loyalty_points_earned || 0) > 0) {
+    lines.push(divider);
+    lines.push(formatTwoColumns('Puntos Ganados Club:', `+${sale.loyalty_points_earned} pts`, colWidth));
+    if (typeof sale.loyalty_balance_after === 'number') {
+      lines.push(formatTwoColumns('Saldo Club Puntos:', `${sale.loyalty_balance_after} pts`, colWidth));
+    }
   }
 
   lines.push(doubleDivider);
@@ -209,6 +235,12 @@ export function generateSaleWhatsAppText(sale: Sale, store: Partial<StoreSetting
   if (totalWhatsAppSavings > 0) {
     text += `🏷️ *Ahorro Mayorista:* ${formatCentsCOP(totalWhatsAppSavings)}\n`;
   }
+  if (sale.coupon_code && (sale.coupon_discount_cents || 0) > 0) {
+    text += `🎟️ *Cupón ${sale.coupon_code}:* -${formatCentsCOP(sale.coupon_discount_cents || 0)}\n`;
+  }
+  if ((sale.loyalty_points_redeemed || 0) > 0 && (sale.loyalty_discount_cents || 0) > 0) {
+    text += `⭐ *Canje Puntos (${sale.loyalty_points_redeemed} pts):* -${formatCentsCOP(sale.loyalty_discount_cents || 0)}\n`;
+  }
   text += `\n💰 *TOTAL A PAGAR:* *${formatCentsCOP(sale.total)}*\n`;
   text += `💳 *Medio de pago:* ${methodLabel}\n`;
 
@@ -218,6 +250,14 @@ export function generateSaleWhatsAppText(sale: Sale, store: Partial<StoreSetting
       ? sale.change_cents
       : Math.max(0, sale.received_cash_cents - sale.total);
     text += `🪙 *Vueltas a Entregar:* ${formatCentsCOP(change)}\n`;
+  }
+
+  if ((sale.loyalty_points_earned || 0) > 0) {
+    text += `🏆 *Club de Puntos:* Ganaste *+${sale.loyalty_points_earned} pts*`;
+    if (typeof sale.loyalty_balance_after === 'number') {
+      text += ` (Saldo: *${sale.loyalty_balance_after} pts*)`;
+    }
+    text += `\n`;
   }
 
   if (store.datos_pago_offline) {

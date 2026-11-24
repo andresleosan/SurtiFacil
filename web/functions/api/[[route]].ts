@@ -18,6 +18,20 @@ import {
   validateWholesaleTiersInput,
   WholesaleTier,
 } from '../_lib/wholesalePricing';
+import {
+  DEFAULT_LOYALTY_CONFIG,
+  isValidCouponCode,
+  isValidLoyaltyPhone,
+  maskPublicCustomerName,
+  normalizeCouponCode,
+  normalizeLoyaltyConfig,
+  normalizeLoyaltyPhone,
+  settleOrderLoyaltyAndCoupon,
+  validateCouponForSubtotal,
+  type CouponDiscountType,
+  type CouponRecord,
+  type LoyaltyConfig,
+} from '../_lib/loyaltyEngine';
 
 const VALID_STAFF_ROLES = new Set(['admin', 'manager', 'cashier']);
 
@@ -72,6 +86,140 @@ function enrichProductRow<T extends Record<string, any> | null | undefined>(row:
   };
 }
 
+async function loadNegocioLoyaltyConfig(
+  db: D1Database,
+  negocioId: string
+): Promise<{ config: LoyaltyConfig; configObj: Record<string, any> }> {
+  const row = await db
+    .prepare('SELECT config_json FROM negocios WHERE id = ?')
+    .bind(negocioId)
+    .first<{ config_json?: string | null }>();
+  let parsed: Record<string, any> = {};
+  try {
+    parsed = row?.config_json ? JSON.parse(row.config_json) : {};
+  } catch {
+    parsed = {};
+  }
+  return {
+    config: normalizeLoyaltyConfig((parsed as any).loyalty),
+    configObj: parsed,
+  };
+}
+
+async function appendOrderLoyaltyEarnStatements(
+  db: D1Database,
+  negocioId: string,
+  order: any,
+  batchStatements: any[],
+  actor: { id: string; role: string },
+  saleId: string | null = null
+): Promise<string | null> {
+  if (!order || order.loyalty_settled === 1) return order?.loyalty_account_id ?? null;
+
+  const normalizedPhone = order.customer_phone ? normalizeLoyaltyPhone(String(order.customer_phone)) : '';
+  if (!isValidLoyaltyPhone(normalizedPhone)) {
+    return order.loyalty_account_id ?? null;
+  }
+
+  const { config: loyaltyConfig } = await loadNegocioLoyaltyConfig(db, negocioId);
+  const pointsEarned = loyaltyConfig.enabled ? Math.max(0, Math.round(Number(order.loyalty_points_earned) || 0)) : 0;
+
+  const existingAcc = await db
+    .prepare('SELECT * FROM loyalty_accounts WHERE negocio_id = ? AND phone = ?')
+    .bind(negocioId, normalizedPhone)
+    .first<any>();
+
+  const paidMerchandiseCents = Math.max(
+    0,
+    (Number(order.subtotal_cents) || Number(order.total_cents) || 0) -
+      (Number(order.coupon_discount_cents) || 0) -
+      (Number(order.loyalty_discount_cents) || 0)
+  );
+  const spentTotalCents = Math.max(0, Number(order.total_cents) || 0);
+  let resolvedAccountId: string | null = existingAcc?.id ?? order.loyalty_account_id ?? null;
+
+  if (existingAcc) {
+    const nextBalance = Math.max(0, (Number(existingAcc.points_balance) || 0) + pointsEarned);
+    batchStatements.push(
+      db
+        .prepare(
+          `UPDATE loyalty_accounts
+           SET points_balance = points_balance + ?,
+               lifetime_points_earned = lifetime_points_earned + ?,
+               total_purchases_count = total_purchases_count + 1,
+               total_spent_cents = total_spent_cents + ?,
+               last_activity_at = datetime('now'),
+               updated_at = datetime('now')
+           WHERE id = ? AND negocio_id = ?`
+        )
+        .bind(pointsEarned, pointsEarned, spentTotalCents, existingAcc.id, negocioId)
+    );
+    if (pointsEarned > 0) {
+      const movId = `lmov-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+      batchStatements.push(
+        db
+          .prepare(
+            `INSERT INTO loyalty_movements (
+              id, negocio_id, account_id, type, points_delta, balance_after, amount_cents, description, sale_id, order_id, created_by_uid, created_by_role, created_at
+            ) VALUES (?, ?, ?, 'earn', ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`
+          )
+          .bind(
+            movId,
+            negocioId,
+            existingAcc.id,
+            pointsEarned,
+            nextBalance,
+            paidMerchandiseCents,
+            `Puntos ganados por pedido ${order.order_code}`,
+            saleId,
+            order.id,
+            actor.id,
+            actor.role
+          )
+      );
+    }
+  } else if (pointsEarned > 0 || loyaltyConfig.enabled) {
+    resolvedAccountId = `loy-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+    const customerName = String(order.customer_name || '').trim() || `Vecino ${normalizedPhone.slice(-4)}`;
+    batchStatements.push(
+      db
+        .prepare(
+          `INSERT INTO loyalty_accounts (
+            id, negocio_id, phone, customer_name, points_balance, lifetime_points_earned, lifetime_points_redeemed,
+            total_purchases_count, total_spent_cents, active, last_activity_at, created_at, updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?, 0, 1, ?, 1, datetime('now'), datetime('now'), datetime('now'))`
+        )
+        .bind(resolvedAccountId, negocioId, normalizedPhone, customerName, pointsEarned, pointsEarned, spentTotalCents)
+    );
+    if (pointsEarned > 0) {
+      const movId = `lmov-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+      batchStatements.push(
+        db
+          .prepare(
+            `INSERT INTO loyalty_movements (
+              id, negocio_id, account_id, type, points_delta, balance_after, amount_cents, description, sale_id, order_id, created_by_uid, created_by_role, created_at
+            ) VALUES (?, ?, ?, 'earn', ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`
+          )
+          .bind(
+            movId,
+            negocioId,
+            resolvedAccountId,
+            pointsEarned,
+            pointsEarned,
+            paidMerchandiseCents,
+            `Puntos ganados por pedido ${order.order_code}`,
+            saleId,
+            order.id,
+            actor.id,
+            actor.role
+          )
+      );
+    }
+  }
+
+  return resolvedAccountId;
+}
+
 interface ProductInput {
   name: string;
   price_cents: number;
@@ -122,6 +270,10 @@ interface SaleInput {
   items: SaleItemInput[];
   credit_customer_id?: string;
   credit_customer_name?: string;
+  loyalty_phone?: string;
+  loyalty_customer_name?: string;
+  loyalty_points_redeemed?: number;
+  coupon_code?: string;
 }
 
 interface CreditCustomerInput {
@@ -506,9 +658,129 @@ export const onRequest: PagesFunction<Env> = async (context) => {
           costo_domicilio_cents: negocio.costo_domicilio_cents || 0,
           datos_pago_offline: negocio.datos_pago_offline,
           config: parsedConfig,
+          loyalty_config: normalizeLoyaltyConfig((parsedConfig as any).loyalty),
         },
         products: (productsResult.results || []).map((row: any) => enrichProductRow(row)),
         combos: combosResult.results || [],
+      });
+    }
+
+    // 2.3 Consulta Pública de Puntos del Club del Barrio (/public/loyalty/lookup?slug=...&phone=...)
+    if (path === '/public/loyalty/lookup' && method === 'GET') {
+      const clientIp = getClientIp(request);
+      const rl = checkRateLimit(`public-loyalty-lookup:${clientIp}`, 40, 5 * 60 * 1000);
+      if (!rl.allowed) {
+        return errorResponse('Demasiadas consultas de puntos. Espera unos minutos.', 429);
+      }
+
+      const slug = (url.searchParams.get('slug') || '').trim().toLowerCase();
+      const rawPhone = url.searchParams.get('phone') || '';
+      if (!slug) {
+        return errorResponse('Slug de tienda no proporcionado.', 400);
+      }
+      const normalizedPhone = normalizeLoyaltyPhone(rawPhone);
+      if (!isValidLoyaltyPhone(normalizedPhone)) {
+        return errorResponse('Ingresa un número celular válido (7 a 15 dígitos).', 400);
+      }
+
+      const negocio = await env.DB.prepare('SELECT id, config_json FROM negocios WHERE slug = ?')
+        .bind(slug)
+        .first<{ id: string; config_json?: string | null }>();
+      if (!negocio) {
+        return errorResponse('Tienda no encontrada.', 404);
+      }
+
+      let parsedConfig: Record<string, any> = {};
+      try {
+        parsedConfig = negocio.config_json ? JSON.parse(negocio.config_json) : {};
+      } catch {
+        parsedConfig = {};
+      }
+      const config = normalizeLoyaltyConfig((parsedConfig as any).loyalty);
+
+      const account = await env.DB.prepare(
+        'SELECT id, customer_name, points_balance FROM loyalty_accounts WHERE negocio_id = ? AND phone = ? AND active = 1'
+      )
+        .bind(negocio.id, normalizedPhone)
+        .first<{ id: string; customer_name: string; points_balance: number }>();
+
+      if (!account) {
+        return jsonResponse({
+          enrolled: false,
+          phone: normalizedPhone,
+          display_name: null,
+          points_balance: 0,
+          redeemable_value_cents: 0,
+          config,
+        });
+      }
+
+      return jsonResponse({
+        enrolled: true,
+        phone: normalizedPhone,
+        display_name: maskPublicCustomerName(account.customer_name),
+        points_balance: Number(account.points_balance) || 0,
+        redeemable_value_cents: (Number(account.points_balance) || 0) * config.point_value_cents,
+        config,
+      });
+    }
+
+    // 2.4 Validación Pública de Cupón de Descuento (/public/coupons/validate)
+    if (path === '/public/coupons/validate' && method === 'POST') {
+      const clientIp = getClientIp(request);
+      const rl = checkRateLimit(`public-coupon-validate:${clientIp}`, 40, 5 * 60 * 1000);
+      if (!rl.allowed) {
+        return errorResponse('Demasiados intentos validando cupones. Espera unos minutos.', 429);
+      }
+
+      const body = (await request.json().catch(() => ({}))) as {
+        slug?: string;
+        code?: string;
+        subtotal_cents?: number;
+      };
+      const slug = String(body.slug || '').trim().toLowerCase();
+      const code = normalizeCouponCode(body.code || '');
+      const subtotalCents = Math.max(0, Math.round(Number(body.subtotal_cents) || 0));
+
+      if (!slug) {
+        return errorResponse('Slug de tienda no proporcionado.', 400);
+      }
+      if (!code) {
+        return errorResponse('Ingresa un código de cupón.', 400);
+      }
+
+      const negocio = await env.DB.prepare('SELECT id FROM negocios WHERE slug = ?')
+        .bind(slug)
+        .first<{ id: string }>();
+      if (!negocio) {
+        return errorResponse('Tienda no encontrada.', 404);
+      }
+
+      const coupon = await env.DB.prepare(
+        'SELECT * FROM discount_coupons WHERE negocio_id = ? AND code = ?'
+      )
+        .bind(negocio.id, code)
+        .first<CouponRecord>();
+
+      const validation = validateCouponForSubtotal(coupon, subtotalCents);
+      if (!validation.valid) {
+        return jsonResponse({ valid: false, error: validation.error }, 400);
+      }
+
+      return jsonResponse({
+        valid: true,
+        coupon: {
+          id: coupon!.id,
+          code: coupon!.code,
+          description: coupon!.description,
+          discount_type: coupon!.discount_type,
+          discount_value: coupon!.discount_value,
+          min_purchase_cents: coupon!.min_purchase_cents,
+          max_discount_cents: coupon!.max_discount_cents,
+          expires_at: coupon!.expires_at,
+        },
+        discount_cents: validation.discount_cents,
+        final_subtotal_cents: validation.final_subtotal_cents,
       });
     }
 
@@ -1481,20 +1753,86 @@ export const onRequest: PagesFunction<Env> = async (context) => {
           });
         }
 
+        const { config: loyaltyConfig } = await loadNegocioLoyaltyConfig(env.DB, auth.negocioId);
+
+        let dbCoupon: CouponRecord | null = null;
+        const requestedCouponCode = normalizeCouponCode(body.coupon_code || '');
+        if (requestedCouponCode) {
+          dbCoupon = await env.DB.prepare(
+            'SELECT * FROM discount_coupons WHERE negocio_id = ? AND code = ?'
+          )
+            .bind(auth.negocioId, requestedCouponCode)
+            .first<CouponRecord>();
+        }
+
+        const rawLoyaltyPhone = body.loyalty_phone ? String(body.loyalty_phone).trim() : '';
+        const normalizedPhone = rawLoyaltyPhone ? normalizeLoyaltyPhone(rawLoyaltyPhone) : '';
+        if (rawLoyaltyPhone && !isValidLoyaltyPhone(normalizedPhone)) {
+          return errorResponse('Número celular del Club de Puntos inválido (debe tener 7 a 15 dígitos).', 400);
+        }
+
+        let dbLoyaltyAccount: any = null;
+        if (normalizedPhone) {
+          dbLoyaltyAccount = await env.DB.prepare(
+            'SELECT * FROM loyalty_accounts WHERE negocio_id = ? AND phone = ?'
+          )
+            .bind(auth.negocioId, normalizedPhone)
+            .first<any>();
+          if (dbLoyaltyAccount && dbLoyaltyAccount.active === 0) {
+            return errorResponse('Esta cuenta del Club de Puntos se encuentra inactiva.', 400);
+          }
+        }
+
+        const settlement = settleOrderLoyaltyAndCoupon({
+          itemsSubtotalCents: computedTotalCents,
+          deliveryFeeCents: 0,
+          config: loyaltyConfig,
+          coupon: dbCoupon,
+          couponCodeRequested: requestedCouponCode || null,
+          hasValidPhone: Boolean(normalizedPhone && isValidLoyaltyPhone(normalizedPhone)),
+          accountPointsBalance: Number(dbLoyaltyAccount?.points_balance) || 0,
+          pointsToRedeemRequested: body.loyalty_points_redeemed ?? 0,
+        });
+
+        if (!settlement.ok) {
+          return errorResponse(settlement.error, 400);
+        }
+
+        const finalTotalCents = settlement.final_total_cents;
         const saleId = `sale-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
         const batchStatements: any[] = [];
+
+        let loyaltyAccountId: string | null = dbLoyaltyAccount?.id ?? null;
+        let nextLoyaltyBalance: number | null = null;
+        if (normalizedPhone) {
+          const prevPoints = Number(dbLoyaltyAccount?.points_balance) || 0;
+          nextLoyaltyBalance = Math.max(0, prevPoints - settlement.points_redeemed + settlement.points_earned);
+          if (!loyaltyAccountId) {
+            loyaltyAccountId = `loy-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+          }
+        }
 
         // 1. Insertar la venta
         batchStatements.push(
           env.DB.prepare(
             `INSERT INTO sales (
-              id, negocio_id, total_cents, payment_method, credit_customer_id, credit_customer_name,
+              id, negocio_id, total_cents, subtotal_cents, coupon_code, coupon_discount_cents,
+              loyalty_account_id, loyalty_phone, loyalty_points_redeemed, loyalty_discount_cents, loyalty_points_earned,
+              payment_method, credit_customer_id, credit_customer_name,
               total_cost_cents, created_by_uid, created_by_role, schema_version, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 2, datetime('now'))`
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 2, datetime('now'))`
           ).bind(
             saleId,
             auth.negocioId,
+            finalTotalCents,
             computedTotalCents,
+            settlement.coupon_code,
+            settlement.coupon_discount_cents,
+            loyaltyAccountId,
+            normalizedPhone || null,
+            settlement.points_redeemed,
+            settlement.points_discount_cents,
+            settlement.points_earned,
             body.payment_method,
             body.credit_customer_id || null,
             body.credit_customer_name || null,
@@ -1546,7 +1884,7 @@ export const onRequest: PagesFunction<Env> = async (context) => {
               auth.negocioId,
               body.credit_customer_id,
               'debt',
-              computedTotalCents,
+              finalTotalCents,
               'Venta a crédito en mostrador',
               saleId,
               auth.user.id,
@@ -1557,8 +1895,109 @@ export const onRequest: PagesFunction<Env> = async (context) => {
           batchStatements.push(
             env.DB.prepare(
               "UPDATE credit_customers SET balance_cents = balance_cents + ?, last_entry_at = datetime('now'), updated_at = datetime('now') WHERE id = ? AND negocio_id = ?"
-            ).bind(computedTotalCents, body.credit_customer_id, auth.negocioId)
+            ).bind(finalTotalCents, body.credit_customer_id, auth.negocioId)
           );
+        }
+
+        // 4. Actualizar usos del cupón si se aplicó
+        if (settlement.coupon_code && dbCoupon) {
+          batchStatements.push(
+            env.DB.prepare(
+              "UPDATE discount_coupons SET used_count = used_count + 1, updated_at = datetime('now') WHERE id = ? AND negocio_id = ?"
+            ).bind(dbCoupon.id, auth.negocioId)
+          );
+        }
+
+        // 5. Actualizar cuenta y movimientos del Club de Puntos
+        if (normalizedPhone && loyaltyAccountId) {
+          if (dbLoyaltyAccount) {
+            batchStatements.push(
+              env.DB.prepare(
+                `UPDATE loyalty_accounts
+                 SET points_balance = points_balance - ? + ?,
+                     lifetime_points_earned = lifetime_points_earned + ?,
+                     lifetime_points_redeemed = lifetime_points_redeemed + ?,
+                     total_purchases_count = total_purchases_count + 1,
+                     total_spent_cents = total_spent_cents + ?,
+                     last_activity_at = datetime('now'),
+                     updated_at = datetime('now')
+                 WHERE id = ? AND negocio_id = ?`
+              ).bind(
+                settlement.points_redeemed,
+                settlement.points_earned,
+                settlement.points_earned,
+                settlement.points_redeemed,
+                finalTotalCents,
+                loyaltyAccountId,
+                auth.negocioId
+              )
+            );
+          } else {
+            const customerNameToUse =
+              String(body.loyalty_customer_name || body.credit_customer_name || '').trim() ||
+              `Vecino ${normalizedPhone.slice(-4)}`;
+            batchStatements.push(
+              env.DB.prepare(
+                `INSERT INTO loyalty_accounts (
+                  id, negocio_id, phone, customer_name, points_balance, lifetime_points_earned, lifetime_points_redeemed,
+                  total_purchases_count, total_spent_cents, active, last_activity_at, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, 0, 1, ?, 1, datetime('now'), datetime('now'), datetime('now'))`
+              ).bind(
+                loyaltyAccountId,
+                auth.negocioId,
+                normalizedPhone,
+                customerNameToUse,
+                settlement.points_earned,
+                settlement.points_earned,
+                finalTotalCents
+              )
+            );
+          }
+
+          if (settlement.points_redeemed > 0 && dbLoyaltyAccount) {
+            const redeemMovId = `lmov-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+            const afterRedeemBalance = Math.max(0, (Number(dbLoyaltyAccount.points_balance) || 0) - settlement.points_redeemed);
+            batchStatements.push(
+              env.DB.prepare(
+                `INSERT INTO loyalty_movements (
+                  id, negocio_id, account_id, type, points_delta, balance_after, amount_cents, description, sale_id, created_by_uid, created_by_role, created_at
+                ) VALUES (?, ?, ?, 'redeem', ?, ?, ?, ?, ?, ?, ?, datetime('now'))`
+              ).bind(
+                redeemMovId,
+                auth.negocioId,
+                loyaltyAccountId,
+                -settlement.points_redeemed,
+                afterRedeemBalance,
+                settlement.points_discount_cents,
+                `Canje de puntos en venta #${saleId.slice(0, 8)}`,
+                saleId,
+                auth.user.id,
+                auth.user.role
+              )
+            );
+          }
+
+          if (settlement.points_earned > 0) {
+            const earnMovId = `lmov-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+            batchStatements.push(
+              env.DB.prepare(
+                `INSERT INTO loyalty_movements (
+                  id, negocio_id, account_id, type, points_delta, balance_after, amount_cents, description, sale_id, created_by_uid, created_by_role, created_at
+                ) VALUES (?, ?, ?, 'earn', ?, ?, ?, ?, ?, ?, ?, datetime('now'))`
+              ).bind(
+                earnMovId,
+                auth.negocioId,
+                loyaltyAccountId,
+                settlement.points_earned,
+                nextLoyaltyBalance ?? settlement.points_earned,
+                settlement.paid_merchandise_cents,
+                `Puntos ganados en venta #${saleId.slice(0, 8)}`,
+                saleId,
+                auth.user.id,
+                auth.user.role
+              )
+            );
+          }
         }
 
         // Ejecutar toda la venta de manera atómica
@@ -1569,7 +2008,16 @@ export const onRequest: PagesFunction<Env> = async (context) => {
             id: saleId,
             saleId,
             negocio_id: auth.negocioId,
-            total_cents: computedTotalCents,
+            total_cents: finalTotalCents,
+            subtotal_cents: computedTotalCents,
+            coupon_code: settlement.coupon_code,
+            coupon_discount_cents: settlement.coupon_discount_cents,
+            loyalty_account_id: loyaltyAccountId,
+            loyalty_phone: normalizedPhone || null,
+            loyalty_points_redeemed: settlement.points_redeemed,
+            loyalty_discount_cents: settlement.points_discount_cents,
+            loyalty_points_earned: settlement.points_earned,
+            loyalty_balance_after: nextLoyaltyBalance,
             total_cost_cents: computedTotalCostCents,
             payment_method: body.payment_method,
             items: preparedItems,
@@ -2990,10 +3438,60 @@ export const onRequest: PagesFunction<Env> = async (context) => {
           return errorResponse('Ningún producto seleccionado es válido en el catálogo.', 400);
         }
 
-        // Sumar costo de domicilio si aplica
-        if (deliveryType === 'delivery' && (negocio.costo_domicilio_cents || 0) > 0) {
-          totalCents += negocio.costo_domicilio_cents;
+        // Liquidar cupones, canje de puntos y cálculo de domicilio en el servidor
+        const itemsSubtotalCents = totalCents;
+        const deliveryFeeCents =
+          deliveryType === 'delivery' && (negocio.costo_domicilio_cents || 0) > 0
+            ? Number(negocio.costo_domicilio_cents) || 0
+            : 0;
+
+        let parsedNegocioConfig: Record<string, any> = {};
+        try {
+          parsedNegocioConfig = negocio.config_json ? JSON.parse(negocio.config_json) : {};
+        } catch {
+          parsedNegocioConfig = {};
         }
+        const loyaltyConfig = normalizeLoyaltyConfig((parsedNegocioConfig as any).loyalty);
+
+        const rawCustomerPhone = body.customer_phone ? String(body.customer_phone).trim() : '';
+        const normalizedCustomerPhone = rawCustomerPhone ? normalizeLoyaltyPhone(rawCustomerPhone) : '';
+        const hasValidPhone = Boolean(normalizedCustomerPhone && isValidLoyaltyPhone(normalizedCustomerPhone));
+
+        let dbCoupon: CouponRecord | null = null;
+        const requestedCouponCode = normalizeCouponCode(body.coupon_code || '');
+        if (requestedCouponCode) {
+          dbCoupon = await env.DB.prepare(
+            'SELECT * FROM discount_coupons WHERE negocio_id = ? AND code = ?'
+          )
+            .bind(negocio.id, requestedCouponCode)
+            .first<CouponRecord>();
+        }
+
+        let dbLoyaltyAccount: any = null;
+        if (hasValidPhone) {
+          dbLoyaltyAccount = await env.DB.prepare(
+            'SELECT * FROM loyalty_accounts WHERE negocio_id = ? AND phone = ? AND active = 1'
+          )
+            .bind(negocio.id, normalizedCustomerPhone)
+            .first<any>();
+        }
+
+        const settlement = settleOrderLoyaltyAndCoupon({
+          itemsSubtotalCents,
+          deliveryFeeCents,
+          config: loyaltyConfig,
+          coupon: dbCoupon,
+          couponCodeRequested: requestedCouponCode || null,
+          hasValidPhone,
+          accountPointsBalance: Number(dbLoyaltyAccount?.points_balance) || 0,
+          pointsToRedeemRequested: body.loyalty_points_redeemed ?? 0,
+        });
+
+        if (!settlement.ok) {
+          return errorResponse(settlement.error, 400);
+        }
+
+        const finalOrderTotalCents = settlement.final_total_cents;
 
         // Generar código de turno correlativo por negocio
         const countRes = await env.DB.prepare(
@@ -3009,29 +3507,80 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         const orderId = `ord-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
         const trackingToken = `tk_${Date.now()}_${Math.random().toString(36).substring(2, 10)}`;
 
-        await env.DB.prepare(
-          `INSERT INTO customer_orders (
-            id, negocio_id, order_code, source, customer_name, customer_phone,
-            delivery_type, delivery_address, delivery_neighborhood, payment_method,
-            items_json, total_cents, status, tracking_token, created_at, updated_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, datetime('now'), datetime('now'))`
-        )
-          .bind(
+        const orderBatch: any[] = [];
+        orderBatch.push(
+          env.DB.prepare(
+            `INSERT INTO customer_orders (
+              id, negocio_id, order_code, source, customer_name, customer_phone,
+              delivery_type, delivery_address, delivery_neighborhood, payment_method,
+              items_json, subtotal_cents, coupon_code, coupon_discount_cents,
+              loyalty_account_id, loyalty_points_redeemed, loyalty_discount_cents, loyalty_points_earned, loyalty_settled,
+              total_cents, status, tracking_token, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, 'pending', ?, datetime('now'), datetime('now'))`
+          ).bind(
             orderId,
             negocio.id,
             orderCode,
             source,
             customerName,
-            body.customer_phone?.trim() || null,
+            hasValidPhone ? normalizedCustomerPhone : rawCustomerPhone || null,
             deliveryType,
             body.delivery_address?.trim() || null,
             body.delivery_neighborhood?.trim() || null,
             paymentMethod,
             JSON.stringify(verifiedItems),
-            totalCents,
+            itemsSubtotalCents,
+            settlement.coupon_code,
+            settlement.coupon_discount_cents,
+            dbLoyaltyAccount?.id ?? null,
+            settlement.points_redeemed,
+            settlement.points_discount_cents,
+            settlement.points_earned,
+            finalOrderTotalCents,
             trackingToken
           )
-          .run();
+        );
+
+        if (settlement.coupon_code && dbCoupon) {
+          orderBatch.push(
+            env.DB.prepare(
+              "UPDATE discount_coupons SET used_count = used_count + 1, updated_at = datetime('now') WHERE id = ? AND negocio_id = ?"
+            ).bind(dbCoupon.id, negocio.id)
+          );
+        }
+
+        if (settlement.points_redeemed > 0 && dbLoyaltyAccount) {
+          const afterReserveBalance = Math.max(0, (Number(dbLoyaltyAccount.points_balance) || 0) - settlement.points_redeemed);
+          orderBatch.push(
+            env.DB.prepare(
+              `UPDATE loyalty_accounts
+               SET points_balance = MAX(0, points_balance - ?),
+                   lifetime_points_redeemed = lifetime_points_redeemed + ?,
+                   last_activity_at = datetime('now'),
+                   updated_at = datetime('now')
+               WHERE id = ? AND negocio_id = ?`
+            ).bind(settlement.points_redeemed, settlement.points_redeemed, dbLoyaltyAccount.id, negocio.id)
+          );
+          const redeemMovId = `lmov-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+          orderBatch.push(
+            env.DB.prepare(
+              `INSERT INTO loyalty_movements (
+                id, negocio_id, account_id, type, points_delta, balance_after, amount_cents, description, order_id, created_by_uid, created_by_role, created_at
+              ) VALUES (?, ?, ?, 'redeem', ?, ?, ?, ?, ?, 'customer', 'customer', datetime('now'))`
+            ).bind(
+              redeemMovId,
+              negocio.id,
+              dbLoyaltyAccount.id,
+              -settlement.points_redeemed,
+              afterReserveBalance,
+              settlement.points_discount_cents,
+              `Canje en pedido ${orderCode}`,
+              orderId
+            )
+          );
+        }
+
+        await env.DB.batch(orderBatch);
 
         const createdOrder = await env.DB.prepare('SELECT * FROM customer_orders WHERE id = ?')
           .bind(orderId)
@@ -3085,11 +3634,92 @@ export const onRequest: PagesFunction<Env> = async (context) => {
           return errorResponse('Estado no válido.', 400);
         }
 
-        await env.DB.prepare(
-          "UPDATE customer_orders SET status = ?, updated_at = datetime('now') WHERE id = ? AND negocio_id = ?"
+        const existingOrder = await env.DB.prepare(
+          'SELECT * FROM customer_orders WHERE id = ? AND negocio_id = ?'
         )
-          .bind(nextStatus, orderId, auth.negocioId)
-          .run();
+          .bind(orderId, auth.negocioId)
+          .first<any>();
+
+        if (!existingOrder) {
+          return errorResponse('Pedido no encontrado en este local.', 404);
+        }
+
+        const statusBatch: any[] = [];
+        let markSettled = existingOrder.loyalty_settled === 1;
+        let resolvedLoyaltyAccId: string | null = existingOrder.loyalty_account_id ?? null;
+
+        if (nextStatus === 'cancelled' && existingOrder.status !== 'cancelled' && existingOrder.loyalty_settled !== 1) {
+          if (Number(existingOrder.loyalty_points_redeemed) > 0 && existingOrder.loyalty_account_id) {
+            const acc = await env.DB.prepare(
+              'SELECT * FROM loyalty_accounts WHERE id = ? AND negocio_id = ?'
+            )
+              .bind(existingOrder.loyalty_account_id, auth.negocioId)
+              .first<any>();
+            const refundedPoints = Math.round(Number(existingOrder.loyalty_points_redeemed) || 0);
+            if (acc && refundedPoints > 0) {
+              const nextBalance = (Number(acc.points_balance) || 0) + refundedPoints;
+              statusBatch.push(
+                env.DB.prepare(
+                  `UPDATE loyalty_accounts
+                   SET points_balance = points_balance + ?,
+                       lifetime_points_redeemed = MAX(0, lifetime_points_redeemed - ?),
+                       updated_at = datetime('now')
+                   WHERE id = ? AND negocio_id = ?`
+                ).bind(refundedPoints, refundedPoints, acc.id, auth.negocioId)
+              );
+              const refundMovId = `lmov-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+              statusBatch.push(
+                env.DB.prepare(
+                  `INSERT INTO loyalty_movements (
+                    id, negocio_id, account_id, type, points_delta, balance_after, amount_cents, description, order_id, created_by_uid, created_by_role, created_at
+                  ) VALUES (?, ?, ?, 'adjust', ?, ?, ?, ?, ?, ?, ?, datetime('now'))`
+                ).bind(
+                  refundMovId,
+                  auth.negocioId,
+                  acc.id,
+                  refundedPoints,
+                  nextBalance,
+                  Number(existingOrder.loyalty_discount_cents) || 0,
+                  `Reintegro por pedido cancelado ${existingOrder.order_code}`,
+                  existingOrder.id,
+                  auth.user.id,
+                  auth.user.role
+                )
+              );
+            }
+          }
+          if (existingOrder.coupon_code) {
+            statusBatch.push(
+              env.DB.prepare(
+                "UPDATE discount_coupons SET used_count = MAX(0, used_count - 1), updated_at = datetime('now') WHERE negocio_id = ? AND code = ?"
+              ).bind(auth.negocioId, existingOrder.coupon_code)
+            );
+          }
+          markSettled = true;
+        } else if (nextStatus === 'completed' && existingOrder.status !== 'completed' && existingOrder.loyalty_settled !== 1) {
+          resolvedLoyaltyAccId = await appendOrderLoyaltyEarnStatements(
+            env.DB,
+            auth.negocioId,
+            existingOrder,
+            statusBatch,
+            { id: auth.user.id, role: auth.user.role },
+            existingOrder.sale_id || null
+          );
+          markSettled = true;
+        }
+
+        statusBatch.unshift(
+          env.DB.prepare(
+            `UPDATE customer_orders
+             SET status = ?,
+                 loyalty_settled = ?,
+                 loyalty_account_id = COALESCE(?, loyalty_account_id),
+                 updated_at = datetime('now')
+             WHERE id = ? AND negocio_id = ?`
+          ).bind(nextStatus, markSettled ? 1 : 0, resolvedLoyaltyAccId, orderId, auth.negocioId)
+        );
+
+        await env.DB.batch(statusBatch);
 
         const updated = await env.DB.prepare('SELECT * FROM customer_orders WHERE id = ? AND negocio_id = ?')
           .bind(orderId, auth.negocioId)
@@ -3138,18 +3768,38 @@ export const onRequest: PagesFunction<Env> = async (context) => {
 
         // Operación atómica en D1 batch
         const batchStatements: any[] = [];
+        const resolvedLoyaltyAccId = await appendOrderLoyaltyEarnStatements(
+          env.DB,
+          auth.negocioId,
+          order,
+          batchStatements,
+          { id: auth.user.id, role: auth.user.role },
+          saleId
+        );
+
+        const normalizedOrderPhone = order.customer_phone ? normalizeLoyaltyPhone(String(order.customer_phone)) : '';
 
         // 1. Insertar venta
-        batchStatements.push(
+        batchStatements.unshift(
           env.DB.prepare(
             `INSERT INTO sales (
-              id, negocio_id, total_cents, payment_method, credit_customer_id, credit_customer_name,
+              id, negocio_id, total_cents, subtotal_cents, coupon_code, coupon_discount_cents,
+              loyalty_account_id, loyalty_phone, loyalty_points_redeemed, loyalty_discount_cents, loyalty_points_earned,
+              payment_method, credit_customer_id, credit_customer_name,
               created_by_uid, created_by_role, schema_version, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 2, datetime('now'))`
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 2, datetime('now'))`
           ).bind(
             saleId,
             auth.negocioId,
             order.total_cents,
+            order.subtotal_cents || order.total_cents,
+            order.coupon_code || null,
+            order.coupon_discount_cents || 0,
+            resolvedLoyaltyAccId,
+            isValidLoyaltyPhone(normalizedOrderPhone) ? normalizedOrderPhone : null,
+            order.loyalty_points_redeemed || 0,
+            order.loyalty_discount_cents || 0,
+            order.loyalty_points_earned || 0,
             paymentMethod,
             creditCustomerId,
             creditCustomerName,
@@ -3217,11 +3867,11 @@ export const onRequest: PagesFunction<Env> = async (context) => {
           );
         }
 
-        // 4. Actualizar estado de customer_orders
+        // 4. Actualizar estado de customer_orders y marcar puntos liquidados
         batchStatements.push(
           env.DB.prepare(
-            "UPDATE customer_orders SET status = 'completed', sale_id = ?, updated_at = datetime('now') WHERE id = ? AND negocio_id = ?"
-          ).bind(saleId, orderId, auth.negocioId)
+            "UPDATE customer_orders SET status = 'completed', sale_id = ?, loyalty_settled = 1, loyalty_account_id = COALESCE(?, loyalty_account_id), updated_at = datetime('now') WHERE id = ? AND negocio_id = ?"
+          ).bind(saleId, resolvedLoyaltyAccId, orderId, auth.negocioId)
         );
 
         await env.DB.batch(batchStatements);
@@ -3232,6 +3882,500 @@ export const onRequest: PagesFunction<Env> = async (context) => {
           sale_id: saleId,
           order_id: orderId,
         });
+      }
+    }
+
+    // 10.4 Club de Puntos del Barrio (/loyalty/*) — Privado Multi-Tenant
+    if (path === '/loyalty' || path.startsWith('/loyalty/')) {
+      const auth = await authenticateRequest(request, env);
+      const subPath = path.replace(/^\/loyalty\/?/, '');
+
+      // GET /api/loyalty/config
+      if (method === 'GET' && subPath === 'config') {
+        const { config } = await loadNegocioLoyaltyConfig(env.DB, auth.negocioId);
+        return jsonResponse(config);
+      }
+
+      // PUT /api/loyalty/config (Solo Admin / Gerente)
+      if (method === 'PUT' && subPath === 'config') {
+        if (auth.user.role === 'cashier') {
+          return errorResponse('Solo administradores y gerentes pueden modificar las reglas del Club de Puntos.', 403);
+        }
+        const body = (await request.json().catch(() => ({}))) as Partial<LoyaltyConfig>;
+        const { configObj } = await loadNegocioLoyaltyConfig(env.DB, auth.negocioId);
+        const nextConfig = normalizeLoyaltyConfig({
+          ...(configObj.loyalty || DEFAULT_LOYALTY_CONFIG),
+          ...body,
+        });
+        const mergedConfig = {
+          ...configObj,
+          loyalty: nextConfig,
+        };
+        await env.DB.prepare(
+          "UPDATE negocios SET config_json = ?, updated_at = datetime('now') WHERE id = ?"
+        )
+          .bind(JSON.stringify(mergedConfig), auth.negocioId)
+          .run();
+
+        return jsonResponse(nextConfig);
+      }
+
+      // GET /api/loyalty/summary
+      if (method === 'GET' && subPath === 'summary') {
+        const { config } = await loadNegocioLoyaltyConfig(env.DB, auth.negocioId);
+        const accStats = await env.DB.prepare(
+          `SELECT COUNT(*) as total_members,
+                  COALESCE(SUM(points_balance), 0) as active_points_balance,
+                  COALESCE(SUM(lifetime_points_earned), 0) as lifetime_points_earned,
+                  COALESCE(SUM(lifetime_points_redeemed), 0) as lifetime_points_redeemed
+           FROM loyalty_accounts
+           WHERE negocio_id = ? AND active = 1`
+        )
+          .bind(auth.negocioId)
+          .first<any>();
+
+        const coupStats = await env.DB.prepare(
+          `SELECT SUM(CASE WHEN active = 1 THEN 1 ELSE 0 END) as active_coupons_count,
+                  COALESCE(SUM(used_count), 0) as total_coupon_redemptions
+           FROM discount_coupons
+           WHERE negocio_id = ?`
+        )
+          .bind(auth.negocioId)
+          .first<any>();
+
+        const activePointsBalance = Number(accStats?.active_points_balance) || 0;
+        return jsonResponse({
+          total_members: Number(accStats?.total_members) || 0,
+          active_points_balance: activePointsBalance,
+          active_points_value_cents: activePointsBalance * config.point_value_cents,
+          lifetime_points_earned: Number(accStats?.lifetime_points_earned) || 0,
+          lifetime_points_redeemed: Number(accStats?.lifetime_points_redeemed) || 0,
+          active_coupons_count: Number(coupStats?.active_coupons_count) || 0,
+          total_coupon_redemptions: Number(coupStats?.total_coupon_redemptions) || 0,
+          config,
+        });
+      }
+
+      // GET /api/loyalty/accounts/lookup?phone=...
+      if (method === 'GET' && subPath === 'accounts/lookup') {
+        const rawPhone = url.searchParams.get('phone') || '';
+        const normalizedPhone = normalizeLoyaltyPhone(rawPhone);
+        if (!isValidLoyaltyPhone(normalizedPhone)) {
+          return errorResponse('Ingresa un número celular válido (7 a 15 dígitos).', 400);
+        }
+
+        const { config } = await loadNegocioLoyaltyConfig(env.DB, auth.negocioId);
+        const account = await env.DB.prepare(
+          'SELECT * FROM loyalty_accounts WHERE negocio_id = ? AND phone = ? AND active = 1'
+        )
+          .bind(auth.negocioId, normalizedPhone)
+          .first<any>();
+
+        if (!account) {
+          return jsonResponse({
+            enrolled: false,
+            phone: normalizedPhone,
+            account: null,
+            redeemable_value_cents: 0,
+            config,
+          });
+        }
+
+        return jsonResponse({
+          enrolled: true,
+          phone: normalizedPhone,
+          account,
+          redeemable_value_cents: (Number(account.points_balance) || 0) * config.point_value_cents,
+          config,
+        });
+      }
+
+      // GET /api/loyalty/accounts
+      if (method === 'GET' && subPath === 'accounts') {
+        const q = (url.searchParams.get('q') || '').trim().toLowerCase();
+        const result = await env.DB.prepare(
+          'SELECT * FROM loyalty_accounts WHERE negocio_id = ? AND active = 1 ORDER BY points_balance DESC, updated_at DESC'
+        )
+          .bind(auth.negocioId)
+          .all();
+
+        let rows = result.results || [];
+        if (q) {
+          const digitsQ = q.replace(/\D/g, '');
+          rows = rows.filter((r: any) => {
+            const nameMatch = String(r.customer_name || '').toLowerCase().includes(q);
+            const phoneMatch = digitsQ
+              ? String(r.phone || '').includes(digitsQ)
+              : String(r.phone || '').toLowerCase().includes(q);
+            return nameMatch || phoneMatch;
+          });
+        }
+
+        return jsonResponse(rows);
+      }
+
+      // POST /api/loyalty/accounts (Inscribir vecino)
+      if (method === 'POST' && subPath === 'accounts') {
+        const body = (await request.json().catch(() => ({}))) as {
+          phone?: string;
+          customer_name?: string;
+          welcome_bonus_points?: number;
+        };
+        const normalizedPhone = normalizeLoyaltyPhone(body.phone || '');
+        const customerName = String(body.customer_name || '').trim();
+        const welcomeBonus = Math.round(Number(body.welcome_bonus_points || 0));
+
+        if (!isValidLoyaltyPhone(normalizedPhone)) {
+          return errorResponse('Número celular inválido (debe tener entre 7 y 15 dígitos).', 400);
+        }
+        if (!customerName) {
+          return errorResponse('El nombre del vecino es obligatorio.', 400);
+        }
+        if (welcomeBonus < 0) {
+          return errorResponse('El bono de bienvenida no puede ser negativo.', 400);
+        }
+        if (welcomeBonus > 0 && auth.user.role === 'cashier') {
+          return errorResponse('Solo administradores y gerentes pueden otorgar bonos de bienvenida.', 403);
+        }
+
+        const existing = await env.DB.prepare(
+          'SELECT id FROM loyalty_accounts WHERE negocio_id = ? AND phone = ?'
+        )
+          .bind(auth.negocioId, normalizedPhone)
+          .first<any>();
+
+        if (existing) {
+          return errorResponse('Ya existe un vecino inscrito con este número celular.', 409);
+        }
+
+        const accountId = `loy-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+        const batch: any[] = [
+          env.DB.prepare(
+            `INSERT INTO loyalty_accounts (
+              id, negocio_id, phone, customer_name, points_balance, lifetime_points_earned, lifetime_points_redeemed,
+              total_purchases_count, total_spent_cents, active, last_activity_at, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, 0, 0, 0, 1, datetime('now'), datetime('now'), datetime('now'))`
+          ).bind(accountId, auth.negocioId, normalizedPhone, customerName, welcomeBonus, welcomeBonus),
+        ];
+
+        if (welcomeBonus > 0) {
+          const movId = `lmov-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+          batch.push(
+            env.DB.prepare(
+              `INSERT INTO loyalty_movements (
+                id, negocio_id, account_id, type, points_delta, balance_after, amount_cents, description, created_by_uid, created_by_role, created_at
+              ) VALUES (?, ?, ?, 'bonus', ?, ?, 0, 'Bono de bienvenida Club de Puntos', ?, ?, datetime('now'))`
+            ).bind(movId, auth.negocioId, accountId, welcomeBonus, welcomeBonus, auth.user.id, auth.user.role)
+          );
+        }
+
+        await env.DB.batch(batch);
+        const created = await env.DB.prepare('SELECT * FROM loyalty_accounts WHERE id = ? AND negocio_id = ?')
+          .bind(accountId, auth.negocioId)
+          .first();
+
+        return jsonResponse(created, 201);
+      }
+
+      // GET /api/loyalty/accounts/:id/movements
+      if (method === 'GET' && subPath.startsWith('accounts/') && subPath.endsWith('/movements')) {
+        const accountId = subPath.replace(/^accounts\//, '').replace(/\/movements$/, '').trim();
+        const account = await env.DB.prepare(
+          'SELECT id FROM loyalty_accounts WHERE id = ? AND negocio_id = ?'
+        )
+          .bind(accountId, auth.negocioId)
+          .first();
+        if (!account) {
+          return errorResponse('Cuenta de puntos no encontrada en este local.', 404);
+        }
+        const result = await env.DB.prepare(
+          'SELECT * FROM loyalty_movements WHERE negocio_id = ? AND account_id = ? ORDER BY created_at DESC LIMIT 50'
+        )
+          .bind(auth.negocioId, accountId)
+          .all();
+        return jsonResponse(result.results || []);
+      }
+
+      // POST /api/loyalty/accounts/:id/adjust (Bono o ajuste manual — Solo Admin / Gerente)
+      if (method === 'POST' && subPath.startsWith('accounts/') && subPath.endsWith('/adjust')) {
+        if (auth.user.role === 'cashier') {
+          return errorResponse('Solo administradores y gerentes pueden ajustar puntos manualmente.', 403);
+        }
+        const accountId = subPath.replace(/^accounts\//, '').replace(/\/adjust$/, '').trim();
+        const body = (await request.json().catch(() => ({}))) as {
+          points_delta?: number;
+          description?: string;
+        };
+        const pointsDelta = Math.round(Number(body.points_delta || 0));
+        const description = String(body.description || '').trim();
+
+        if (!Number.isInteger(pointsDelta) || pointsDelta === 0) {
+          return errorResponse('El ajuste de puntos debe ser un número entero distinto de 0.', 400);
+        }
+        if (!description) {
+          return errorResponse('Indica el motivo del ajuste o bono.', 400);
+        }
+
+        const account = await env.DB.prepare(
+          'SELECT * FROM loyalty_accounts WHERE id = ? AND negocio_id = ?'
+        )
+          .bind(accountId, auth.negocioId)
+          .first<any>();
+        if (!account) {
+          return errorResponse('Cuenta de puntos no encontrada en este local.', 404);
+        }
+
+        const nextBalance = (Number(account.points_balance) || 0) + pointsDelta;
+        if (nextBalance < 0) {
+          return errorResponse('El saldo resultante de puntos no puede ser negativo.', 400);
+        }
+
+        const movType = pointsDelta > 0 ? 'bonus' : 'adjust';
+        const movId = `lmov-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+
+        await env.DB.batch([
+          env.DB.prepare(
+            `UPDATE loyalty_accounts
+             SET points_balance = ?,
+                 lifetime_points_earned = lifetime_points_earned + ?,
+                 last_activity_at = datetime('now'),
+                 updated_at = datetime('now')
+             WHERE id = ? AND negocio_id = ?`
+          ).bind(nextBalance, pointsDelta > 0 ? pointsDelta : 0, accountId, auth.negocioId),
+          env.DB.prepare(
+            `INSERT INTO loyalty_movements (
+              id, negocio_id, account_id, type, points_delta, balance_after, amount_cents, description, created_by_uid, created_by_role, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, datetime('now'))`
+          ).bind(movId, auth.negocioId, accountId, movType, pointsDelta, nextBalance, description, auth.user.id, auth.user.role),
+        ]);
+
+        const updatedAccount = await env.DB.prepare(
+          'SELECT * FROM loyalty_accounts WHERE id = ? AND negocio_id = ?'
+        )
+          .bind(accountId, auth.negocioId)
+          .first();
+
+        return jsonResponse(updatedAccount);
+      }
+    }
+
+    // 10.5 Cupones de Descuento (/coupons/*) — Privado Multi-Tenant
+    if (path === '/coupons' || path.startsWith('/coupons/')) {
+      const auth = await authenticateRequest(request, env);
+      const subPath = path.replace(/^\/coupons\/?/, '');
+
+      // GET /api/coupons
+      if (method === 'GET' && !subPath) {
+        const result = await env.DB.prepare(
+          'SELECT * FROM discount_coupons WHERE negocio_id = ? ORDER BY active DESC, created_at DESC'
+        )
+          .bind(auth.negocioId)
+          .all();
+        return jsonResponse(result.results || []);
+      }
+
+      // POST /api/coupons/validate (Todos los roles para POS)
+      if (method === 'POST' && subPath === 'validate') {
+        const body = (await request.json().catch(() => ({}))) as {
+          code?: string;
+          subtotal_cents?: number;
+        };
+        const code = normalizeCouponCode(body.code || '');
+        const subtotalCents = Math.max(0, Math.round(Number(body.subtotal_cents) || 0));
+        if (!code) {
+          return errorResponse('Ingresa un código de cupón.', 400);
+        }
+
+        const coupon = await env.DB.prepare(
+          'SELECT * FROM discount_coupons WHERE negocio_id = ? AND code = ?'
+        )
+          .bind(auth.negocioId, code)
+          .first<CouponRecord>();
+
+        const validation = validateCouponForSubtotal(coupon, subtotalCents);
+        if (!validation.valid) {
+          return jsonResponse({ valid: false, error: validation.error }, 400);
+        }
+
+        return jsonResponse({
+          valid: true,
+          coupon,
+          discount_cents: validation.discount_cents,
+          final_subtotal_cents: validation.final_subtotal_cents,
+        });
+      }
+
+      // Operaciones de escritura de cupones: Solo Admin / Gerente
+      if (auth.user.role === 'cashier') {
+        return errorResponse('Solo administradores y gerentes pueden crear o modificar cupones.', 403);
+      }
+
+      // POST /api/coupons
+      if (method === 'POST' && !subPath) {
+        const body = (await request.json().catch(() => ({}))) as {
+          code?: string;
+          description?: string;
+          discount_type?: CouponDiscountType;
+          discount_value?: number;
+          min_purchase_cents?: number;
+          max_discount_cents?: number | null;
+          max_uses?: number | null;
+          expires_at?: string | null;
+        };
+
+        const code = normalizeCouponCode(body.code || '');
+        if (!isValidCouponCode(code)) {
+          return errorResponse('El código debe tener 3 a 24 caracteres alfanuméricos (A-Z, 0-9, _ o -).', 400);
+        }
+
+        const discountType: CouponDiscountType =
+          body.discount_type === 'fixed_cents' ? 'fixed_cents' : 'percentage';
+        const discountValue = Math.round(Number(body.discount_value || 0));
+        if (discountType === 'percentage' && (discountValue < 1 || discountValue > 100)) {
+          return errorResponse('El porcentaje de descuento debe estar entre 1% y 100%.', 400);
+        }
+        if (discountType === 'fixed_cents' && discountValue < 100) {
+          return errorResponse('El descuento fijo debe ser al menos de $ 1 COP (100 centavos).', 400);
+        }
+
+        const minPurchaseCents = Math.max(0, Math.round(Number(body.min_purchase_cents || 0)));
+        const maxDiscountCents =
+          body.max_discount_cents !== null && body.max_discount_cents !== undefined && Number(body.max_discount_cents) > 0
+            ? Math.round(Number(body.max_discount_cents))
+            : null;
+        const maxUses =
+          body.max_uses !== null && body.max_uses !== undefined && Number(body.max_uses) > 0
+            ? Math.round(Number(body.max_uses))
+            : null;
+
+        const normalizedExp = normalizeExpirationDate(body.expires_at);
+        if (normalizedExp === 'INVALID') {
+          return errorResponse('La fecha de vencimiento del cupón no es válida (usa YYYY-MM-DD).', 400);
+        }
+
+        const duplicate = await env.DB.prepare(
+          'SELECT id FROM discount_coupons WHERE negocio_id = ? AND code = ?'
+        )
+          .bind(auth.negocioId, code)
+          .first();
+        if (duplicate) {
+          return errorResponse(`Ya existe un cupón con el código ${code} en este local.`, 409);
+        }
+
+        const couponId = `coup-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+        await env.DB.prepare(
+          `INSERT INTO discount_coupons (
+            id, negocio_id, code, description, discount_type, discount_value,
+            min_purchase_cents, max_discount_cents, max_uses, used_count, expires_at, active, created_by_uid, created_at, updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, 1, ?, datetime('now'), datetime('now'))`
+        )
+          .bind(
+            couponId,
+            auth.negocioId,
+            code,
+            body.description?.trim() || null,
+            discountType,
+            discountValue,
+            minPurchaseCents,
+            maxDiscountCents,
+            maxUses,
+            normalizedExp,
+            auth.user.id
+          )
+          .run();
+
+        const created = await env.DB.prepare(
+          'SELECT * FROM discount_coupons WHERE id = ? AND negocio_id = ?'
+        )
+          .bind(couponId, auth.negocioId)
+          .first();
+        return jsonResponse(created, 201);
+      }
+
+      // PUT /api/coupons/:id
+      if (method === 'PUT' && subPath) {
+        const couponId = subPath.trim();
+        const existing = await env.DB.prepare(
+          'SELECT * FROM discount_coupons WHERE id = ? AND negocio_id = ?'
+        )
+          .bind(couponId, auth.negocioId)
+          .first<any>();
+        if (!existing) {
+          return errorResponse('Cupón no encontrado en este local.', 404);
+        }
+
+        const body = (await request.json().catch(() => ({}))) as {
+          active?: boolean | number;
+          description?: string | null;
+          min_purchase_cents?: number;
+          max_discount_cents?: number | null;
+          max_uses?: number | null;
+          expires_at?: string | null;
+        };
+
+        let nextExpires = existing.expires_at;
+        if (body.expires_at !== undefined) {
+          const norm = normalizeExpirationDate(body.expires_at);
+          if (norm === 'INVALID') {
+            return errorResponse('La fecha de vencimiento del cupón no es válida.', 400);
+          }
+          nextExpires = norm;
+        }
+
+        await env.DB.prepare(
+          `UPDATE discount_coupons
+           SET active = ?,
+               description = ?,
+               min_purchase_cents = ?,
+               max_discount_cents = ?,
+               max_uses = ?,
+               expires_at = ?,
+               updated_at = datetime('now')
+           WHERE id = ? AND negocio_id = ?`
+        )
+          .bind(
+            body.active !== undefined ? (body.active ? 1 : 0) : existing.active,
+            body.description !== undefined ? (body.description?.trim() || null) : existing.description,
+            body.min_purchase_cents !== undefined
+              ? Math.max(0, Math.round(Number(body.min_purchase_cents) || 0))
+              : existing.min_purchase_cents,
+            body.max_discount_cents !== undefined
+              ? (body.max_discount_cents && Number(body.max_discount_cents) > 0
+                  ? Math.round(Number(body.max_discount_cents))
+                  : null)
+              : existing.max_discount_cents,
+            body.max_uses !== undefined
+              ? (body.max_uses && Number(body.max_uses) > 0 ? Math.round(Number(body.max_uses)) : null)
+              : existing.max_uses,
+            nextExpires,
+            couponId,
+            auth.negocioId
+          )
+          .run();
+
+        const updated = await env.DB.prepare(
+          'SELECT * FROM discount_coupons WHERE id = ? AND negocio_id = ?'
+        )
+          .bind(couponId, auth.negocioId)
+          .first();
+        return jsonResponse(updated);
+      }
+
+      // DELETE /api/coupons/:id
+      if (method === 'DELETE' && subPath) {
+        const couponId = subPath.trim();
+        const existing = await env.DB.prepare(
+          'SELECT id FROM discount_coupons WHERE id = ? AND negocio_id = ?'
+        )
+          .bind(couponId, auth.negocioId)
+          .first();
+        if (!existing) {
+          return errorResponse('Cupón no encontrado en este local.', 404);
+        }
+        await env.DB.prepare('DELETE FROM discount_coupons WHERE id = ? AND negocio_id = ?')
+          .bind(couponId, auth.negocioId)
+          .run();
+        return jsonResponse({ success: true, id: couponId });
       }
     }
 

@@ -3,6 +3,16 @@ import {
   parseWholesaleTiers,
   resolveProductUnitPricing,
 } from '../../web/functions/_lib/wholesalePricing';
+import {
+  DEFAULT_LOYALTY_CONFIG,
+  isValidLoyaltyPhone,
+  maskPublicCustomerName,
+  normalizeCouponCode,
+  normalizeLoyaltyConfig,
+  normalizeLoyaltyPhone,
+  settleOrderLoyaltyAndCoupon,
+  validateCouponForSubtotal,
+} from '../../web/functions/_lib/loyaltyEngine';
 
 export function createFakeFirebaseJwt(uid: string, email: string): string {
   const toBase64Url = (obj: Record<string, unknown>) =>
@@ -198,6 +208,87 @@ export async function setupProductionE2EHarness(page: Page) {
   const cashClosings: Array<Record<string, any>> = [];
   let cashExpenses: Array<Record<string, any>> = [];
   let shrinkageEntries: Array<Record<string, any>> = [];
+
+  let loyaltyConfig = { ...DEFAULT_LOYALTY_CONFIG };
+  const loyaltyAccounts: Array<Record<string, any>> = [
+    {
+      id: 'loy-don-carlos',
+      negocio_id: 'surtifacil',
+      phone: '3004567890',
+      customer_name: 'Don Carlos Restrepo',
+      points_balance: 85,
+      lifetime_points_earned: 120,
+      lifetime_points_redeemed: 35,
+      total_purchases_count: 9,
+      total_spent_cents: 12000000,
+      active: 1,
+      last_activity_at: new Date().toISOString(),
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    },
+    {
+      id: 'loy-dona-marta',
+      negocio_id: 'surtifacil',
+      phone: '3112345678',
+      customer_name: 'Doña Marta Gómez',
+      points_balance: 40,
+      lifetime_points_earned: 40,
+      lifetime_points_redeemed: 0,
+      total_purchases_count: 4,
+      total_spent_cents: 4000000,
+      active: 1,
+      last_activity_at: new Date().toISOString(),
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    },
+  ];
+  const loyaltyMovements: Array<Record<string, any>> = [
+    {
+      id: 'lmov-seed-carlos',
+      negocio_id: 'surtifacil',
+      account_id: 'loy-don-carlos',
+      type: 'bonus',
+      points_delta: 85,
+      balance_after: 85,
+      amount_cents: 0,
+      description: 'Saldo inicial Club de Puntos del Barrio',
+      created_at: new Date().toISOString(),
+    },
+  ];
+  let discountCoupons: Array<Record<string, any>> = [
+    {
+      id: 'coup-vecino10',
+      negocio_id: 'surtifacil',
+      code: 'VECINO10',
+      description: '10% de descuento para vecinos del barrio',
+      discount_type: 'percentage',
+      discount_value: 10,
+      min_purchase_cents: 1000000,
+      max_discount_cents: 1000000,
+      max_uses: 100,
+      used_count: 3,
+      expires_at: null,
+      active: 1,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    },
+    {
+      id: 'coup-mercado2000',
+      negocio_id: 'surtifacil',
+      code: 'MERCADO2000',
+      description: '$ 2.000 COP de regalo en tu mercado',
+      discount_type: 'fixed_cents',
+      discount_value: 200000,
+      min_purchase_cents: 1200000,
+      max_discount_cents: null,
+      max_uses: 50,
+      used_count: 1,
+      expires_at: null,
+      active: 1,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    },
+  ];
 
   let storeSettings = {
     id: 'surtifacil',
@@ -468,9 +559,51 @@ export async function setupProductionE2EHarness(page: Page) {
     // Catálogo público de tienda / kiosco
     if (pathname.startsWith('/public/store/') && method === 'GET') {
       return jsonResponse({
-        store: storeSettings,
+        store: { ...storeSettings, loyalty_config: loyaltyConfig },
         products,
         combos,
+      });
+    }
+
+    // Endpoints públicos de Club de Puntos y Cupones
+    if (pathname === '/public/loyalty/lookup' && method === 'GET') {
+      const normalized = normalizeLoyaltyPhone(urlObj.searchParams.get('phone') || '');
+      if (!isValidLoyaltyPhone(normalized)) {
+        return jsonResponse({ error: 'Ingresa un número celular válido (7 a 15 dígitos).' }, 400);
+      }
+      const acc = loyaltyAccounts.find((a) => a.phone === normalized && a.active === 1);
+      if (!acc) {
+        return jsonResponse({
+          enrolled: false,
+          phone: normalized,
+          display_name: null,
+          points_balance: 0,
+          redeemable_value_cents: 0,
+          config: loyaltyConfig,
+        });
+      }
+      return jsonResponse({
+        enrolled: true,
+        phone: normalized,
+        display_name: maskPublicCustomerName(acc.customer_name),
+        points_balance: acc.points_balance,
+        redeemable_value_cents: acc.points_balance * loyaltyConfig.point_value_cents,
+        config: loyaltyConfig,
+      });
+    }
+
+    if (pathname === '/public/coupons/validate' && method === 'POST') {
+      const code = normalizeCouponCode(body.code || '');
+      const coupon = discountCoupons.find((c) => c.code === code) || null;
+      const outcome = validateCouponForSubtotal(coupon as any, Number(body.subtotal_cents) || 0);
+      if (!outcome.valid) {
+        return jsonResponse({ valid: false, error: outcome.error }, 400);
+      }
+      return jsonResponse({
+        valid: true,
+        coupon,
+        discount_cents: outcome.discount_cents,
+        final_subtotal_cents: outcome.final_subtotal_cents,
       });
     }
 
@@ -555,6 +688,35 @@ export async function setupProductionE2EHarness(page: Page) {
       });
       const subtotal = items.reduce((s: number, i: any) => s + i.subtotal_cents, 0);
       const deliveryFee = body.delivery_type === 'delivery' ? storeSettings.costo_domicilio_cents : 0;
+      const normalizedPhone = body.customer_phone ? normalizeLoyaltyPhone(body.customer_phone) : '';
+      const hasValidPhone = Boolean(normalizedPhone && isValidLoyaltyPhone(normalizedPhone));
+      const requestedCouponCode = normalizeCouponCode(body.coupon_code || '');
+      const dbCoupon = requestedCouponCode
+        ? discountCoupons.find((c) => c.code === requestedCouponCode) || null
+        : null;
+      const dbAcc = hasValidPhone
+        ? loyaltyAccounts.find((a) => a.phone === normalizedPhone && a.active === 1) || null
+        : null;
+      const settlement = settleOrderLoyaltyAndCoupon({
+        itemsSubtotalCents: subtotal,
+        deliveryFeeCents: deliveryFee,
+        config: loyaltyConfig,
+        coupon: dbCoupon as any,
+        couponCodeRequested: requestedCouponCode || null,
+        hasValidPhone,
+        accountPointsBalance: dbAcc?.points_balance ?? 0,
+        pointsToRedeemRequested: body.loyalty_points_redeemed ?? 0,
+      });
+      if (!settlement.ok) {
+        return jsonResponse({ error: settlement.error }, 400);
+      }
+      if (dbCoupon && settlement.coupon_code) {
+        dbCoupon.used_count += 1;
+      }
+      if (dbAcc && settlement.points_redeemed > 0) {
+        dbAcc.points_balance = Math.max(0, dbAcc.points_balance - settlement.points_redeemed);
+        dbAcc.lifetime_points_redeemed += settlement.points_redeemed;
+      }
 
       const createdOrder = {
         id: `ord-${Date.now()}-${orderNum}`,
@@ -563,14 +725,21 @@ export async function setupProductionE2EHarness(page: Page) {
         tracking_token: trackingToken,
         source: body.source || 'kiosk',
         customer_name: body.customer_name || 'Cliente Vecino',
-        customer_phone: body.customer_phone || '',
+        customer_phone: hasValidPhone ? normalizedPhone : body.customer_phone || '',
         delivery_type: body.delivery_type || 'pickup_counter',
         delivery_address: body.delivery_address || '',
         payment_method: body.payment_method || 'cash',
         items,
         subtotal_cents: subtotal,
+        coupon_code: settlement.coupon_code,
+        coupon_discount_cents: settlement.coupon_discount_cents,
+        loyalty_account_id: dbAcc?.id ?? null,
+        loyalty_points_redeemed: settlement.points_redeemed,
+        loyalty_discount_cents: settlement.points_discount_cents,
+        loyalty_points_earned: settlement.points_earned,
+        loyalty_settled: 0,
         delivery_fee_cents: deliveryFee,
-        total_cents: subtotal + deliveryFee,
+        total_cents: settlement.final_total_cents,
         status: 'pending',
         created_at: new Date().toISOString(),
         store_name: storeSettings.nombre,
@@ -593,6 +762,27 @@ export async function setupProductionE2EHarness(page: Page) {
       );
     }
 
+    if (pathname.startsWith('/customer-orders/') && pathname.endsWith('/status') && method === 'PUT') {
+      const parts = pathname.split('/');
+      const orderId = decodeURIComponent(parts[2]);
+      const found = customerOrders.find((o) => o.id === orderId);
+      if (found) {
+        if (body.status === 'cancelled' && found.status !== 'cancelled' && !found.loyalty_settled) {
+          if (found.loyalty_points_redeemed > 0 && found.loyalty_account_id) {
+            const acc = loyaltyAccounts.find((a) => a.id === found.loyalty_account_id);
+            if (acc) acc.points_balance += Number(found.loyalty_points_redeemed || 0);
+          }
+          if (found.coupon_code) {
+            const c = discountCoupons.find((cp) => cp.code === found.coupon_code);
+            if (c) c.used_count = Math.max(0, c.used_count - 1);
+          }
+          found.loyalty_settled = 1;
+        }
+        found.status = body.status;
+      }
+      return jsonResponse(found || { error: 'No encontrado' }, found ? 200 : 404);
+    }
+
     if (pathname.endsWith('/convert-to-sale') && method === 'POST') {
       const parts = pathname.split('/');
       const orderId = decodeURIComponent(parts[2]);
@@ -601,6 +791,16 @@ export async function setupProductionE2EHarness(page: Page) {
       if (found) {
         found.status = 'completed';
         found.sale_id = saleId;
+        if (!found.loyalty_settled && found.customer_phone) {
+          const acc = loyaltyAccounts.find((a) => a.phone === normalizeLoyaltyPhone(found.customer_phone));
+          const earned = Number(found.loyalty_points_earned || 0);
+          if (acc) {
+            acc.points_balance += earned;
+            acc.lifetime_points_earned += earned;
+            acc.total_purchases_count += 1;
+          }
+          found.loyalty_settled = 1;
+        }
         sales.unshift({
           id: saleId,
           total_cents: found.total_cents,
@@ -641,17 +841,233 @@ export async function setupProductionE2EHarness(page: Page) {
           wholesale_savings_cents: pricing.wholesale_savings_cents,
         };
       });
-      const totalCents = mappedItems.reduce((s: number, i: any) => s + i.subtotal_cents, 0);
+      const subtotalCents = mappedItems.reduce((s: number, i: any) => s + i.subtotal_cents, 0);
+      const normalizedPhone = body.loyalty_phone ? normalizeLoyaltyPhone(body.loyalty_phone) : '';
+      const hasValidPhone = Boolean(normalizedPhone && isValidLoyaltyPhone(normalizedPhone));
+      const requestedCouponCode = normalizeCouponCode(body.coupon_code || '');
+      const dbCoupon = requestedCouponCode
+        ? discountCoupons.find((c) => c.code === requestedCouponCode) || null
+        : null;
+      let dbAcc = hasValidPhone
+        ? loyaltyAccounts.find((a) => a.phone === normalizedPhone && a.active === 1) || null
+        : null;
+      const settlement = settleOrderLoyaltyAndCoupon({
+        itemsSubtotalCents: subtotalCents,
+        deliveryFeeCents: 0,
+        config: loyaltyConfig,
+        coupon: dbCoupon as any,
+        couponCodeRequested: requestedCouponCode || null,
+        hasValidPhone,
+        accountPointsBalance: dbAcc?.points_balance ?? 0,
+        pointsToRedeemRequested: body.loyalty_points_redeemed ?? 0,
+      });
+      if (!settlement.ok) {
+        return jsonResponse({ error: settlement.error }, 400);
+      }
+      if (dbCoupon && settlement.coupon_code) {
+        dbCoupon.used_count += 1;
+      }
+      if (hasValidPhone) {
+        if (!dbAcc) {
+          dbAcc = {
+            id: `loy-${Date.now()}`,
+            negocio_id: 'surtifacil',
+            phone: normalizedPhone,
+            customer_name: body.loyalty_customer_name || `Vecino ${normalizedPhone.slice(-4)}`,
+            points_balance: settlement.points_earned,
+            lifetime_points_earned: settlement.points_earned,
+            lifetime_points_redeemed: 0,
+            total_purchases_count: 1,
+            total_spent_cents: settlement.final_total_cents,
+            active: 1,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          };
+          loyaltyAccounts.unshift(dbAcc);
+        } else {
+          dbAcc.points_balance = Math.max(
+            0,
+            dbAcc.points_balance - settlement.points_redeemed + settlement.points_earned
+          );
+          dbAcc.lifetime_points_earned += settlement.points_earned;
+          dbAcc.lifetime_points_redeemed += settlement.points_redeemed;
+          dbAcc.total_purchases_count += 1;
+          dbAcc.total_spent_cents += settlement.final_total_cents;
+        }
+      }
+
       const createdSale = {
         id: saleId,
-        total_cents: totalCents,
+        total_cents: settlement.final_total_cents,
+        subtotal_cents: subtotalCents,
+        coupon_code: settlement.coupon_code,
+        coupon_discount_cents: settlement.coupon_discount_cents,
+        loyalty_phone: hasValidPhone ? normalizedPhone : null,
+        loyalty_points_redeemed: settlement.points_redeemed,
+        loyalty_discount_cents: settlement.points_discount_cents,
+        loyalty_points_earned: settlement.points_earned,
         payment_method: body.payment_method || 'cash',
         credit_customer_id: body.credit_customer_id,
         items: mappedItems,
         created_at: new Date().toISOString(),
       };
       sales.unshift(createdSale);
-      return jsonResponse({ id: saleId, saleId, total_cents: totalCents, items: mappedItems }, 201);
+      return jsonResponse({
+        id: saleId,
+        saleId,
+        total_cents: settlement.final_total_cents,
+        subtotal_cents: subtotalCents,
+        coupon_code: settlement.coupon_code,
+        coupon_discount_cents: settlement.coupon_discount_cents,
+        loyalty_points_redeemed: settlement.points_redeemed,
+        loyalty_discount_cents: settlement.points_discount_cents,
+        loyalty_points_earned: settlement.points_earned,
+        items: mappedItems,
+      }, 201);
+    }
+
+    // Club de Puntos y Cupones (Admin / Staff)
+    if (pathname === '/loyalty/config' && method === 'GET') {
+      return jsonResponse(loyaltyConfig);
+    }
+    if (pathname === '/loyalty/config' && method === 'PUT') {
+      if (actor.role === 'cashier') {
+        return jsonResponse({ error: 'Solo administradores y gerentes pueden modificar reglas.' }, 403);
+      }
+      loyaltyConfig = normalizeLoyaltyConfig({ ...loyaltyConfig, ...body });
+      return jsonResponse(loyaltyConfig);
+    }
+    if (pathname === '/loyalty/summary' && method === 'GET') {
+      const activePts = loyaltyAccounts.reduce((s, a) => s + a.points_balance, 0);
+      return jsonResponse({
+        total_members: loyaltyAccounts.length,
+        active_points_balance: activePts,
+        active_points_value_cents: activePts * loyaltyConfig.point_value_cents,
+        lifetime_points_earned: loyaltyAccounts.reduce((s, a) => s + a.lifetime_points_earned, 0),
+        lifetime_points_redeemed: loyaltyAccounts.reduce((s, a) => s + a.lifetime_points_redeemed, 0),
+        active_coupons_count: discountCoupons.filter((c) => c.active === 1).length,
+        total_coupon_redemptions: discountCoupons.reduce((s, c) => s + c.used_count, 0),
+        config: loyaltyConfig,
+      });
+    }
+    if (pathname === '/loyalty/accounts/lookup' && method === 'GET') {
+      const normalized = normalizeLoyaltyPhone(urlObj.searchParams.get('phone') || '');
+      if (!isValidLoyaltyPhone(normalized)) {
+        return jsonResponse({ error: 'Número celular inválido.' }, 400);
+      }
+      const acc = loyaltyAccounts.find((a) => a.phone === normalized && a.active === 1) || null;
+      return jsonResponse({
+        enrolled: Boolean(acc),
+        phone: normalized,
+        account: acc,
+        redeemable_value_cents: (acc?.points_balance || 0) * loyaltyConfig.point_value_cents,
+        config: loyaltyConfig,
+      });
+    }
+    if (pathname === '/loyalty/accounts' && method === 'GET') {
+      return jsonResponse(loyaltyAccounts);
+    }
+    if (pathname === '/loyalty/accounts' && method === 'POST') {
+      const normalized = normalizeLoyaltyPhone(body.phone || '');
+      const bonus = Math.max(0, Math.round(Number(body.welcome_bonus_points || 0)));
+      const created = {
+        id: `loy-${Date.now()}`,
+        negocio_id: 'surtifacil',
+        phone: normalized,
+        customer_name: body.customer_name,
+        points_balance: bonus,
+        lifetime_points_earned: bonus,
+        lifetime_points_redeemed: 0,
+        total_purchases_count: 0,
+        total_spent_cents: 0,
+        active: 1,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
+      loyaltyAccounts.unshift(created);
+      return jsonResponse(created, 201);
+    }
+    if (pathname.startsWith('/loyalty/accounts/') && pathname.endsWith('/movements') && method === 'GET') {
+      const accId = decodeURIComponent(pathname.split('/')[3]);
+      return jsonResponse(loyaltyMovements.filter((m) => m.account_id === accId));
+    }
+    if (pathname.startsWith('/loyalty/accounts/') && pathname.endsWith('/adjust') && method === 'POST') {
+      if (actor.role === 'cashier') {
+        return jsonResponse({ error: 'Solo administradores y gerentes pueden ajustar puntos.' }, 403);
+      }
+      const accId = decodeURIComponent(pathname.split('/')[3]);
+      const acc = loyaltyAccounts.find((a) => a.id === accId);
+      if (acc) {
+        const delta = Math.round(Number(body.points_delta || 0));
+        acc.points_balance = Math.max(0, acc.points_balance + delta);
+        if (delta > 0) acc.lifetime_points_earned += delta;
+        loyaltyMovements.unshift({
+          id: `lmov-${Date.now()}`,
+          negocio_id: 'surtifacil',
+          account_id: accId,
+          type: delta > 0 ? 'bonus' : 'adjust',
+          points_delta: delta,
+          balance_after: acc.points_balance,
+          amount_cents: 0,
+          description: body.description,
+          created_at: new Date().toISOString(),
+        });
+      }
+      return jsonResponse(acc || { ok: true });
+    }
+    if (pathname === '/coupons' && method === 'GET') {
+      return jsonResponse(discountCoupons);
+    }
+    if (pathname === '/coupons/validate' && method === 'POST') {
+      const code = normalizeCouponCode(body.code || '');
+      const coupon = discountCoupons.find((c) => c.code === code) || null;
+      const outcome = validateCouponForSubtotal(coupon as any, Number(body.subtotal_cents) || 0);
+      if (!outcome.valid) {
+        return jsonResponse({ valid: false, error: outcome.error }, 400);
+      }
+      return jsonResponse({
+        valid: true,
+        coupon,
+        discount_cents: outcome.discount_cents,
+        final_subtotal_cents: outcome.final_subtotal_cents,
+      });
+    }
+    if (pathname === '/coupons' && method === 'POST') {
+      if (actor.role === 'cashier') {
+        return jsonResponse({ error: 'Solo administradores y gerentes pueden crear cupones.' }, 403);
+      }
+      const created = {
+        id: `coup-${Date.now()}`,
+        negocio_id: 'surtifacil',
+        code: normalizeCouponCode(body.code || ''),
+        description: body.description || null,
+        discount_type: body.discount_type || 'percentage',
+        discount_value: Math.round(Number(body.discount_value || 0)),
+        min_purchase_cents: Math.round(Number(body.min_purchase_cents || 0)),
+        max_discount_cents: body.max_discount_cents ?? null,
+        max_uses: body.max_uses ?? null,
+        used_count: 0,
+        expires_at: body.expires_at ?? null,
+        active: 1,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
+      discountCoupons.unshift(created);
+      return jsonResponse(created, 201);
+    }
+    if (pathname.startsWith('/coupons/') && method === 'PUT') {
+      const id = decodeURIComponent(pathname.replace('/coupons/', ''));
+      const c = discountCoupons.find((cp) => cp.id === id);
+      if (c) {
+        if (body.active !== undefined) c.active = body.active ? 1 : 0;
+        if (body.description !== undefined) c.description = body.description;
+      }
+      return jsonResponse(c || { ok: true });
+    }
+    if (pathname.startsWith('/coupons/') && method === 'DELETE') {
+      const id = decodeURIComponent(pathname.replace('/coupons/', ''));
+      discountCoupons = discountCoupons.filter((cp) => cp.id !== id);
+      return jsonResponse({ success: true, id });
     }
 
     // Libro de Fiados

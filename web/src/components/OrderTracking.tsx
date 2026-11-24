@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { Icon } from './ui/Icon';
 import { trackCustomerOrder } from '../services/customerOrderService';
 import type { CustomerOrder, CustomerOrderStatus } from '../types/customerOrder';
-import { formatCOP } from '../utils/currency';
+import { formatCentsCOP } from '../utils/currency';
 
 export interface OrderTrackingProps {
   token?: string;
@@ -369,11 +369,11 @@ export default function OrderTracking({ token = '', onExit }: OrderTrackingProps
                 <div className="min-w-0 flex-1">
                   <div className="font-semibold text-sf-text truncate">{item.product_name}</div>
                   <div className="text-[11px] text-gray-500 tabular-nums">
-                    {formatCOP(item.unit_price_cents)} × {item.quantity} {item.unit || 'unid'}
+                    {formatCentsCOP(item.unit_price_cents)} × {item.quantity} {item.unit || 'unid'}
                   </div>
                 </div>
                 <div className="font-bold text-sf-text tabular-nums">
-                  {formatCOP(item.subtotal_cents || item.unit_price_cents * item.quantity)}
+                  {formatCentsCOP(item.subtotal_cents || item.unit_price_cents * item.quantity)}
                 </div>
               </div>
             ))}
@@ -381,12 +381,30 @@ export default function OrderTracking({ token = '', onExit }: OrderTrackingProps
 
           {/* Total */}
           <div className="rounded-xl bg-slate-50 border border-slate-200/90 p-3.5 space-y-1.5 text-xs">
+            {order.coupon_code && (order.coupon_discount_cents || 0) > 0 && (
+              <div className="flex justify-between font-semibold text-blue-700 tabular-nums">
+                <span>🎟️ Cupón {order.coupon_code}:</span>
+                <span>-{formatCentsCOP(order.coupon_discount_cents || 0)}</span>
+              </div>
+            )}
+            {(order.loyalty_points_redeemed || 0) > 0 && (order.loyalty_discount_cents || 0) > 0 && (
+              <div className="flex justify-between font-semibold text-amber-800 tabular-nums">
+                <span>⭐ Canje {order.loyalty_points_redeemed} pts:</span>
+                <span>-{formatCentsCOP(order.loyalty_discount_cents || 0)}</span>
+              </div>
+            )}
             <div className="flex justify-between text-sm font-bold text-sf-text">
               <span>Total General:</span>
               <span className="text-base text-sf-primary tabular-nums">
-                {formatCOP(order.total_cents)}
+                {formatCentsCOP(order.total_cents)}
               </span>
             </div>
+            {(order.loyalty_points_earned || 0) > 0 && (
+              <div className="pt-1 border-t border-slate-200 font-bold text-emerald-700">
+                ⭐ {order.loyalty_settled === 1 ? 'Puntos acreditados:' : 'Puntos por ganar al entregar:'} +
+                {order.loyalty_points_earned} pts del Club
+              </div>
+            )}
           </div>
         </div>
 

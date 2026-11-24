@@ -156,6 +156,14 @@ CREATE TABLE IF NOT EXISTS sales (
   id TEXT PRIMARY KEY,
   negocio_id TEXT NOT NULL DEFAULT 'surtifacil' REFERENCES negocios(id) ON DELETE CASCADE,
   total_cents INTEGER NOT NULL,
+  subtotal_cents INTEGER DEFAULT 0,
+  coupon_code TEXT,
+  coupon_discount_cents INTEGER NOT NULL DEFAULT 0,
+  loyalty_account_id TEXT,
+  loyalty_phone TEXT,
+  loyalty_points_redeemed INTEGER NOT NULL DEFAULT 0,
+  loyalty_discount_cents INTEGER NOT NULL DEFAULT 0,
+  loyalty_points_earned INTEGER NOT NULL DEFAULT 0,
   payment_method TEXT NOT NULL CHECK(payment_method IN ('cash', 'card', 'other', 'credit')),
   credit_customer_id TEXT REFERENCES credit_customers(id) ON DELETE SET NULL,
   credit_customer_name TEXT,
@@ -235,6 +243,14 @@ CREATE TABLE IF NOT EXISTS customer_orders (
   delivery_neighborhood TEXT,
   payment_method TEXT NOT NULL CHECK(payment_method IN ('cash', 'transfer', 'credit')) DEFAULT 'cash',
   items_json TEXT NOT NULL DEFAULT '[]',
+  subtotal_cents INTEGER DEFAULT 0,
+  coupon_code TEXT,
+  coupon_discount_cents INTEGER NOT NULL DEFAULT 0,
+  loyalty_account_id TEXT,
+  loyalty_points_redeemed INTEGER NOT NULL DEFAULT 0,
+  loyalty_discount_cents INTEGER NOT NULL DEFAULT 0,
+  loyalty_points_earned INTEGER NOT NULL DEFAULT 0,
+  loyalty_settled INTEGER NOT NULL DEFAULT 0,
   total_cents INTEGER NOT NULL DEFAULT 0,
   status TEXT NOT NULL CHECK(status IN ('pending', 'preparing', 'ready_or_on_way', 'completed', 'cancelled')) DEFAULT 'pending',
   tracking_token TEXT UNIQUE,
@@ -315,6 +331,68 @@ CREATE TABLE IF NOT EXISTS _system_secrets (
   secret_value TEXT NOT NULL,
   updated_at TEXT DEFAULT (datetime('now'))
 );
+
+-- 10.5 Fidelización Vecinal: Cuentas del Club de Puntos del Barrio por Celular
+CREATE TABLE IF NOT EXISTS loyalty_accounts (
+  id TEXT PRIMARY KEY,
+  negocio_id TEXT NOT NULL DEFAULT 'surtifacil' REFERENCES negocios(id) ON DELETE CASCADE,
+  phone TEXT NOT NULL,
+  customer_name TEXT NOT NULL,
+  points_balance INTEGER NOT NULL DEFAULT 0,
+  lifetime_points_earned INTEGER NOT NULL DEFAULT 0,
+  lifetime_points_redeemed INTEGER NOT NULL DEFAULT 0,
+  total_purchases_count INTEGER NOT NULL DEFAULT 0,
+  total_spent_cents INTEGER NOT NULL DEFAULT 0,
+  active INTEGER NOT NULL DEFAULT 1,
+  last_activity_at TEXT,
+  created_at TEXT DEFAULT (datetime('now')),
+  updated_at TEXT DEFAULT (datetime('now')),
+  UNIQUE(negocio_id, phone)
+);
+
+CREATE INDEX IF NOT EXISTS idx_loyalty_accounts_negocio_phone ON loyalty_accounts(negocio_id, phone);
+CREATE INDEX IF NOT EXISTS idx_loyalty_accounts_negocio_points ON loyalty_accounts(negocio_id, points_balance DESC);
+
+-- 10.6 Movimientos Auditables de Puntos (Acumulación, Canje, Bono, Ajuste)
+CREATE TABLE IF NOT EXISTS loyalty_movements (
+  id TEXT PRIMARY KEY,
+  negocio_id TEXT NOT NULL DEFAULT 'surtifacil' REFERENCES negocios(id) ON DELETE CASCADE,
+  account_id TEXT NOT NULL REFERENCES loyalty_accounts(id) ON DELETE CASCADE,
+  type TEXT NOT NULL CHECK(type IN ('earn', 'redeem', 'adjust', 'bonus')),
+  points_delta INTEGER NOT NULL,
+  balance_after INTEGER NOT NULL,
+  amount_cents INTEGER NOT NULL DEFAULT 0,
+  description TEXT,
+  sale_id TEXT,
+  order_id TEXT,
+  created_by_uid TEXT NOT NULL DEFAULT 'system',
+  created_by_role TEXT DEFAULT 'cashier',
+  created_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_loyalty_movements_account ON loyalty_movements(negocio_id, account_id, created_at DESC);
+
+-- 10.7 Cupones de Descuento Compartibles por WhatsApp y Storefront
+CREATE TABLE IF NOT EXISTS discount_coupons (
+  id TEXT PRIMARY KEY,
+  negocio_id TEXT NOT NULL DEFAULT 'surtifacil' REFERENCES negocios(id) ON DELETE CASCADE,
+  code TEXT NOT NULL,
+  description TEXT,
+  discount_type TEXT NOT NULL CHECK(discount_type IN ('percentage', 'fixed_cents')) DEFAULT 'percentage',
+  discount_value INTEGER NOT NULL,
+  min_purchase_cents INTEGER NOT NULL DEFAULT 0,
+  max_discount_cents INTEGER,
+  max_uses INTEGER,
+  used_count INTEGER NOT NULL DEFAULT 0,
+  expires_at TEXT,
+  active INTEGER NOT NULL DEFAULT 1,
+  created_by_uid TEXT DEFAULT 'system',
+  created_at TEXT DEFAULT (datetime('now')),
+  updated_at TEXT DEFAULT (datetime('now')),
+  UNIQUE(negocio_id, code)
+);
+
+CREATE INDEX IF NOT EXISTS idx_discount_coupons_negocio_code ON discount_coupons(negocio_id, code);
 
 -- ==============================================================================
 -- 11. Semillas Iniciales (Negocio Insignia y SuperAdmin de la Plataforma)

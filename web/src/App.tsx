@@ -21,6 +21,7 @@ const PAGE_COMPONENTS: Record<Page, ComponentType> = {
   margins: lazy(() => import('./components/MarginReports')),
   restock: lazy(() => import('./components/Restock')),
   whatsapp: lazy(() => import('./components/WhatsAppChat')),
+  loyalty: lazy(() => import('./components/LoyaltyClub')),
   settings: lazy(() => import('./components/StoreSettings')),
   'super-admin': lazy(() => import('./components/SuperAdminStores')),
 };

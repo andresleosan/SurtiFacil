@@ -2,6 +2,7 @@ import { CreditCustomer, CreditEntryType, PaymentMethod, Product, SaleItem, User
 import { apiClient, emitDataChange, getActiveNegocioId } from './apiClient';
 import { addLocalCreditEntry, addLocalSale, mockCreditCustomers, mockProducts } from './mockData';
 import { resolveProductUnitPricing } from '../utils/wholesalePricing';
+import type { CreateSaleLoyaltyOptions } from '../types/loyalty';
 
 const DB_NAME = 'surtifacil_offline_v1';
 const DB_VERSION = 1;
@@ -25,6 +26,10 @@ export interface OfflineSalePayload {
   credit_customer_id?: string;
   credit_customer_name?: string;
   total_cents: number;
+  loyalty_phone?: string;
+  loyalty_customer_name?: string;
+  loyalty_points_redeemed?: number;
+  coupon_code?: string;
 }
 
 export interface OfflineCreditEntryPayload {
@@ -411,6 +416,7 @@ export async function enqueueOfflineSale(
   paymentMethod: PaymentMethod,
   creditCustomerId?: string,
   explicitNegocioId?: string,
+  loyaltyOptions?: CreateSaleLoyaltyOptions,
 ): Promise<OfflineQueueItem> {
   if (!cartItems || cartItems.length === 0) {
     throw new Error('El carrito está vacío');
@@ -518,6 +524,14 @@ export async function enqueueOfflineSale(
       ...(creditCustomerId ? { credit_customer_id: creditCustomerId } : {}),
       ...(creditCustomerName ? { credit_customer_name: creditCustomerName } : {}),
       total_cents: totalCents,
+      ...(loyaltyOptions?.loyalty_phone ? { loyalty_phone: loyaltyOptions.loyalty_phone } : {}),
+      ...(loyaltyOptions?.loyalty_customer_name
+        ? { loyalty_customer_name: loyaltyOptions.loyalty_customer_name }
+        : {}),
+      ...(loyaltyOptions?.loyalty_points_redeemed
+        ? { loyalty_points_redeemed: loyaltyOptions.loyalty_points_redeemed }
+        : {}),
+      ...(loyaltyOptions?.coupon_code ? { coupon_code: loyaltyOptions.coupon_code } : {}),
     },
   };
 
@@ -641,6 +655,12 @@ async function replaySingleQueueItem(item: OfflineQueueItem): Promise<void> {
         })),
         payment_method: payload.payment_method,
         ...(payload.credit_customer_id ? { credit_customer_id: payload.credit_customer_id } : {}),
+        ...(payload.loyalty_phone ? { loyalty_phone: payload.loyalty_phone } : {}),
+        ...(payload.loyalty_customer_name ? { loyalty_customer_name: payload.loyalty_customer_name } : {}),
+        ...(payload.loyalty_points_redeemed
+          ? { loyalty_points_redeemed: payload.loyalty_points_redeemed }
+          : {}),
+        ...(payload.coupon_code ? { coupon_code: payload.coupon_code } : {}),
       },
       {
         headers: { 'X-Negocio-Id': item.negocio_id },

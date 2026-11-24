@@ -1,4 +1,4 @@
-import { apiClient, emitDataChange } from './apiClient';
+import { apiClient, ApiError, emitDataChange } from './apiClient';
 import type {
   CustomerOrder,
   CreateCustomerOrderInput,
@@ -7,6 +7,19 @@ import type {
 } from '../types/customerOrder';
 import { mockProducts } from './mockData';
 import { parseWholesaleTiers, resolveProductUnitPricing } from '../utils/wholesalePricing';
+import {
+  DEFAULT_LOYALTY_CONFIG,
+  isValidLoyaltyPhone,
+  normalizeCouponCode,
+  normalizeLoyaltyConfig,
+  normalizeLoyaltyPhone,
+  settleOrderLoyaltyAndCoupon,
+} from '../utils/loyaltyEngine';
+import {
+  getMockCouponsSnapshot,
+  getMockLoyaltyAccountsSnapshot,
+  getMockLoyaltyConfigSnapshot,
+} from './loyaltyService';
 
 function isMockMode(): boolean {
   return import.meta.env.VITE_USE_MOCK_DATA === 'true';
@@ -131,6 +144,9 @@ export async function getPublicStore(slug: string): Promise<PublicStoreData> {
           costo_domicilio_cents: response.store.costo_domicilio_cents || 0,
           datos_pago_offline: response.store.datos_pago_offline,
           config: response.store.config || {},
+          loyalty_config: normalizeLoyaltyConfig(
+            response.store.loyalty_config ?? response.store.config?.loyalty
+          ),
           products: (response.products || []).map((p: any) => ({
             ...p,
             wholesale_tiers: parseWholesaleTiers(p.wholesale_tiers ?? p.wholesale_tiers_json),
@@ -164,6 +180,7 @@ export async function getPublicStore(slug: string): Promise<PublicStoreData> {
       permite_domicilio: true,
       permite_retiro: true,
     },
+    loyalty_config: { ...DEFAULT_LOYALTY_CONFIG },
     products: mockProducts.map((p) => {
       const tiers = parseWholesaleTiers(p.wholesale_tiers ?? p.wholesale_tiers_json);
       return {
@@ -216,9 +233,13 @@ export async function createCustomerOrder(
       }>('/customer-orders', input);
       if (response && response.success && response.order) {
         emitDataChange('sales');
+        emitDataChange('loyalty');
         return response;
       }
     } catch (error) {
+      if (error instanceof ApiError && error.status >= 400 && error.status < 500) {
+        throw error;
+      }
       console.warn('Error enviando customer-order a D1, usando mock fallback:', error);
     }
   }
@@ -245,7 +266,31 @@ export async function createCustomerOrder(
       image_url: i.image_url,
     };
   });
-  const totalCents = resolvedItems.reduce((sum, item) => sum + item.subtotal_cents, 0);
+  const subtotalCents = resolvedItems.reduce((sum, item) => sum + item.subtotal_cents, 0);
+  const deliveryFeeCents = input.delivery_type === 'delivery' ? 350000 : 0;
+  const normalizedPhone = input.customer_phone ? normalizeLoyaltyPhone(input.customer_phone) : '';
+  const hasValidPhone = Boolean(normalizedPhone && isValidLoyaltyPhone(normalizedPhone));
+  const normalizedCoupon = input.coupon_code ? normalizeCouponCode(input.coupon_code) : '';
+  const mockCoupon = normalizedCoupon
+    ? getMockCouponsSnapshot().find((c) => c.code === normalizedCoupon) || null
+    : null;
+  const mockAcc = hasValidPhone
+    ? getMockLoyaltyAccountsSnapshot().find((a) => a.phone === normalizedPhone) || null
+    : null;
+  const settlement = settleOrderLoyaltyAndCoupon({
+    itemsSubtotalCents: subtotalCents,
+    deliveryFeeCents,
+    config: getMockLoyaltyConfigSnapshot(),
+    coupon: mockCoupon,
+    couponCodeRequested: normalizedCoupon || null,
+    hasValidPhone,
+    accountPointsBalance: mockAcc?.points_balance ?? 0,
+    pointsToRedeemRequested: input.loyalty_points_redeemed ?? 0,
+  });
+  if (!settlement.ok) {
+    throw new Error(settlement.error);
+  }
+  const totalCents = settlement.final_total_cents;
 
   const newOrder: CustomerOrder = {
     id: `ord-mock-${Date.now()}`,
@@ -253,13 +298,21 @@ export async function createCustomerOrder(
     order_code: orderCode,
     source: input.source,
     customer_name: input.customer_name,
-    customer_phone: input.customer_phone || null,
+    customer_phone: hasValidPhone ? normalizedPhone : input.customer_phone || null,
     delivery_type: input.delivery_type,
     delivery_address: input.delivery_address || null,
     delivery_neighborhood: input.delivery_neighborhood || null,
     payment_method: input.payment_method,
     items_json: JSON.stringify(resolvedItems),
     items: resolvedItems,
+    subtotal_cents: subtotalCents,
+    coupon_code: settlement.coupon_code,
+    coupon_discount_cents: settlement.coupon_discount_cents,
+    loyalty_account_id: mockAcc?.id ?? null,
+    loyalty_points_redeemed: settlement.points_redeemed,
+    loyalty_discount_cents: settlement.points_discount_cents,
+    loyalty_points_earned: settlement.points_earned,
+    loyalty_settled: 0,
     total_cents: totalCents,
     status: 'pending',
     tracking_token: `tk_${Date.now()}`,
@@ -269,6 +322,7 @@ export async function createCustomerOrder(
 
   mockOrders = [newOrder, ...mockOrders];
   emitDataChange('sales');
+  emitDataChange('loyalty');
   return { success: true, order: newOrder };
 }
 

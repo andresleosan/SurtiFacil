@@ -185,6 +185,14 @@ export async function ensureDatabaseSchema(db: D1Database, force = false): Promi
       id TEXT PRIMARY KEY,
       negocio_id TEXT NOT NULL DEFAULT 'surtifacil',
       total_cents INTEGER NOT NULL,
+      subtotal_cents INTEGER DEFAULT 0,
+      coupon_code TEXT,
+      coupon_discount_cents INTEGER NOT NULL DEFAULT 0,
+      loyalty_account_id TEXT,
+      loyalty_phone TEXT,
+      loyalty_points_redeemed INTEGER NOT NULL DEFAULT 0,
+      loyalty_discount_cents INTEGER NOT NULL DEFAULT 0,
+      loyalty_points_earned INTEGER NOT NULL DEFAULT 0,
       payment_method TEXT NOT NULL,
       credit_customer_id TEXT,
       credit_customer_name TEXT,
@@ -261,6 +269,14 @@ export async function ensureDatabaseSchema(db: D1Database, force = false): Promi
       delivery_neighborhood TEXT,
       payment_method TEXT NOT NULL DEFAULT 'cash',
       items_json TEXT NOT NULL DEFAULT '[]',
+      subtotal_cents INTEGER DEFAULT 0,
+      coupon_code TEXT,
+      coupon_discount_cents INTEGER NOT NULL DEFAULT 0,
+      loyalty_account_id TEXT,
+      loyalty_points_redeemed INTEGER NOT NULL DEFAULT 0,
+      loyalty_discount_cents INTEGER NOT NULL DEFAULT 0,
+      loyalty_points_earned INTEGER NOT NULL DEFAULT 0,
+      loyalty_settled INTEGER NOT NULL DEFAULT 0,
       total_cents INTEGER NOT NULL DEFAULT 0,
       status TEXT NOT NULL DEFAULT 'pending',
       tracking_token TEXT UNIQUE,
@@ -342,6 +358,86 @@ export async function ensureDatabaseSchema(db: D1Database, force = false): Promi
     )`
   );
 
+  await safeRun(
+    db,
+    `CREATE TABLE IF NOT EXISTS loyalty_accounts (
+      id TEXT PRIMARY KEY,
+      negocio_id TEXT NOT NULL DEFAULT 'surtifacil',
+      phone TEXT NOT NULL,
+      customer_name TEXT NOT NULL,
+      points_balance INTEGER NOT NULL DEFAULT 0,
+      lifetime_points_earned INTEGER NOT NULL DEFAULT 0,
+      lifetime_points_redeemed INTEGER NOT NULL DEFAULT 0,
+      total_purchases_count INTEGER NOT NULL DEFAULT 0,
+      total_spent_cents INTEGER NOT NULL DEFAULT 0,
+      active INTEGER NOT NULL DEFAULT 1,
+      last_activity_at TEXT,
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now')),
+      UNIQUE(negocio_id, phone)
+    )`
+  );
+
+  await safeRun(
+    db,
+    'CREATE INDEX IF NOT EXISTS idx_loyalty_accounts_negocio_phone ON loyalty_accounts(negocio_id, phone)'
+  );
+  await safeRun(
+    db,
+    'CREATE INDEX IF NOT EXISTS idx_loyalty_accounts_negocio_points ON loyalty_accounts(negocio_id, points_balance DESC)'
+  );
+
+  await safeRun(
+    db,
+    `CREATE TABLE IF NOT EXISTS loyalty_movements (
+      id TEXT PRIMARY KEY,
+      negocio_id TEXT NOT NULL DEFAULT 'surtifacil',
+      account_id TEXT NOT NULL,
+      type TEXT NOT NULL DEFAULT 'earn',
+      points_delta INTEGER NOT NULL,
+      balance_after INTEGER NOT NULL,
+      amount_cents INTEGER NOT NULL DEFAULT 0,
+      description TEXT,
+      sale_id TEXT,
+      order_id TEXT,
+      created_by_uid TEXT NOT NULL DEFAULT 'system',
+      created_by_role TEXT DEFAULT 'cashier',
+      created_at TEXT DEFAULT (datetime('now'))
+    )`
+  );
+
+  await safeRun(
+    db,
+    'CREATE INDEX IF NOT EXISTS idx_loyalty_movements_account ON loyalty_movements(negocio_id, account_id, created_at DESC)'
+  );
+
+  await safeRun(
+    db,
+    `CREATE TABLE IF NOT EXISTS discount_coupons (
+      id TEXT PRIMARY KEY,
+      negocio_id TEXT NOT NULL DEFAULT 'surtifacil',
+      code TEXT NOT NULL,
+      description TEXT,
+      discount_type TEXT NOT NULL DEFAULT 'percentage',
+      discount_value INTEGER NOT NULL,
+      min_purchase_cents INTEGER NOT NULL DEFAULT 0,
+      max_discount_cents INTEGER,
+      max_uses INTEGER,
+      used_count INTEGER NOT NULL DEFAULT 0,
+      expires_at TEXT,
+      active INTEGER NOT NULL DEFAULT 1,
+      created_by_uid TEXT DEFAULT 'system',
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now')),
+      UNIQUE(negocio_id, code)
+    )`
+  );
+
+  await safeRun(
+    db,
+    'CREATE INDEX IF NOT EXISTS idx_discount_coupons_negocio_code ON discount_coupons(negocio_id, code)'
+  );
+
   // 2. Migrar columnas faltantes en tablas preexistentes de Fase 1
   const alterColumns = [
     // users
@@ -394,12 +490,29 @@ export async function ensureDatabaseSchema(db: D1Database, force = false): Promi
     "ALTER TABLE credit_entries ADD COLUMN created_by_role TEXT DEFAULT 'admin'",
     // sales
     "ALTER TABLE sales ADD COLUMN negocio_id TEXT NOT NULL DEFAULT 'surtifacil'",
+    'ALTER TABLE sales ADD COLUMN subtotal_cents INTEGER DEFAULT 0',
+    'ALTER TABLE sales ADD COLUMN coupon_code TEXT',
+    'ALTER TABLE sales ADD COLUMN coupon_discount_cents INTEGER NOT NULL DEFAULT 0',
+    'ALTER TABLE sales ADD COLUMN loyalty_account_id TEXT',
+    'ALTER TABLE sales ADD COLUMN loyalty_phone TEXT',
+    'ALTER TABLE sales ADD COLUMN loyalty_points_redeemed INTEGER NOT NULL DEFAULT 0',
+    'ALTER TABLE sales ADD COLUMN loyalty_discount_cents INTEGER NOT NULL DEFAULT 0',
+    'ALTER TABLE sales ADD COLUMN loyalty_points_earned INTEGER NOT NULL DEFAULT 0',
     'ALTER TABLE sales ADD COLUMN credit_customer_id TEXT',
     'ALTER TABLE sales ADD COLUMN credit_customer_name TEXT',
     'ALTER TABLE sales ADD COLUMN total_cost_cents INTEGER DEFAULT 0',
     'ALTER TABLE sales ADD COLUMN created_by_uid TEXT',
     'ALTER TABLE sales ADD COLUMN created_by_role TEXT',
     'ALTER TABLE sales ADD COLUMN schema_version INTEGER DEFAULT 2',
+    // customer_orders
+    'ALTER TABLE customer_orders ADD COLUMN subtotal_cents INTEGER DEFAULT 0',
+    'ALTER TABLE customer_orders ADD COLUMN coupon_code TEXT',
+    'ALTER TABLE customer_orders ADD COLUMN coupon_discount_cents INTEGER NOT NULL DEFAULT 0',
+    'ALTER TABLE customer_orders ADD COLUMN loyalty_account_id TEXT',
+    'ALTER TABLE customer_orders ADD COLUMN loyalty_points_redeemed INTEGER NOT NULL DEFAULT 0',
+    'ALTER TABLE customer_orders ADD COLUMN loyalty_discount_cents INTEGER NOT NULL DEFAULT 0',
+    'ALTER TABLE customer_orders ADD COLUMN loyalty_points_earned INTEGER NOT NULL DEFAULT 0',
+    'ALTER TABLE customer_orders ADD COLUMN loyalty_settled INTEGER NOT NULL DEFAULT 0',
     // sale_items
     'ALTER TABLE sale_items ADD COLUMN unit_cost_cents INTEGER DEFAULT 0',
     'ALTER TABLE sale_items ADD COLUMN cost_subtotal_cents INTEGER DEFAULT 0',
@@ -959,6 +1072,69 @@ export async function ensureDatabaseSchema(db: D1Database, force = false): Promi
     `INSERT OR IGNORE INTO suppliers (
       id, negocio_id, name, contact_name, phone, email, address, category, active, total_orders, total_spent_cents, lead_time_days, created_at
     ) VALUES ('supp-mayorista', 'surtifacil', 'Central Mayorista Bloque 14', 'Luz Marina Vélez', '3123334455', 'ventas@mayoristab14.co', 'Itagüí, Antioquia', 'Granos y Abarrotes', 1, 8, 42000000, 2, datetime('now'))`
+  );
+
+  // 8. Semillas del Club de Puntos del Barrio y Cupones WhatsApp para 'surtifacil'
+  await safeRun(
+    db,
+    `INSERT OR IGNORE INTO loyalty_accounts (
+      id, negocio_id, phone, customer_name, points_balance, lifetime_points_earned, lifetime_points_redeemed,
+      total_purchases_count, total_spent_cents, active, last_activity_at, created_at, updated_at
+    ) VALUES (
+      'loy-don-carlos', 'surtifacil', '3004567890', 'Don Carlos Restrepo', 85, 120, 35,
+      9, 12000000, 1, datetime('now'), datetime('now'), datetime('now')
+    )`
+  );
+
+  await safeRun(
+    db,
+    `INSERT OR IGNORE INTO loyalty_accounts (
+      id, negocio_id, phone, customer_name, points_balance, lifetime_points_earned, lifetime_points_redeemed,
+      total_purchases_count, total_spent_cents, active, last_activity_at, created_at, updated_at
+    ) VALUES (
+      'loy-dona-marta', 'surtifacil', '3112345678', 'Doña Marta Gómez', 40, 40, 0,
+      4, 4000000, 1, datetime('now'), datetime('now'), datetime('now')
+    )`
+  );
+
+  await safeRun(
+    db,
+    `INSERT OR IGNORE INTO loyalty_movements (
+      id, negocio_id, account_id, type, points_delta, balance_after, amount_cents, description, created_by_uid, created_by_role, created_at
+    ) VALUES (
+      'lmov-seed-carlos', 'surtifacil', 'loy-don-carlos', 'bonus', 85, 85, 0, 'Saldo inicial Club de Puntos del Barrio', 'system', 'admin', datetime('now')
+    )`
+  );
+
+  await safeRun(
+    db,
+    `INSERT OR IGNORE INTO loyalty_movements (
+      id, negocio_id, account_id, type, points_delta, balance_after, amount_cents, description, created_by_uid, created_by_role, created_at
+    ) VALUES (
+      'lmov-seed-marta', 'surtifacil', 'loy-dona-marta', 'bonus', 40, 40, 0, 'Saldo inicial Club de Puntos del Barrio', 'system', 'admin', datetime('now')
+    )`
+  );
+
+  await safeRun(
+    db,
+    `INSERT OR IGNORE INTO discount_coupons (
+      id, negocio_id, code, description, discount_type, discount_value, min_purchase_cents, max_discount_cents,
+      max_uses, used_count, active, created_by_uid, created_at, updated_at
+    ) VALUES (
+      'coup-vecino10', 'surtifacil', 'VECINO10', '10% de descuento para vecinos del barrio', 'percentage', 10,
+      1000000, 1000000, 100, 3, 1, 'system', datetime('now'), datetime('now')
+    )`
+  );
+
+  await safeRun(
+    db,
+    `INSERT OR IGNORE INTO discount_coupons (
+      id, negocio_id, code, description, discount_type, discount_value, min_purchase_cents, max_discount_cents,
+      max_uses, used_count, active, created_by_uid, created_at, updated_at
+    ) VALUES (
+      'coup-mercado2000', 'surtifacil', 'MERCADO2000', '$ 2.000 COP de regalo en tu mercado', 'fixed_cents', 200000,
+      1200000, NULL, 50, 1, 1, 'system', datetime('now'), datetime('now')
+    )`
   );
 
   schemaMigrated = true;

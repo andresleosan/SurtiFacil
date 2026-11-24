@@ -25,6 +25,16 @@ import {
   requestNotificationPermission,
 } from '../services/notificationService';
 import { getPrimaryWholesaleTier, resolveProductUnitPricing } from '../utils/wholesalePricing';
+import { lookupLoyaltyByPhone, validateCouponStaff } from '../services/loyaltyService';
+import type { DiscountCoupon, LoyaltyLookupResponse, CreateSaleLoyaltyOptions } from '../types/loyalty';
+import {
+  calculateMaxRedeemablePoints,
+  DEFAULT_LOYALTY_CONFIG,
+  isValidLoyaltyPhone,
+  normalizeCouponCode,
+  normalizeLoyaltyPhone,
+  settleOrderLoyaltyAndCoupon,
+} from '../utils/loyaltyEngine';
 
 const PAYMENT_OPTIONS: Array<{ value: PaymentMethod; label: string; emoji: string }> = [
   { value: 'cash', label: 'Efectivo', emoji: '💵' },
@@ -77,6 +87,18 @@ const CreateSale = () => {
   const [notifPermission, setNotifPermission] = useState<NotificationPermission>(() => getNotificationPermission());
   const [receivedCashCents, setReceivedCashCents] = useState<number | null>(null);
 
+  // Estado Club de Puntos del Barrio y Cupones
+  const [loyaltyPanelOpen, setLoyaltyPanelOpen] = useState(false);
+  const [loyaltyPhoneInput, setLoyaltyPhoneInput] = useState('');
+  const [loyaltyLookup, setLoyaltyLookup] = useState<LoyaltyLookupResponse | null>(null);
+  const [loyaltyLookupLoading, setLoyaltyLookupLoading] = useState(false);
+  const [loyaltyLookupError, setLoyaltyLookupError] = useState('');
+  const [pointsToRedeem, setPointsToRedeem] = useState(0);
+  const [couponInput, setCouponInput] = useState('');
+  const [appliedCoupon, setAppliedCoupon] = useState<DiscountCoupon | null>(null);
+  const [couponLoading, setCouponLoading] = useState(false);
+  const [couponError, setCouponError] = useState('');
+
   const handleLoadOrderToCart = (order: CustomerOrder) => {
     const items = order.items || [];
     const newCartItems: SaleItem[] = items.map((i) => {
@@ -101,6 +123,14 @@ const CreateSale = () => {
       setPaymentMethod('other');
     } else {
       setPaymentMethod('cash');
+    }
+    if (order.customer_phone) {
+      setLoyaltyPhoneInput(order.customer_phone);
+      setLoyaltyPanelOpen(true);
+    }
+    if (order.coupon_code) {
+      setCouponInput(order.coupon_code);
+      setLoyaltyPanelOpen(true);
     }
     setActiveTab('pos');
     if (isMobile) {
@@ -167,8 +197,118 @@ const CreateSale = () => {
     });
   }, [products, search]);
 
-  const total = cartItems.reduce((sum, item) => sum + item.subtotal, 0);
+  const subtotal = cartItems.reduce((sum, item) => sum + item.subtotal, 0);
   const unitCount = cartItems.reduce((sum, item) => sum + item.quantity, 0);
+
+  const activeLoyaltyConfig = loyaltyLookup?.config || DEFAULT_LOYALTY_CONFIG;
+  const normalizedPhone = normalizeLoyaltyPhone(loyaltyPhoneInput);
+  const hasValidPhone = isValidLoyaltyPhone(normalizedPhone);
+  const accountPointsBalance = loyaltyLookup?.account?.points_balance ?? 0;
+
+  const couponEval = useMemo(() => {
+    if (!appliedCoupon || subtotal <= 0) {
+      return { coupon: null as DiscountCoupon | null, discountCents: 0, warning: '' };
+    }
+    const res = settleOrderLoyaltyAndCoupon({
+      itemsSubtotalCents: subtotal,
+      deliveryFeeCents: 0,
+      config: activeLoyaltyConfig,
+      coupon: appliedCoupon,
+      couponCodeRequested: appliedCoupon.code,
+      hasValidPhone: false,
+      accountPointsBalance: 0,
+      pointsToRedeemRequested: 0,
+    });
+    if (!res.ok) {
+      return { coupon: null as DiscountCoupon | null, discountCents: 0, warning: res.error };
+    }
+    return {
+      coupon: appliedCoupon,
+      discountCents: res.coupon_discount_cents,
+      warning: '',
+    };
+  }, [appliedCoupon, subtotal, activeLoyaltyConfig]);
+
+  const afterCouponSubtotal = Math.max(0, subtotal - couponEval.discountCents);
+  const redeemPolicy = useMemo(
+    () => calculateMaxRedeemablePoints(accountPointsBalance, afterCouponSubtotal, activeLoyaltyConfig),
+    [accountPointsBalance, afterCouponSubtotal, activeLoyaltyConfig]
+  );
+
+  const effectivePointsToRedeem = useMemo(() => {
+    if (!hasValidPhone || !redeemPolicy.can_redeem || pointsToRedeem <= 0) return 0;
+    const clamped = Math.min(Math.floor(pointsToRedeem), redeemPolicy.max_points);
+    return clamped >= activeLoyaltyConfig.min_redeem_points ? clamped : 0;
+  }, [hasValidPhone, redeemPolicy, pointsToRedeem, activeLoyaltyConfig.min_redeem_points]);
+
+  const saleSettlement = useMemo(() => {
+    const res = settleOrderLoyaltyAndCoupon({
+      itemsSubtotalCents: subtotal,
+      deliveryFeeCents: 0,
+      config: activeLoyaltyConfig,
+      coupon: couponEval.coupon,
+      couponCodeRequested: couponEval.coupon?.code || null,
+      hasValidPhone,
+      accountPointsBalance,
+      pointsToRedeemRequested: effectivePointsToRedeem,
+    });
+    if (res.ok) return res;
+    return {
+      ok: true as const,
+      items_subtotal_cents: subtotal,
+      coupon_code: null,
+      coupon_discount_cents: 0,
+      after_coupon_subtotal_cents: subtotal,
+      points_redeemed: 0,
+      points_discount_cents: 0,
+      paid_merchandise_cents: subtotal,
+      delivery_fee_cents: 0,
+      final_total_cents: subtotal,
+      points_earned: 0,
+      config: activeLoyaltyConfig,
+    };
+  }, [subtotal, activeLoyaltyConfig, couponEval.coupon, hasValidPhone, accountPointsBalance, effectivePointsToRedeem]);
+
+  const total = saleSettlement.final_total_cents;
+
+  const handleLookupLoyalty = async () => {
+    setLoyaltyLookupError('');
+    try {
+      setLoyaltyLookupLoading(true);
+      const res = await lookupLoyaltyByPhone(loyaltyPhoneInput);
+      setLoyaltyLookup(res);
+      setPointsToRedeem(0);
+    } catch (err: unknown) {
+      setLoyaltyLookup(null);
+      setPointsToRedeem(0);
+      setLoyaltyLookupError(err instanceof Error ? err.message : 'No se pudo consultar el celular.');
+    } finally {
+      setLoyaltyLookupLoading(false);
+    }
+  };
+
+  const handleApplyCoupon = async () => {
+    setCouponError('');
+    const code = normalizeCouponCode(couponInput);
+    if (!code) {
+      setCouponError('Ingresa un código de cupón.');
+      return;
+    }
+    try {
+      setCouponLoading(true);
+      const res = await validateCouponStaff(code, subtotal);
+      if (res.valid && res.coupon) {
+        setAppliedCoupon(res.coupon);
+        setCouponInput(res.coupon.code);
+      } else {
+        setCouponError(res.error || 'Cupón no válido.');
+      }
+    } catch (err: unknown) {
+      setCouponError(err instanceof Error ? err.message : 'Cupón no válido.');
+    } finally {
+      setCouponLoading(false);
+    }
+  };
 
   const addToCart = (product: Product, quantity = 1): boolean => {
     setError('');
@@ -273,11 +413,42 @@ const CreateSale = () => {
       const actualChangeCents = methodSnapshot === 'cash' && actualReceivedCents !== undefined
         ? Math.max(0, actualReceivedCents - total)
         : undefined;
-      const saleId = await createSale(cartItems, paymentMethod, paymentMethod === 'credit' ? creditCustomerId : undefined);
+
+      const hasLoyaltyOrCoupon =
+        hasValidPhone || Boolean(saleSettlement.coupon_code) || saleSettlement.points_redeemed > 0;
+      const loyaltyOptions: CreateSaleLoyaltyOptions | undefined = hasLoyaltyOrCoupon
+        ? {
+            ...(hasValidPhone ? { loyalty_phone: normalizedPhone } : {}),
+            ...(hasValidPhone && (loyaltyLookup?.account?.customer_name || creditCust?.name)
+              ? { loyalty_customer_name: loyaltyLookup?.account?.customer_name || creditCust?.name }
+              : {}),
+            ...(saleSettlement.points_redeemed > 0
+              ? { loyalty_points_redeemed: saleSettlement.points_redeemed }
+              : {}),
+            ...(saleSettlement.coupon_code ? { coupon_code: saleSettlement.coupon_code } : {}),
+          }
+        : undefined;
+
+      const saleId = loyaltyOptions
+        ? await createSale(cartItems, paymentMethod, paymentMethod === 'credit' ? creditCustomerId : undefined, loyaltyOptions)
+        : await createSale(cartItems, paymentMethod, paymentMethod === 'credit' ? creditCustomerId : undefined);
+
+      const expectedBalanceAfter = hasValidPhone
+        ? Math.max(0, accountPointsBalance - saleSettlement.points_redeemed + saleSettlement.points_earned)
+        : null;
+
       const createdSaleObj: Sale = {
         id: saleId,
         date: new Date(),
         total,
+        subtotal_cents: subtotal,
+        coupon_code: saleSettlement.coupon_code,
+        coupon_discount_cents: saleSettlement.coupon_discount_cents,
+        loyalty_phone: hasValidPhone ? normalizedPhone : null,
+        loyalty_points_redeemed: saleSettlement.points_redeemed,
+        loyalty_discount_cents: saleSettlement.points_discount_cents,
+        loyalty_points_earned: saleSettlement.points_earned,
+        loyalty_balance_after: expectedBalanceAfter,
         payment_method: methodSnapshot,
         credit_customer_id: creditCust?.id,
         credit_customer_name: creditCust?.name,
@@ -292,6 +463,14 @@ const CreateSale = () => {
       setPaymentMethod('cash');
       setCreditCustomerId('');
       setReceivedCashCents(null);
+      setLoyaltyPhoneInput('');
+      setLoyaltyLookup(null);
+      setLoyaltyLookupError('');
+      setPointsToRedeem(0);
+      setCouponInput('');
+      setAppliedCoupon(null);
+      setCouponError('');
+      setLoyaltyPanelOpen(false);
       setCartOpen(false);
       window.setTimeout(() => setSuccess(false), 8000);
     } catch (err: unknown) {
@@ -324,6 +503,43 @@ const CreateSale = () => {
       onCreditCustomerChange={setCreditCustomerId}
       receivedCashCents={receivedCashCents}
       onReceivedCashChange={setReceivedCashCents}
+      subtotalCents={subtotal}
+      loyaltyPanelOpen={loyaltyPanelOpen}
+      onToggleLoyaltyPanel={() => setLoyaltyPanelOpen((prev) => !prev)}
+      loyaltyPhoneInput={loyaltyPhoneInput}
+      onLoyaltyPhoneChange={(val) => {
+        setLoyaltyPhoneInput(val);
+        setLoyaltyLookupError('');
+        if (!val.trim()) {
+          setLoyaltyLookup(null);
+          setPointsToRedeem(0);
+        }
+      }}
+      onLookupLoyalty={() => void handleLookupLoyalty()}
+      loyaltyLookup={loyaltyLookup}
+      loyaltyLookupLoading={loyaltyLookupLoading}
+      loyaltyLookupError={loyaltyLookupError}
+      pointsToRedeem={effectivePointsToRedeem}
+      maxRedeemablePoints={redeemPolicy.can_redeem ? redeemPolicy.max_points : 0}
+      minRedeemPoints={activeLoyaltyConfig.min_redeem_points}
+      onPointsToRedeemChange={setPointsToRedeem}
+      couponInput={couponInput}
+      onCouponInputChange={(val) => {
+        setCouponInput(val);
+        setCouponError('');
+      }}
+      onApplyCoupon={() => void handleApplyCoupon()}
+      onRemoveCoupon={() => {
+        setAppliedCoupon(null);
+        setCouponInput('');
+        setCouponError('');
+      }}
+      appliedCoupon={couponEval.coupon}
+      couponDiscountCents={saleSettlement.coupon_discount_cents}
+      pointsDiscountCents={saleSettlement.points_discount_cents}
+      pointsEarnedPreview={saleSettlement.points_earned}
+      couponLoading={couponLoading}
+      couponError={couponError || couponEval.warning}
     />
   );
 
@@ -432,10 +648,26 @@ const CreateSale = () => {
                   <div>
                     <span className="font-bold text-sm block">Venta registrada exitosamente</span>
                     {lastCreatedSale && (
-                      <span className="text-xs text-green-800">
-                        Comprobante #{lastCreatedSale.id.slice(0, 8)} · {formatCentsCOP(lastCreatedSale.total)}
-                        {lastCreatedSale.id.startsWith('offline_') ? ' · 📡 Encolada en Modo Offline (FIFO)' : ''}
-                      </span>
+                      <div className="space-y-1">
+                        <span className="text-xs text-green-800 block">
+                          Comprobante #{lastCreatedSale.id.slice(0, 8)} · {formatCentsCOP(lastCreatedSale.total)}
+                          {lastCreatedSale.id.startsWith('offline_') ? ' · 📡 Encolada en Modo Offline (FIFO)' : ''}
+                        </span>
+                        {((lastCreatedSale.loyalty_points_earned || 0) > 0 || lastCreatedSale.coupon_code) && (
+                          <div className="flex flex-wrap gap-1.5 text-[11px] font-bold">
+                            {(lastCreatedSale.loyalty_points_earned || 0) > 0 && (
+                              <span className="rounded-full bg-amber-100 px-2 py-0.5 text-amber-900">
+                                ⭐ +{lastCreatedSale.loyalty_points_earned} pts Club
+                              </span>
+                            )}
+                            {lastCreatedSale.coupon_code && (
+                              <span className="rounded-full bg-blue-100 px-2 py-0.5 text-blue-900">
+                                🎟️ Cupón {lastCreatedSale.coupon_code}
+                              </span>
+                            )}
+                          </div>
+                        )}
+                      </div>
                     )}
                   </div>
                 </div>
@@ -667,6 +899,29 @@ interface CartPanelProps {
   onConfirm: () => void;
   receivedCashCents: number | null;
   onReceivedCashChange: (cents: number | null) => void;
+  subtotalCents: number;
+  loyaltyPanelOpen: boolean;
+  onToggleLoyaltyPanel: () => void;
+  loyaltyPhoneInput: string;
+  onLoyaltyPhoneChange: (val: string) => void;
+  onLookupLoyalty: () => void;
+  loyaltyLookup: LoyaltyLookupResponse | null;
+  loyaltyLookupLoading: boolean;
+  loyaltyLookupError: string;
+  pointsToRedeem: number;
+  maxRedeemablePoints: number;
+  minRedeemPoints: number;
+  onPointsToRedeemChange: (pts: number) => void;
+  couponInput: string;
+  onCouponInputChange: (val: string) => void;
+  onApplyCoupon: () => void;
+  onRemoveCoupon: () => void;
+  appliedCoupon: DiscountCoupon | null;
+  couponDiscountCents: number;
+  pointsDiscountCents: number;
+  pointsEarnedPreview: number;
+  couponLoading: boolean;
+  couponError: string;
 }
 
 function CartPanel({
@@ -686,8 +941,32 @@ function CartPanel({
   onConfirm,
   receivedCashCents,
   onReceivedCashChange,
+  subtotalCents,
+  loyaltyPanelOpen,
+  onToggleLoyaltyPanel,
+  loyaltyPhoneInput,
+  onLoyaltyPhoneChange,
+  onLookupLoyalty,
+  loyaltyLookup,
+  loyaltyLookupLoading,
+  loyaltyLookupError,
+  pointsToRedeem,
+  maxRedeemablePoints,
+  minRedeemPoints,
+  onPointsToRedeemChange,
+  couponInput,
+  onCouponInputChange,
+  onApplyCoupon,
+  onRemoveCoupon,
+  appliedCoupon,
+  couponDiscountCents,
+  pointsDiscountCents,
+  pointsEarnedPreview,
+  couponLoading,
+  couponError,
 }: CartPanelProps) {
   const wholesaleSavings = items.reduce((sum, item) => sum + (item.wholesale_savings_cents || 0), 0);
+  const hasPhoneDigits = isValidLoyaltyPhone(normalizeLoyaltyPhone(loyaltyPhoneInput));
 
   return (
     <div className="space-y-4">
@@ -752,6 +1031,184 @@ function CartPanel({
         </ul>
       )}
 
+      {/* Bloque Colapsable Club de Puntos / Cupón */}
+      {items.length > 0 && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50/40">
+          <button
+            type="button"
+            aria-expanded={loyaltyPanelOpen}
+            onClick={onToggleLoyaltyPanel}
+            className="flex min-h-[44px] w-full items-center justify-between px-3 py-2 text-left text-xs font-bold text-amber-950"
+          >
+            <span className="flex items-center gap-1.5">
+              <span>⭐ Club de Puntos / Cupón</span>
+              {appliedCoupon && (
+                <span className="rounded bg-blue-100 px-1.5 py-0.5 text-[10px] text-blue-900">
+                  {appliedCoupon.code}
+                </span>
+              )}
+              {pointsToRedeem > 0 && (
+                <span className="rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] text-emerald-900">
+                  -{pointsToRedeem} pts
+                </span>
+              )}
+            </span>
+            <Icon name={loyaltyPanelOpen ? 'chevron-up' : 'chevron-down'} size={16} />
+          </button>
+
+          {loyaltyPanelOpen && (
+            <div className="space-y-3 border-t border-amber-200/80 bg-white p-3 rounded-b-xl">
+              {/* Consulta de Puntos por Celular */}
+              <div className="space-y-1.5">
+                <label htmlFor="pos-loyalty-phone" className="block text-[11px] font-bold text-slate-700">
+                  Celular del Vecino (Acumular / Canjear Puntos)
+                </label>
+                <div className="flex gap-1.5">
+                  <input
+                    id="pos-loyalty-phone"
+                    type="tel"
+                    value={loyaltyPhoneInput}
+                    onChange={(e) => onLoyaltyPhoneChange(e.target.value)}
+                    placeholder="Ej: 300 456 7890"
+                    className="input min-h-[44px] flex-1 text-sm"
+                  />
+                  <button
+                    type="button"
+                    onClick={onLookupLoyalty}
+                    disabled={loyaltyLookupLoading || !loyaltyPhoneInput.trim()}
+                    className="btn-primary min-h-[44px] px-3 text-xs font-bold shrink-0"
+                  >
+                    {loyaltyLookupLoading ? '...' : 'Consultar'}
+                  </button>
+                </div>
+                {loyaltyLookupError && (
+                  <p className="text-[11px] font-semibold text-red-600">{loyaltyLookupError}</p>
+                )}
+
+                {loyaltyLookup && (
+                  <div className="rounded-lg border border-amber-200 bg-amber-50/70 p-2.5 text-xs space-y-2">
+                    {loyaltyLookup.enrolled && loyaltyLookup.account ? (
+                      <>
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="font-bold text-slate-800 truncate">
+                            {loyaltyLookup.account.customer_name}
+                          </span>
+                          <span className="font-black text-amber-900 tabular-nums shrink-0">
+                            ⭐ {loyaltyLookup.account.points_balance} pts (
+                            {formatCentsCOP(loyaltyLookup.redeemable_value_cents)})
+                          </span>
+                        </div>
+                        {maxRedeemablePoints >= minRedeemPoints ? (
+                          <div className="space-y-1.5">
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              <button
+                                type="button"
+                                onClick={() => onPointsToRedeemChange(0)}
+                                className={`min-h-[36px] rounded-lg px-2.5 text-[11px] font-bold border ${
+                                  pointsToRedeem === 0
+                                    ? 'bg-sf-primary text-white border-sf-primary'
+                                    : 'bg-white text-slate-700 border-slate-200'
+                                }`}
+                              >
+                                Sin canje
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => onPointsToRedeemChange(maxRedeemablePoints)}
+                                className={`min-h-[36px] rounded-lg px-2.5 text-[11px] font-bold border ${
+                                  pointsToRedeem === maxRedeemablePoints
+                                    ? 'bg-emerald-600 text-white border-emerald-600'
+                                    : 'bg-white text-emerald-800 border-emerald-300'
+                                }`}
+                              >
+                                Canjear máx. ({maxRedeemablePoints} pts)
+                              </button>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <label htmlFor="pos-redeem-points" className="text-[11px] text-slate-600 shrink-0">
+                                Puntos a canjear:
+                              </label>
+                              <input
+                                id="pos-redeem-points"
+                                type="number"
+                                min={0}
+                                max={maxRedeemablePoints}
+                                value={pointsToRedeem}
+                                onChange={(e) =>
+                                  onPointsToRedeemChange(
+                                    Math.max(0, Math.min(maxRedeemablePoints, Math.round(Number(e.target.value) || 0)))
+                                  )
+                                }
+                                className="input min-h-[36px] w-24 text-xs py-1"
+                              />
+                            </div>
+                          </div>
+                        ) : (
+                          <p className="text-[11px] text-slate-600">
+                            Necesita al menos {minRedeemPoints} pts disponibles para canjear.
+                          </p>
+                        )}
+                      </>
+                    ) : (
+                      <p className="text-[11px] text-slate-700">
+                        ✨ Celular nuevo: quedará inscrito automáticamente al confirmar esta compra.
+                      </p>
+                    )}
+                  </div>
+                )}
+
+                {hasPhoneDigits && pointsEarnedPreview > 0 && (
+                  <p className="text-[11px] font-semibold text-emerald-700">
+                    ⭐ Ganará +{pointsEarnedPreview} pts con esta compra
+                  </p>
+                )}
+              </div>
+
+              {/* Aplicación de Cupón */}
+              <div className="space-y-1.5 border-t border-slate-100 pt-2">
+                <label htmlFor="pos-coupon-code" className="block text-[11px] font-bold text-slate-700">
+                  Código de Cupón WhatsApp
+                </label>
+                {appliedCoupon ? (
+                  <div className="flex items-center justify-between rounded-lg border border-blue-200 bg-blue-50 px-2.5 py-2 text-xs">
+                    <span className="font-bold text-blue-900">
+                      🎟️ {appliedCoupon.code} (-{formatCentsCOP(couponDiscountCents)})
+                    </span>
+                    <button
+                      type="button"
+                      onClick={onRemoveCoupon}
+                      className="text-xs font-bold text-red-600 hover:underline px-2 py-1"
+                    >
+                      Quitar
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex gap-1.5">
+                    <input
+                      id="pos-coupon-code"
+                      type="text"
+                      value={couponInput}
+                      onChange={(e) => onCouponInputChange(e.target.value.toUpperCase())}
+                      placeholder="Ej: VECINO10"
+                      className="input min-h-[44px] flex-1 font-mono text-sm uppercase"
+                    />
+                    <button
+                      type="button"
+                      onClick={onApplyCoupon}
+                      disabled={couponLoading || !couponInput.trim() || subtotalCents <= 0}
+                      className="btn-secondary min-h-[44px] px-3 text-xs font-bold shrink-0"
+                    >
+                      {couponLoading ? '...' : 'Aplicar'}
+                    </button>
+                  </div>
+                )}
+                {couponError && <p className="text-[11px] font-semibold text-red-600">{couponError}</p>}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
       <div className="space-y-1 border-t border-gray-200 pt-3 text-sm text-sf-text">
         <div className="flex justify-between">
           <span>Artículos</span>
@@ -761,6 +1218,18 @@ function CartPanel({
           <div className="flex justify-between text-xs font-semibold text-emerald-700">
             <span>Ahorro mayorista</span>
             <span className="tabular-nums">-{formatPrice(wholesaleSavings)}</span>
+          </div>
+        )}
+        {couponDiscountCents > 0 && appliedCoupon && (
+          <div className="flex justify-between text-xs font-semibold text-blue-700">
+            <span>Cupón {appliedCoupon.code}</span>
+            <span className="tabular-nums">-{formatCentsCOP(couponDiscountCents)}</span>
+          </div>
+        )}
+        {pointsDiscountCents > 0 && (
+          <div className="flex justify-between text-xs font-semibold text-amber-800">
+            <span>Canje {pointsToRedeem} pts</span>
+            <span className="tabular-nums">-{formatCentsCOP(pointsDiscountCents)}</span>
           </div>
         )}
         <div className="flex justify-between text-lg font-bold">

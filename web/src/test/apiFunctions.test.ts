@@ -23,6 +23,9 @@ class MockD1Database implements D1Database {
     cash_closings: any[];
     cash_expenses: any[];
     inventory_shrinkage: any[];
+    loyalty_accounts: any[];
+    loyalty_movements: any[];
+    discount_coupons: any[];
     _system_secrets: Array<{ secret_key: string; secret_value: string; updated_at?: string }>;
   };
 
@@ -136,6 +139,71 @@ class MockD1Database implements D1Database {
       cash_closings: [],
       cash_expenses: [],
       inventory_shrinkage: [],
+      loyalty_accounts: [
+        {
+          id: 'loy-carlos',
+          negocio_id: 'surtifacil',
+          phone: '3004567890',
+          customer_name: 'Don Carlos Restrepo',
+          points_balance: 85,
+          lifetime_points_earned: 120,
+          lifetime_points_redeemed: 35,
+          total_purchases_count: 9,
+          total_spent_cents: 12000000,
+          active: 1,
+          last_activity_at: new Date().toISOString(),
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        },
+        {
+          id: 'loy-otro',
+          negocio_id: 'otra-tienda',
+          phone: '3004567890',
+          customer_name: 'Cliente Otra Tienda',
+          points_balance: 500,
+          lifetime_points_earned: 500,
+          lifetime_points_redeemed: 0,
+          total_purchases_count: 5,
+          total_spent_cents: 5000000,
+          active: 1,
+          last_activity_at: new Date().toISOString(),
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        },
+      ],
+      loyalty_movements: [],
+      discount_coupons: [
+        {
+          id: 'coup-vecino10',
+          negocio_id: 'surtifacil',
+          code: 'VECINO10',
+          description: '10% de descuento vecinos',
+          discount_type: 'percentage',
+          discount_value: 10,
+          min_purchase_cents: 1000000,
+          max_discount_cents: 1000000,
+          max_uses: 100,
+          used_count: 0,
+          expires_at: null,
+          active: 1,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        },
+        {
+          id: 'coup-otro',
+          negocio_id: 'otra-tienda',
+          code: 'SECRETO50',
+          description: 'Solo otra tienda',
+          discount_type: 'percentage',
+          discount_value: 50,
+          min_purchase_cents: 0,
+          max_discount_cents: null,
+          max_uses: 10,
+          used_count: 0,
+          expires_at: null,
+          active: 1,
+        },
+      ],
       _system_secrets: [],
     };
   }
@@ -462,6 +530,91 @@ class MockD1Database implements D1Database {
           return { results: list as T[], success: true };
         }
 
+        if (q.includes('FROM loyalty_accounts') && q.includes('total_members')) {
+          const list = db.tables.loyalty_accounts.filter(
+            (a) => a.negocio_id === boundValues[0] && a.active === 1
+          );
+          return {
+            results: [
+              {
+                total_members: list.length,
+                active_points_balance: list.reduce((s, a) => s + (a.points_balance || 0), 0),
+                lifetime_points_earned: list.reduce((s, a) => s + (a.lifetime_points_earned || 0), 0),
+                lifetime_points_redeemed: list.reduce((s, a) => s + (a.lifetime_points_redeemed || 0), 0),
+              } as unknown as T,
+            ],
+            success: true,
+          };
+        }
+
+        if (q.includes('FROM loyalty_accounts WHERE negocio_id = ? AND phone = ?')) {
+          const [negId, phone] = boundValues;
+          const acc = db.tables.loyalty_accounts.find(
+            (a) =>
+              a.negocio_id === negId &&
+              a.phone === phone &&
+              (!q.includes('active = 1') || a.active === 1)
+          );
+          return { results: acc ? [acc as T] : [], success: true };
+        }
+
+        if (q.includes('FROM loyalty_accounts WHERE id = ? AND negocio_id = ?')) {
+          const [accId, negId] = boundValues;
+          const acc = db.tables.loyalty_accounts.find(
+            (a) => a.id === accId && a.negocio_id === negId
+          );
+          return { results: acc ? [acc as T] : [], success: true };
+        }
+
+        if (q.includes('FROM loyalty_accounts WHERE negocio_id = ?')) {
+          const list = db.tables.loyalty_accounts.filter(
+            (a) => a.negocio_id === boundValues[0] && a.active === 1
+          );
+          return { results: list as T[], success: true };
+        }
+
+        if (q.includes('FROM loyalty_movements WHERE negocio_id = ? AND account_id = ?')) {
+          const [negId, accId] = boundValues;
+          const list = db.tables.loyalty_movements.filter(
+            (m) => m.negocio_id === negId && m.account_id === accId
+          );
+          return { results: list as T[], success: true };
+        }
+
+        if (q.includes('FROM discount_coupons') && q.includes('active_coupons_count')) {
+          const list = db.tables.discount_coupons.filter((c) => c.negocio_id === boundValues[0]);
+          return {
+            results: [
+              {
+                active_coupons_count: list.filter((c) => c.active === 1).length,
+                total_coupon_redemptions: list.reduce((s, c) => s + (c.used_count || 0), 0),
+              } as unknown as T,
+            ],
+            success: true,
+          };
+        }
+
+        if (q.includes('FROM discount_coupons WHERE negocio_id = ? AND code = ?')) {
+          const [negId, code] = boundValues;
+          const c = db.tables.discount_coupons.find(
+            (cp) => cp.negocio_id === negId && cp.code === code
+          );
+          return { results: c ? [c as T] : [], success: true };
+        }
+
+        if (q.includes('FROM discount_coupons WHERE id = ? AND negocio_id = ?')) {
+          const [coupId, negId] = boundValues;
+          const c = db.tables.discount_coupons.find(
+            (cp) => cp.id === coupId && cp.negocio_id === negId
+          );
+          return { results: c ? [c as T] : [], success: true };
+        }
+
+        if (q.includes('FROM discount_coupons WHERE negocio_id = ?')) {
+          const list = db.tables.discount_coupons.filter((c) => c.negocio_id === boundValues[0]);
+          return { results: list as T[], success: true };
+        }
+
         return { results: [], success: true };
       },
       async run() {
@@ -578,19 +731,58 @@ class MockD1Database implements D1Database {
         }
 
         if (q.startsWith('INSERT INTO sales')) {
-          const [id, negocio_id, total_cents, payment_method, credit_customer_id, credit_customer_name, total_cost_cents, created_by_uid, created_by_role] = boundValues;
-          db.tables.sales.push({
-            id,
-            negocio_id,
-            total_cents,
-            payment_method,
-            credit_customer_id,
-            credit_customer_name,
-            total_cost_cents,
-            created_by_uid,
-            created_by_role,
-            created_at: new Date().toISOString(),
-          });
+          if (q.includes('total_cost_cents')) {
+            const [
+              id, negocio_id, total_cents, subtotal_cents, coupon_code, coupon_discount_cents,
+              loyalty_account_id, loyalty_phone, loyalty_points_redeemed, loyalty_discount_cents, loyalty_points_earned,
+              payment_method, credit_customer_id, credit_customer_name, total_cost_cents, created_by_uid, created_by_role,
+            ] = boundValues;
+            db.tables.sales.push({
+              id,
+              negocio_id,
+              total_cents,
+              subtotal_cents,
+              coupon_code,
+              coupon_discount_cents,
+              loyalty_account_id,
+              loyalty_phone,
+              loyalty_points_redeemed,
+              loyalty_discount_cents,
+              loyalty_points_earned,
+              payment_method,
+              credit_customer_id,
+              credit_customer_name,
+              total_cost_cents,
+              created_by_uid,
+              created_by_role,
+              created_at: new Date().toISOString(),
+            });
+          } else {
+            const [
+              id, negocio_id, total_cents, subtotal_cents, coupon_code, coupon_discount_cents,
+              loyalty_account_id, loyalty_phone, loyalty_points_redeemed, loyalty_discount_cents, loyalty_points_earned,
+              payment_method, credit_customer_id, credit_customer_name, created_by_uid, created_by_role,
+            ] = boundValues;
+            db.tables.sales.push({
+              id,
+              negocio_id,
+              total_cents,
+              subtotal_cents,
+              coupon_code,
+              coupon_discount_cents,
+              loyalty_account_id,
+              loyalty_phone,
+              loyalty_points_redeemed,
+              loyalty_discount_cents,
+              loyalty_points_earned,
+              payment_method,
+              credit_customer_id,
+              credit_customer_name,
+              created_by_uid,
+              created_by_role,
+              created_at: new Date().toISOString(),
+            });
+          }
         }
 
         if (q.startsWith('INSERT INTO sale_items')) {
@@ -782,6 +974,13 @@ class MockD1Database implements D1Database {
           }
         }
 
+        if (q.startsWith('UPDATE negocios SET config_json = ?')) {
+          const [configJson, negId] = boundValues;
+          const neg = db.tables.negocios.find((n: any) => n.id === negId);
+          if (neg) neg.config_json = configJson;
+          return { success: true };
+        }
+
         if (q.startsWith('UPDATE negocios SET')) {
           const [nombre, barrio, direccion, telefono, horario, costoDom, datosPago, configJson, negId] = boundValues;
           const neg = db.tables.negocios.find((n: any) => n.id === negId);
@@ -822,7 +1021,9 @@ class MockD1Database implements D1Database {
           const [
             id, negocio_id, order_code, source, customer_name, customer_phone,
             delivery_type, delivery_address, delivery_neighborhood, payment_method,
-            items_json, total_cents, tracking_token
+            items_json, subtotal_cents, coupon_code, coupon_discount_cents,
+            loyalty_account_id, loyalty_points_redeemed, loyalty_discount_cents, loyalty_points_earned,
+            total_cents, tracking_token,
           ] = boundValues;
           db.tables.customer_orders.push({
             id,
@@ -836,6 +1037,14 @@ class MockD1Database implements D1Database {
             delivery_neighborhood,
             payment_method,
             items_json,
+            subtotal_cents,
+            coupon_code,
+            coupon_discount_cents,
+            loyalty_account_id,
+            loyalty_points_redeemed,
+            loyalty_discount_cents,
+            loyalty_points_earned,
+            loyalty_settled: 0,
             total_cents,
             status: 'pending',
             tracking_token,
@@ -844,14 +1053,157 @@ class MockD1Database implements D1Database {
         }
 
         if (q.startsWith('UPDATE customer_orders')) {
+          const negId = boundValues[boundValues.length - 1];
           const orderId = boundValues[boundValues.length - 2];
-          const ord = db.tables.customer_orders.find((o) => o.id === orderId);
+          const ord = db.tables.customer_orders.find((o) => o.id === orderId && o.negocio_id === negId);
           if (ord) {
-            ord.status = boundValues[0];
-            if (boundValues.length >= 4) {
-              ord.sale_id = boundValues[1];
+            if (q.includes("status = 'completed'")) {
+              ord.status = 'completed';
+              ord.sale_id = boundValues[0];
+              ord.loyalty_settled = 1;
+              if (boundValues[1]) ord.loyalty_account_id = boundValues[1];
+            } else {
+              ord.status = boundValues[0];
+              ord.loyalty_settled = boundValues[1];
+              if (boundValues[2]) ord.loyalty_account_id = boundValues[2];
             }
           }
+        }
+
+        if (q.startsWith('INSERT INTO loyalty_accounts')) {
+          const [id, negocio_id, phone, customer_name, points_balance, lifetime_points_earned, total_spent_cents] =
+            boundValues;
+          db.tables.loyalty_accounts.push({
+            id,
+            negocio_id,
+            phone,
+            customer_name,
+            points_balance,
+            lifetime_points_earned,
+            lifetime_points_redeemed: 0,
+            total_purchases_count: q.includes('0, 0, 0') ? 0 : 1,
+            total_spent_cents: total_spent_cents ?? 0,
+            active: 1,
+            last_activity_at: new Date().toISOString(),
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          });
+        }
+
+        if (q.startsWith('UPDATE loyalty_accounts')) {
+          const negId = boundValues[boundValues.length - 1];
+          const accId = boundValues[boundValues.length - 2];
+          const acc = db.tables.loyalty_accounts.find((a) => a.id === accId && a.negocio_id === negId);
+          if (acc) {
+            if (q.includes('points_balance = points_balance - ? + ?')) {
+              const [redeemed, earned, addEarned, addRedeemed, addSpent] = boundValues;
+              acc.points_balance = Math.max(0, acc.points_balance - redeemed + earned);
+              acc.lifetime_points_earned += addEarned;
+              acc.lifetime_points_redeemed += addRedeemed;
+              acc.total_purchases_count += 1;
+              acc.total_spent_cents += addSpent;
+            } else if (q.includes('points_balance = MAX(0, points_balance - ?)')) {
+              const [redeemed, addRedeemed] = boundValues;
+              acc.points_balance = Math.max(0, acc.points_balance - redeemed);
+              acc.lifetime_points_redeemed += addRedeemed;
+            } else if (q.includes('points_balance = points_balance + ?') && q.includes('total_purchases_count')) {
+              const [earned, addEarned, addSpent] = boundValues;
+              acc.points_balance += earned;
+              acc.lifetime_points_earned += addEarned;
+              acc.total_purchases_count += 1;
+              acc.total_spent_cents += addSpent;
+            } else if (q.includes('points_balance = points_balance + ?')) {
+              const [refunded, subRedeemed] = boundValues;
+              acc.points_balance += refunded;
+              acc.lifetime_points_redeemed = Math.max(0, acc.lifetime_points_redeemed - subRedeemed);
+            } else if (q.includes('points_balance = ?')) {
+              const [nextBal, addEarned] = boundValues;
+              acc.points_balance = nextBal;
+              acc.lifetime_points_earned += addEarned;
+            }
+          }
+        }
+
+        if (q.startsWith('INSERT INTO loyalty_movements')) {
+          if (q.includes("'redeem'") || q.includes("'earn'") || q.includes("'bonus'") || q.includes("'adjust'")) {
+            if (q.includes("VALUES (?, ?, ?, 'redeem'") || q.includes("VALUES (?, ?, ?, 'earn'") || q.includes("VALUES (?, ?, ?, 'adjust'")) {
+              if (q.includes(', sale_id, order_id,')) {
+                const [id, negocio_id, account_id, points_delta, balance_after, amount_cents, description, sale_id, order_id, uid, role] = boundValues;
+                db.tables.loyalty_movements.push({
+                  id, negocio_id, account_id, type: 'earn', points_delta, balance_after, amount_cents, description, sale_id, order_id, created_by_uid: uid, created_by_role: role, created_at: new Date().toISOString(),
+                });
+              } else if (q.includes(', order_id,')) {
+                const [id, negocio_id, account_id, points_delta, balance_after, amount_cents, description, order_id] = boundValues;
+                db.tables.loyalty_movements.push({
+                  id, negocio_id, account_id, type: q.includes("'redeem'") ? 'redeem' : 'adjust', points_delta, balance_after, amount_cents, description, order_id, created_at: new Date().toISOString(),
+                });
+              } else {
+                const [id, negocio_id, account_id, points_delta, balance_after, amount_cents, description, sale_id, uid, role] = boundValues;
+                db.tables.loyalty_movements.push({
+                  id, negocio_id, account_id, type: q.includes("'redeem'") ? 'redeem' : 'earn', points_delta, balance_after, amount_cents, description, sale_id, created_by_uid: uid, created_by_role: role, created_at: new Date().toISOString(),
+                });
+              }
+            } else if (q.includes("'bonus'")) {
+              const [id, negocio_id, account_id, points_delta, balance_after, uid, role] = boundValues;
+              db.tables.loyalty_movements.push({
+                id, negocio_id, account_id, type: 'bonus', points_delta, balance_after, amount_cents: 0, description: 'Bono de bienvenida', created_by_uid: uid, created_by_role: role, created_at: new Date().toISOString(),
+              });
+            }
+          } else {
+            const [id, negocio_id, account_id, type, points_delta, balance_after, description, uid, role] = boundValues;
+            db.tables.loyalty_movements.push({
+              id, negocio_id, account_id, type, points_delta, balance_after, amount_cents: 0, description, created_by_uid: uid, created_by_role: role, created_at: new Date().toISOString(),
+            });
+          }
+        }
+
+        if (q.startsWith('INSERT INTO discount_coupons')) {
+          const [id, negocio_id, code, description, discount_type, discount_value, min_purchase_cents, max_discount_cents, max_uses, expires_at, created_by_uid] = boundValues;
+          db.tables.discount_coupons.push({
+            id,
+            negocio_id,
+            code,
+            description,
+            discount_type,
+            discount_value,
+            min_purchase_cents,
+            max_discount_cents,
+            max_uses,
+            used_count: 0,
+            expires_at,
+            active: 1,
+            created_by_uid,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          });
+        }
+
+        if (q.startsWith('UPDATE discount_coupons SET used_count = used_count + 1')) {
+          const [coupId, negId] = boundValues;
+          const c = db.tables.discount_coupons.find((cp) => cp.id === coupId && cp.negocio_id === negId);
+          if (c) c.used_count += 1;
+        } else if (q.startsWith('UPDATE discount_coupons SET used_count = MAX(0, used_count - 1)')) {
+          const [negId, code] = boundValues;
+          const c = db.tables.discount_coupons.find((cp) => cp.negocio_id === negId && cp.code === code);
+          if (c) c.used_count = Math.max(0, c.used_count - 1);
+        } else if (q.startsWith('UPDATE discount_coupons')) {
+          const [active, description, minPurchase, maxDisc, maxUses, expiresAt, coupId, negId] = boundValues;
+          const c = db.tables.discount_coupons.find((cp) => cp.id === coupId && cp.negocio_id === negId);
+          if (c) {
+            c.active = active;
+            c.description = description;
+            c.min_purchase_cents = minPurchase;
+            c.max_discount_cents = maxDisc;
+            c.max_uses = maxUses;
+            c.expires_at = expiresAt;
+          }
+        }
+
+        if (q.startsWith('DELETE FROM discount_coupons WHERE id = ? AND negocio_id = ?')) {
+          const [coupId, negId] = boundValues;
+          db.tables.discount_coupons = db.tables.discount_coupons.filter(
+            (cp) => !(cp.id === coupId && cp.negocio_id === negId)
+          );
         }
 
         if (q.startsWith('INSERT INTO whatsapp_conversations')) {
@@ -2310,5 +2662,216 @@ describe('Cloudflare Pages Functions API (/api/*)', () => {
     );
     const quickLoginRes = await onRequest(quickLoginCtx as any);
     expect(quickLoginRes.status).toBe(403);
+  });
+
+  describe('Club de Puntos del Barrio y Cupones (Multi-Tenant + Transacciones Atómicas)', () => {
+    it('aísla cuentas y cupones por negocio_id y enmascara apellido en consulta pública', async () => {
+      // Consulta privada en 'surtifacil' NO ve la cuenta de 'otra-tienda' (500 pts) ni el cupón SECRETO50
+      const listCtx = createMockContext(
+        'GET',
+        'http://localhost/api/loyalty/accounts',
+        { Authorization: 'Bearer mock:admin-1:admin@surtifacil.com:admin' },
+        null,
+        db
+      );
+      const listRes = await onRequest(listCtx as any);
+      expect(listRes.status).toBe(200);
+      const listData = await listRes.json();
+      expect(listData.some((a: any) => a.id === 'loy-otro')).toBe(false);
+      expect(listData.some((a: any) => a.id === 'loy-carlos')).toBe(true);
+
+      const coupCtx = createMockContext(
+        'GET',
+        'http://localhost/api/coupons',
+        { Authorization: 'Bearer mock:admin-1:admin@surtifacil.com:admin' },
+        null,
+        db
+      );
+      const coupRes = await onRequest(coupCtx as any);
+      const coupData = await coupRes.json();
+      expect(coupData.some((c: any) => c.code === 'SECRETO50')).toBe(false);
+
+      // Consulta pública enmascara el apellido ("Don Carlos Restrepo" -> "Don Carlos R.")
+      const pubLookup = createMockContext(
+        'GET',
+        'http://localhost/api/public/loyalty/lookup?slug=surtifacil&phone=+573004567890',
+        {},
+        null,
+        db
+      );
+      const pubRes = await onRequest(pubLookup as any);
+      expect(pubRes.status).toBe(200);
+      const pubData = await pubRes.json();
+      expect(pubData.enrolled).toBe(true);
+      expect(pubData.display_name).toBe('Don Carlos R.');
+      expect(pubData.points_balance).toBe(85);
+      expect(pubData.redeemable_value_cents).toBe(425000);
+    });
+
+    it('aplica RBAC estricto: cajero recibe 403 al crear cupón, ajustar puntos o cambiar reglas', async () => {
+      const cashierCouponCtx = createMockContext(
+        'POST',
+        'http://localhost/api/coupons',
+        { Authorization: 'Bearer mock:cashier-1:cajero@surtifacil.com:cashier' },
+        { code: 'NUEVO10', discount_type: 'percentage', discount_value: 10 },
+        db
+      );
+      expect((await onRequest(cashierCouponCtx as any)).status).toBe(403);
+
+      const cashierAdjustCtx = createMockContext(
+        'POST',
+        'http://localhost/api/loyalty/accounts/loy-carlos/adjust',
+        { Authorization: 'Bearer mock:cashier-1:cajero@surtifacil.com:cashier' },
+        { points_delta: 20, description: 'Bono' },
+        db
+      );
+      expect((await onRequest(cashierAdjustCtx as any)).status).toBe(403);
+
+      const cashierCfgCtx = createMockContext(
+        'PUT',
+        'http://localhost/api/loyalty/config',
+        { Authorization: 'Bearer mock:cashier-1:cajero@surtifacil.com:cashier' },
+        { pesos_per_point_cents: 50000 },
+        db
+      );
+      expect((await onRequest(cashierCfgCtx as any)).status).toBe(403);
+
+      // Cajero SÍ puede consultar puntos y validar cupones para cobrar en mostrador
+      const cashierLookupCtx = createMockContext(
+        'GET',
+        'http://localhost/api/loyalty/accounts/lookup?phone=3004567890',
+        { Authorization: 'Bearer mock:cashier-1:cajero@surtifacil.com:cashier' },
+        null,
+        db
+      );
+      expect((await onRequest(cashierLookupCtx as any)).status).toBe(200);
+    });
+
+    it('POST /api/sales liquida cupón + canje de puntos + acumulación en servidor y bloquea sobre-canje', async () => {
+      // 3 uds de Arroz ($4.500 c/u = $13.500 = 1.350.000 cents).
+      // Cupón VECINO10 (10%) -> -$1.350 -> queda $12.150 (1.215.000 cents).
+      // Canje 50 pts -> -$2.500 (250.000 cents) -> pagado $9.650 (965.000 cents) -> gana 9 pts.
+      // Saldo Don Carlos: 85 - 50 + 9 = 44 pts.
+      const saleCtx = createMockContext(
+        'POST',
+        'http://localhost/api/sales',
+        { Authorization: 'Bearer mock:cashier-1:cajero@surtifacil.com:cashier' },
+        {
+          payment_method: 'cash',
+          items: [{ product_id: 'p-1', quantity: 3 }],
+          loyalty_phone: '3004567890',
+          loyalty_points_redeemed: 50,
+          coupon_code: 'vecino10',
+        },
+        db
+      );
+      const res = await onRequest(saleCtx as any);
+      expect(res.status).toBe(201);
+      const data = await res.json();
+      expect(data.subtotal_cents).toBe(1350000);
+      expect(data.coupon_code).toBe('VECINO10');
+      expect(data.coupon_discount_cents).toBe(135000);
+      expect(data.loyalty_points_redeemed).toBe(50);
+      expect(data.loyalty_discount_cents).toBe(250000);
+      expect(data.total_cents).toBe(965000);
+      expect(data.loyalty_points_earned).toBe(9);
+      expect(data.loyalty_balance_after).toBe(44);
+
+      const carlos = db.tables.loyalty_accounts.find((a) => a.id === 'loy-carlos');
+      expect(carlos?.points_balance).toBe(44);
+      const coupon = db.tables.discount_coupons.find((c) => c.code === 'VECINO10');
+      expect(coupon?.used_count).toBe(1);
+
+      // Intento de sobre-canje (pedir 100 pts teniendo solo 44) -> 400
+      const overCtx = createMockContext(
+        'POST',
+        'http://localhost/api/sales',
+        { Authorization: 'Bearer mock:cashier-1:cajero@surtifacil.com:cashier' },
+        {
+          payment_method: 'cash',
+          items: [{ product_id: 'p-1', quantity: 3 }],
+          loyalty_phone: '3004567890',
+          loyalty_points_redeemed: 100,
+        },
+        db
+      );
+      const overRes = await onRequest(overCtx as any);
+      expect(overRes.status).toBe(400);
+    });
+
+    it('ciclo pedido web/kiosco: reserva cupón/puntos, acredita al facturar 1 vez y reintegra al cancelar', async () => {
+      // 1. Pedido con canje de 20 pts y cupón VECINO10 (3 uds Arroz = $13.500 -> -10% $1.350 -> -$1.000 pts = $11.150 -> gana 11 pts)
+      const orderCtx = createMockContext(
+        'POST',
+        'http://localhost/api/customer-orders',
+        {},
+        {
+          slug: 'surtifacil',
+          source: 'web',
+          customer_name: 'Don Carlos Restrepo',
+          customer_phone: '3004567890',
+          delivery_type: 'pickup_counter',
+          payment_method: 'cash',
+          coupon_code: 'VECINO10',
+          loyalty_points_redeemed: 20,
+          items: [{ product_id: 'p-1', quantity: 3 }],
+        },
+        db
+      );
+      const orderRes = await onRequest(orderCtx as any);
+      expect(orderRes.status).toBe(201);
+      const orderData = await orderRes.json();
+      expect(orderData.order.total_cents).toBe(1115000);
+      expect(orderData.order.loyalty_points_earned).toBe(11);
+      // Reserva inmediata: 85 - 20 = 65 pts
+      expect(db.tables.loyalty_accounts.find((a) => a.id === 'loy-carlos')?.points_balance).toBe(65);
+
+      // 2. Facturar orden -> acredita los 11 pts -> 65 + 11 = 76 pts
+      const convertCtx = createMockContext(
+        'POST',
+        `http://localhost/api/customer-orders/${orderData.order.id}/convert-to-sale`,
+        { Authorization: 'Bearer mock:cashier-1:cajero@surtifacil.com:cashier' },
+        {},
+        db
+      );
+      const convertRes = await onRequest(convertCtx as any);
+      expect(convertRes.status).toBe(200);
+      expect(db.tables.loyalty_accounts.find((a) => a.id === 'loy-carlos')?.points_balance).toBe(76);
+
+      // 3. Crear segundo pedido con canje de 16 pts + VECINO10 y CANCELARLO -> reintegra puntos y cupón
+      const order2Ctx = createMockContext(
+        'POST',
+        'http://localhost/api/customer-orders',
+        {},
+        {
+          slug: 'surtifacil',
+          source: 'kiosk',
+          customer_name: 'Don Carlos Restrepo',
+          customer_phone: '3004567890',
+          delivery_type: 'pickup_counter',
+          payment_method: 'cash',
+          coupon_code: 'VECINO10',
+          loyalty_points_redeemed: 16,
+          items: [{ product_id: 'p-1', quantity: 3 }],
+        },
+        db
+      );
+      const order2Res = await onRequest(order2Ctx as any);
+      const order2Data = await order2Res.json();
+      expect(db.tables.loyalty_accounts.find((a) => a.id === 'loy-carlos')?.points_balance).toBe(60);
+      expect(db.tables.discount_coupons.find((c) => c.code === 'VECINO10')?.used_count).toBe(2);
+
+      const cancelCtx = createMockContext(
+        'PUT',
+        `http://localhost/api/customer-orders/${order2Data.order.id}/status`,
+        { Authorization: 'Bearer mock:cashier-1:cajero@surtifacil.com:cashier' },
+        { status: 'cancelled' },
+        db
+      );
+      const cancelRes = await onRequest(cancelCtx as any);
+      expect(cancelRes.status).toBe(200);
+      expect(db.tables.loyalty_accounts.find((a) => a.id === 'loy-carlos')?.points_balance).toBe(76);
+      expect(db.tables.discount_coupons.find((c) => c.code === 'VECINO10')?.used_count).toBe(1);
+    });
   });
 });

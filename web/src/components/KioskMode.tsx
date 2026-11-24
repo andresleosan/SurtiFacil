@@ -9,6 +9,16 @@ import {
   resolveProductUnitPricing,
   type WholesaleTier,
 } from '../utils/wholesalePricing';
+import { lookupPublicLoyaltyByPhone, validatePublicCoupon } from '../services/loyaltyService';
+import type { DiscountCoupon, PublicLoyaltyLookupResponse } from '../types/loyalty';
+import {
+  calculateMaxRedeemablePoints,
+  DEFAULT_LOYALTY_CONFIG,
+  isValidLoyaltyPhone,
+  normalizeCouponCode,
+  normalizeLoyaltyPhone,
+  settleOrderLoyaltyAndCoupon,
+} from '../utils/loyaltyEngine';
 
 const AISLES = [
   { id: 'todos', label: 'Todos', emoji: '🌟' },
@@ -52,6 +62,17 @@ export default function KioskMode({ slug = 'surtifacil', onExit }: KioskModeProp
   const [deliveryNeighborhood, setDeliveryNeighborhood] = useState('');
   const [paymentMethod, setPaymentMethod] = useState<'cash' | 'transfer' | 'credit'>('cash');
   const [submitting, setSubmitting] = useState(false);
+  const [checkoutError, setCheckoutError] = useState<string | null>(null);
+
+  // Club de Puntos y Cupones en Kiosco
+  const [loyaltyLookup, setLoyaltyLookup] = useState<PublicLoyaltyLookupResponse | null>(null);
+  const [loyaltyLookupLoading, setLoyaltyLookupLoading] = useState(false);
+  const [loyaltyLookupError, setLoyaltyLookupError] = useState<string | null>(null);
+  const [redeemMaxPoints, setRedeemMaxPoints] = useState(false);
+  const [couponInput, setCouponInput] = useState('');
+  const [appliedCoupon, setAppliedCoupon] = useState<DiscountCoupon | null>(null);
+  const [couponLoading, setCouponLoading] = useState(false);
+  const [couponError, setCouponError] = useState<string | null>(null);
 
   // Pantalla de Turno Gigante
   const [turnResult, setTurnResult] = useState<{
@@ -59,6 +80,11 @@ export default function KioskMode({ slug = 'surtifacil', onExit }: KioskModeProp
     customerName: string;
     totalCents: number;
     paymentMethod: string;
+    couponCode?: string | null;
+    couponDiscountCents?: number;
+    pointsRedeemed?: number;
+    pointsDiscountCents?: number;
+    pointsEarned?: number;
   } | null>(null);
   const [countdown, setCountdown] = useState(15);
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -129,6 +155,13 @@ export default function KioskMode({ slug = 'surtifacil', onExit }: KioskModeProp
     setPaymentMethod('cash');
     setDeliveryType('pickup_counter');
     setCheckoutStep(null);
+    setCheckoutError(null);
+    setLoyaltyLookup(null);
+    setLoyaltyLookupError(null);
+    setRedeemMaxPoints(false);
+    setCouponInput('');
+    setAppliedCoupon(null);
+    setCouponError(null);
     setSelectedAisle('todos');
     setSearch('');
   };
@@ -273,20 +306,141 @@ export default function KioskMode({ slug = 'surtifacil', onExit }: KioskModeProp
     return cart.reduce((sum, item) => sum + (item.wholesale_savings_cents || 0), 0);
   }, [cart]);
 
-  const cartTotalCents = useMemo(() => {
-    const itemsTotal = cart.reduce((sum, item) => sum + item.subtotal_cents, 0);
-    const deliveryCost = deliveryType === 'delivery' ? (storeData?.costo_domicilio_cents || 0) : 0;
-    return itemsTotal + deliveryCost;
-  }, [cart, deliveryType, storeData]);
+  const itemsSubtotalCents = useMemo(() => {
+    return cart.reduce((sum, item) => sum + item.subtotal_cents, 0);
+  }, [cart]);
+
+  const deliveryCostCents = useMemo(() => {
+    return deliveryType === 'delivery' ? (storeData?.costo_domicilio_cents || 0) : 0;
+  }, [deliveryType, storeData]);
+
+  const loyaltyConfig = storeData?.loyalty_config || loyaltyLookup?.config || DEFAULT_LOYALTY_CONFIG;
+  const normalizedKioskPhone = normalizeLoyaltyPhone(customerPhone);
+  const hasValidKioskPhone = isValidLoyaltyPhone(normalizedKioskPhone);
+
+  const couponEval = useMemo(() => {
+    if (!appliedCoupon || itemsSubtotalCents <= 0) {
+      return { coupon: null as DiscountCoupon | null, discountCents: 0, warning: null as string | null };
+    }
+    const res = settleOrderLoyaltyAndCoupon({
+      itemsSubtotalCents,
+      deliveryFeeCents: 0,
+      config: loyaltyConfig,
+      coupon: appliedCoupon,
+      couponCodeRequested: appliedCoupon.code,
+      hasValidPhone: false,
+      accountPointsBalance: 0,
+      pointsToRedeemRequested: 0,
+    });
+    if (!res.ok) {
+      return { coupon: null as DiscountCoupon | null, discountCents: 0, warning: res.error };
+    }
+    return { coupon: appliedCoupon, discountCents: res.coupon_discount_cents, warning: null };
+  }, [appliedCoupon, itemsSubtotalCents, loyaltyConfig]);
+
+  const afterCouponSubtotalCents = Math.max(0, itemsSubtotalCents - couponEval.discountCents);
+  const redeemPolicy = useMemo(
+    () =>
+      calculateMaxRedeemablePoints(
+        loyaltyLookup?.points_balance ?? 0,
+        afterCouponSubtotalCents,
+        loyaltyConfig
+      ),
+    [loyaltyLookup?.points_balance, afterCouponSubtotalCents, loyaltyConfig]
+  );
+
+  const pointsToRedeem =
+    hasValidKioskPhone && redeemMaxPoints && redeemPolicy.can_redeem ? redeemPolicy.max_points : 0;
+
+  const orderSettlement = useMemo(() => {
+    const res = settleOrderLoyaltyAndCoupon({
+      itemsSubtotalCents,
+      deliveryFeeCents: deliveryCostCents,
+      config: loyaltyConfig,
+      coupon: couponEval.coupon,
+      couponCodeRequested: couponEval.coupon?.code || null,
+      hasValidPhone: hasValidKioskPhone,
+      accountPointsBalance: loyaltyLookup?.points_balance ?? 0,
+      pointsToRedeemRequested: pointsToRedeem,
+    });
+    if (res.ok) return res;
+    return {
+      ok: true as const,
+      items_subtotal_cents: itemsSubtotalCents,
+      coupon_code: null,
+      coupon_discount_cents: 0,
+      after_coupon_subtotal_cents: itemsSubtotalCents,
+      points_redeemed: 0,
+      points_discount_cents: 0,
+      paid_merchandise_cents: itemsSubtotalCents,
+      delivery_fee_cents: deliveryCostCents,
+      final_total_cents: itemsSubtotalCents + deliveryCostCents,
+      points_earned: 0,
+      config: loyaltyConfig,
+    };
+  }, [
+    itemsSubtotalCents,
+    deliveryCostCents,
+    loyaltyConfig,
+    couponEval.coupon,
+    hasValidKioskPhone,
+    loyaltyLookup?.points_balance,
+    pointsToRedeem,
+  ]);
+
+  const cartTotalCents = orderSettlement.final_total_cents;
 
   const cartUnitsCount = useMemo(() => {
     return cart.reduce((sum, item) => sum + item.quantity, 0);
   }, [cart]);
 
+  const handleLookupKioskPoints = async () => {
+    setLoyaltyLookupError(null);
+    try {
+      setLoyaltyLookupLoading(true);
+      const res = await lookupPublicLoyaltyByPhone(storeData?.slug || slug, customerPhone);
+      setLoyaltyLookup(res);
+      setRedeemMaxPoints(false);
+      if (res.enrolled && res.display_name && !customerName.trim()) {
+        setCustomerName(res.display_name);
+      }
+    } catch (err: unknown) {
+      setLoyaltyLookup(null);
+      setRedeemMaxPoints(false);
+      setLoyaltyLookupError(err instanceof Error ? err.message : 'No se pudo consultar tus puntos.');
+    } finally {
+      setLoyaltyLookupLoading(false);
+    }
+  };
+
+  const handleApplyKioskCoupon = async () => {
+    setCouponError(null);
+    const code = normalizeCouponCode(couponInput);
+    if (!code) {
+      setCouponError('Escribe el código de tu cupón.');
+      return;
+    }
+    try {
+      setCouponLoading(true);
+      const res = await validatePublicCoupon(storeData?.slug || slug, code, itemsSubtotalCents);
+      if (res.valid && res.coupon) {
+        setAppliedCoupon(res.coupon);
+        setCouponInput(res.coupon.code);
+      } else {
+        setCouponError(res.error || 'Cupón no válido.');
+      }
+    } catch (err: unknown) {
+      setCouponError(err instanceof Error ? err.message : 'Cupón no válido.');
+    } finally {
+      setCouponLoading(false);
+    }
+  };
+
   // Envío del pedido y generación de turno
   const handleConfirmOrder = async () => {
+    setCheckoutError(null);
     if (!customerName.trim()) {
-      alert('Por favor escribe tu nombre para llamarte por el turno.');
+      setCheckoutError('Por favor escribe tu nombre para llamarte por el turno.');
       return;
     }
     if (cart.length === 0) return;
@@ -297,11 +451,13 @@ export default function KioskMode({ slug = 'surtifacil', onExit }: KioskModeProp
         slug: storeData?.slug || slug,
         negocio_id: storeData?.id,
         customer_name: customerName.trim(),
-        customer_phone: customerPhone.trim() || undefined,
+        customer_phone: hasValidKioskPhone ? normalizedKioskPhone : customerPhone.trim() || undefined,
         delivery_type: deliveryType,
         delivery_address: deliveryAddress.trim() || undefined,
         delivery_neighborhood: deliveryNeighborhood.trim() || undefined,
         payment_method: paymentMethod,
+        coupon_code: orderSettlement.coupon_code || undefined,
+        loyalty_points_redeemed: orderSettlement.points_redeemed > 0 ? orderSettlement.points_redeemed : undefined,
         items: cart.map((i) => ({
           product_id: i.product_id,
           product_name: i.product_name,
@@ -320,9 +476,14 @@ export default function KioskMode({ slug = 'surtifacil', onExit }: KioskModeProp
         customerName: customerName.trim(),
         totalCents: res.order.total_cents,
         paymentMethod,
+        couponCode: res.order.coupon_code ?? orderSettlement.coupon_code,
+        couponDiscountCents: res.order.coupon_discount_cents ?? orderSettlement.coupon_discount_cents,
+        pointsRedeemed: res.order.loyalty_points_redeemed ?? orderSettlement.points_redeemed,
+        pointsDiscountCents: res.order.loyalty_discount_cents ?? orderSettlement.points_discount_cents,
+        pointsEarned: res.order.loyalty_points_earned ?? orderSettlement.points_earned,
       });
     } catch (err: unknown) {
-      alert(err instanceof Error ? err.message : 'Error al registrar el pedido en el Kiosco.');
+      setCheckoutError(err instanceof Error ? err.message : 'Error al registrar el pedido en el Kiosco.');
     } finally {
       setSubmitting(false);
     }
@@ -375,6 +536,27 @@ export default function KioskMode({ slug = 'surtifacil', onExit }: KioskModeProp
                 {formatCentsCOP(turnResult.totalCents)}
               </span>
             </div>
+            {((turnResult.couponDiscountCents || 0) > 0 ||
+              (turnResult.pointsDiscountCents || 0) > 0 ||
+              (turnResult.pointsEarned || 0) > 0) && (
+              <div className="mt-3 flex flex-wrap gap-2 pt-2 border-t border-slate-700 text-xs font-bold">
+                {(turnResult.couponDiscountCents || 0) > 0 && turnResult.couponCode && (
+                  <span className="rounded-lg bg-blue-500/20 px-2.5 py-1 text-blue-300">
+                    🎟️ Cupón {turnResult.couponCode}: -{formatCentsCOP(turnResult.couponDiscountCents || 0)}
+                  </span>
+                )}
+                {(turnResult.pointsDiscountCents || 0) > 0 && (
+                  <span className="rounded-lg bg-amber-500/20 px-2.5 py-1 text-amber-300">
+                    ⭐ Canje {turnResult.pointsRedeemed} pts: -{formatCentsCOP(turnResult.pointsDiscountCents || 0)}
+                  </span>
+                )}
+                {(turnResult.pointsEarned || 0) > 0 && (
+                  <span className="rounded-lg bg-emerald-500/20 px-2.5 py-1 text-emerald-300">
+                    ✨ Acumulas +{turnResult.pointsEarned} pts en tu Club
+                  </span>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Cuenta regresiva de reinicio automático */}
@@ -974,12 +1156,21 @@ export default function KioskMode({ slug = 'surtifacil', onExit }: KioskModeProp
               </div>
               <button
                 type="button"
-                onClick={() => setCheckoutStep(null)}
+                onClick={() => {
+                  setCheckoutStep(null);
+                  setCheckoutError(null);
+                }}
                 className="p-2 text-slate-400 hover:text-slate-600 rounded-full"
               >
                 <Icon name="close" size={24} />
               </button>
             </div>
+
+            {checkoutError && (
+              <div role="alert" className="mt-4 rounded-2xl border border-red-200 bg-red-50 p-3 text-sm font-semibold text-red-700">
+                {checkoutError}
+              </div>
+            )}
 
             {/* Paso 1: Datos del Vecino */}
             {checkoutStep === 1 && (
@@ -1000,18 +1191,85 @@ export default function KioskMode({ slug = 'surtifacil', onExit }: KioskModeProp
                   <p className="text-xs text-slate-500 mt-1">Con este nombre te llamaremos en el mostrador.</p>
                 </div>
 
-                <div>
-                  <label htmlFor="kiosk-customer-phone" className="block text-sm font-bold text-slate-700 mb-2">
-                    Teléfono WhatsApp (Opcional)
+                <div className="space-y-2">
+                  <label htmlFor="kiosk-customer-phone" className="block text-sm font-bold text-slate-700">
+                    Teléfono WhatsApp (Para Puntos del Club)
                   </label>
-                  <input
-                    id="kiosk-customer-phone"
-                    type="tel"
-                    value={customerPhone}
-                    onChange={(e) => setCustomerPhone(e.target.value)}
-                    placeholder="300 123 4567"
-                    className="w-full min-h-[56px] rounded-2xl border-2 border-slate-200 px-4 text-lg font-semibold text-slate-800 focus:border-sf-primary focus:outline-none"
-                  />
+                  <div className="flex flex-col sm:flex-row gap-2">
+                    <input
+                      id="kiosk-customer-phone"
+                      type="tel"
+                      value={customerPhone}
+                      onChange={(e) => {
+                        setCustomerPhone(e.target.value);
+                        setLoyaltyLookupError(null);
+                        if (!e.target.value.trim()) {
+                          setLoyaltyLookup(null);
+                          setRedeemMaxPoints(false);
+                        }
+                      }}
+                      placeholder="300 123 4567"
+                      className="flex-1 min-h-[56px] rounded-2xl border-2 border-slate-200 px-4 text-lg font-semibold text-slate-800 focus:border-sf-primary focus:outline-none"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => void handleLookupKioskPoints()}
+                      disabled={loyaltyLookupLoading || !customerPhone.trim()}
+                      className="min-h-[56px] rounded-2xl bg-amber-500 hover:bg-amber-600 disabled:opacity-50 px-4 text-sm font-bold text-white transition shrink-0"
+                    >
+                      {loyaltyLookupLoading ? 'Consultando...' : '⭐ Consultar mis Puntos'}
+                    </button>
+                  </div>
+
+                  {loyaltyLookupError && (
+                    <p className="text-xs font-semibold text-red-600">{loyaltyLookupError}</p>
+                  )}
+
+                  {loyaltyLookup && (
+                    <div className="rounded-2xl border-2 border-amber-200 bg-amber-50/70 p-3.5 space-y-2 text-sm">
+                      {loyaltyLookup.enrolled ? (
+                        <>
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="font-bold text-slate-800">
+                              👋 {loyaltyLookup.display_name}
+                            </span>
+                            <span className="font-black text-amber-900 tabular-nums">
+                              ⭐ {loyaltyLookup.points_balance} pts ({formatCentsCOP(loyaltyLookup.redeemable_value_cents)})
+                            </span>
+                          </div>
+                          {redeemPolicy.can_redeem ? (
+                            <button
+                              type="button"
+                              onClick={() => setRedeemMaxPoints((prev) => !prev)}
+                              className={`w-full min-h-[56px] rounded-xl font-bold text-sm transition border-2 ${
+                                redeemMaxPoints
+                                  ? 'border-emerald-600 bg-emerald-600 text-white'
+                                  : 'border-amber-400 bg-white text-amber-900 hover:bg-amber-100'
+                              }`}
+                            >
+                              {redeemMaxPoints
+                                ? `✅ Canjeando ${redeemPolicy.max_points} pts (-${formatCentsCOP(redeemPolicy.max_discount_cents)}) · Toca para quitar`
+                                : `Usar ${redeemPolicy.max_points} puntos (-${formatCentsCOP(redeemPolicy.max_discount_cents)})`}
+                            </button>
+                          ) : (
+                            <p className="text-xs text-slate-600">
+                              Necesitas mínimo {loyaltyConfig.min_redeem_points} puntos para canjear en este pedido.
+                            </p>
+                          )}
+                        </>
+                      ) : (
+                        <p className="text-xs font-semibold text-amber-950">
+                          ✨ ¡Bienvenido! Acumularás +{orderSettlement.points_earned} puntos al completar tu pedido.
+                        </p>
+                      )}
+                    </div>
+                  )}
+
+                  {hasValidKioskPhone && !loyaltyLookup && orderSettlement.points_earned > 0 && (
+                    <p className="text-xs font-semibold text-emerald-700">
+                      ✨ Acumularás +{orderSettlement.points_earned} puntos con este pedido
+                    </p>
+                  )}
                 </div>
 
                 {storeData?.config.permite_domicilio && (
@@ -1149,11 +1407,87 @@ export default function KioskMode({ slug = 'surtifacil', onExit }: KioskModeProp
                   </button>
                 </div>
 
-                <div className="rounded-2xl bg-slate-50 p-4 border border-slate-200 flex justify-between items-center">
-                  <span className="font-semibold text-slate-600">Total a facturar:</span>
-                  <span className="text-2xl font-black text-slate-900 tabular-nums">
-                    {formatCentsCOP(cartTotalCents)}
-                  </span>
+                {/* Bloque de Cupón de Descuento en Kiosco */}
+                <div className="rounded-2xl border-2 border-slate-200 bg-slate-50/70 p-4 space-y-2">
+                  <label htmlFor="kiosk-coupon-code" className="block text-sm font-bold text-slate-700">
+                    🎟️ ¿Tienes un cupón de descuento?
+                  </label>
+                  {couponEval.coupon ? (
+                    <div className="flex items-center justify-between rounded-xl border border-blue-200 bg-blue-50 px-3 py-2.5 text-sm">
+                      <span className="font-bold text-blue-900">
+                        🎟️ {couponEval.coupon.code} (-{formatCentsCOP(orderSettlement.coupon_discount_cents)})
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setAppliedCoupon(null);
+                          setCouponInput('');
+                          setCouponError(null);
+                        }}
+                        className="min-h-[44px] px-3 text-xs font-bold text-red-600 hover:underline"
+                      >
+                        Quitar
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="flex gap-2">
+                      <input
+                        id="kiosk-coupon-code"
+                        type="text"
+                        value={couponInput}
+                        onChange={(e) => {
+                          setCouponInput(e.target.value.toUpperCase());
+                          setCouponError(null);
+                        }}
+                        placeholder="Ej: VECINO10"
+                        className="flex-1 min-h-[56px] rounded-xl border-2 border-slate-200 bg-white px-4 font-mono text-base font-bold uppercase text-slate-800 focus:border-sf-primary focus:outline-none"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => void handleApplyKioskCoupon()}
+                        disabled={couponLoading || !couponInput.trim()}
+                        className="min-h-[56px] rounded-xl bg-sf-primary hover:bg-blue-600 disabled:opacity-50 px-5 text-sm font-bold text-white"
+                      >
+                        {couponLoading ? '...' : 'Aplicar'}
+                      </button>
+                    </div>
+                  )}
+                  {(couponError || couponEval.warning) && (
+                    <p className="text-xs font-semibold text-red-600">
+                      {couponError || couponEval.warning}
+                    </p>
+                  )}
+                </div>
+
+                <div className="rounded-2xl bg-slate-50 p-4 border border-slate-200 space-y-1.5">
+                  <div className="flex justify-between text-xs text-slate-600 tabular-nums">
+                    <span>Subtotal productos:</span>
+                    <span className="font-semibold">{formatCentsCOP(itemsSubtotalCents)}</span>
+                  </div>
+                  {orderSettlement.coupon_discount_cents > 0 && orderSettlement.coupon_code && (
+                    <div className="flex justify-between text-xs font-bold text-blue-700 tabular-nums">
+                      <span>Cupón {orderSettlement.coupon_code}:</span>
+                      <span>-{formatCentsCOP(orderSettlement.coupon_discount_cents)}</span>
+                    </div>
+                  )}
+                  {orderSettlement.points_discount_cents > 0 && (
+                    <div className="flex justify-between text-xs font-bold text-amber-800 tabular-nums">
+                      <span>Canje {orderSettlement.points_redeemed} pts:</span>
+                      <span>-{formatCentsCOP(orderSettlement.points_discount_cents)}</span>
+                    </div>
+                  )}
+                  {deliveryCostCents > 0 && (
+                    <div className="flex justify-between text-xs text-slate-600 tabular-nums">
+                      <span>Domicilio:</span>
+                      <span className="font-semibold">{formatCentsCOP(deliveryCostCents)}</span>
+                    </div>
+                  )}
+                  <div className="flex justify-between items-center pt-1.5 border-t border-slate-200">
+                    <span className="font-semibold text-slate-700">Total a facturar:</span>
+                    <span className="text-2xl font-black text-slate-900 tabular-nums">
+                      {formatCentsCOP(cartTotalCents)}
+                    </span>
+                  </div>
                 </div>
 
                 <div className="flex gap-3">

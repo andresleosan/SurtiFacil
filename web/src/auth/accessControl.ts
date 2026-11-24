@@ -6,6 +6,7 @@ export const PAGES = [
   'sales',
   'create-sale',
   'whatsapp',
+  'loyalty',
   'employees',
   'credits',
   'reports',
@@ -35,6 +36,7 @@ export const PAGE_ROLES: Readonly<Record<Page, readonly UserRole[]>> = {
   margins: MANAGER_ROLES,
   restock: MANAGER_ROLES,
   whatsapp: MANAGER_ROLES,
+  loyalty: ALL_ROLES,
   settings: MANAGER_ROLES,
   'super-admin': ['admin'],
 };

@@ -47,7 +47,8 @@ export type IconName =
   | 'download'
   | 'copy'
   | 'share'
-  | 'qr';
+  | 'qr'
+  | 'gift';
 
 const PATHS: Record<IconName, string> = {
   home: 'M3 11.5 12 4l9 7.5M5 10v10h5v-6h4v6h5V10',
@@ -97,6 +98,7 @@ const PATHS: Record<IconName, string> = {
   copy: 'M8 4v12a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V7.242a2 2 0 0 0-.602-1.43L16.083 2.57A2 2 0 0 0 14.685 2H10a2 2 0 0 0-2 2Zm-4 4H3a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-1',
   share: 'M18 8a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM6 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Zm12 7a3 3 0 1 0 0-6 3 3 0 0 0 0 6Zm-9.41-4.41l6.83 3.98m0-13.14l-6.82 3.98',
   qr: 'M3 3h6v6H3V3Zm12 0h6v6h-6V3ZM3 15h6v6H3v-6Zm12 0h3v3h-3v-3Zm3 3h3v3h-3v-3Zm-3 3h3v-3m3-3v3m-3-9h6v3h-6v-3ZM6 6h0m12 0h0M6 18h0',
+  gift: 'M20 12v10H4V12M2 7h20v5H2V7Zm10 15V7m0 0H7.5a2.5 2.5 0 1 1 0-5C11 2 12 7 12 7Zm0 0h4.5a2.5 2.5 0 1 0 0-5C13 2 12 7 12 7Z',
 };
 
 interface IconProps extends Omit<SVGProps<SVGSVGElement>, 'name'> {

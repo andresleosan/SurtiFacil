@@ -86,13 +86,14 @@ export function LiveOrdersTray({ onLoadOrderToCart, onSaleCreated }: LiveOrdersT
   const handleFastInvoice = async (order: CustomerOrder) => {
     try {
       setActionLoadingId(order.id);
-      const res = await convertOrderToSale(order.id);
+      setError(null);
+      await convertOrderToSale(order.id);
       setSuccessMessage(`✅ ${order.order_code} facturado exitosamente.`);
       setTimeout(() => setSuccessMessage(null), 4000);
       await fetchOrders(true);
       if (onSaleCreated) onSaleCreated();
     } catch (err: unknown) {
-      alert(err instanceof Error ? err.message : 'Error al facturar pedido.');
+      setError(err instanceof Error ? err.message : 'Error al facturar pedido.');
     } finally {
       setActionLoadingId(null);
     }
@@ -101,10 +102,11 @@ export function LiveOrdersTray({ onLoadOrderToCart, onSaleCreated }: LiveOrdersT
   const handleStatusChange = async (orderId: string, nextStatus: any) => {
     try {
       setActionLoadingId(orderId);
+      setError(null);
       await updateCustomerOrderStatus(orderId, nextStatus);
       await fetchOrders(true);
     } catch (err: unknown) {
-      alert(err instanceof Error ? err.message : 'Error actualizando estado.');
+      setError(err instanceof Error ? err.message : 'Error actualizando estado.');
     } finally {
       setActionLoadingId(null);
     }
@@ -216,6 +218,21 @@ export function LiveOrdersTray({ onLoadOrderToCart, onSaleCreated }: LiveOrdersT
                   {order.delivery_address && (
                     <span className="rounded bg-slate-100 px-2 py-0.5 truncate max-w-xs">
                       📍 {order.delivery_address}
+                    </span>
+                  )}
+                  {order.coupon_code && (
+                    <span className="rounded bg-blue-100 px-2 py-0.5 font-bold text-blue-900">
+                      🎟️ {order.coupon_code} (-{formatCentsCOP(order.coupon_discount_cents || 0)})
+                    </span>
+                  )}
+                  {(order.loyalty_points_redeemed || 0) > 0 && (
+                    <span className="rounded bg-amber-100 px-2 py-0.5 font-bold text-amber-900">
+                      ⭐ Canje {order.loyalty_points_redeemed} pts (-{formatCentsCOP(order.loyalty_discount_cents || 0)})
+                    </span>
+                  )}
+                  {(order.loyalty_points_earned || 0) > 0 && (
+                    <span className="rounded bg-emerald-100 px-2 py-0.5 font-bold text-emerald-800">
+                      ✨ +{order.loyalty_points_earned} pts Club
                     </span>
                   )}
                 </div>

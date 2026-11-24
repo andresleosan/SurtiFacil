@@ -559,4 +559,120 @@ test.describe('Suite E2E de Certificación de Producción — SurtiFácil SaaS',
     await expect(page.getByText(/🏷️ Mayorista 3\+/i)).toBeVisible();
     await expect(page.getByText(/🏷️ Ahorro mayorista incluido:/i)).toBeVisible();
   });
+
+  test('11. Club de Puntos del Barrio y Cupones WhatsApp (Admin #/loyalty, POS #/create-sale, Kiosco iPad y Tienda Vecinal)', async ({
+    page,
+  }) => {
+    await setupProductionE2EHarness(page);
+
+    // 1. Autenticación Admin y gestión en #/loyalty
+    await page.goto('/#/login');
+    await page.getByLabel('Correo electrónico').fill('andres.san1404@gmail.com');
+    await page.getByLabel('Contraseña').fill('TestPass123!');
+    await page.getByRole('button', { name: 'Iniciar Sesión' }).click();
+
+    await page.goto('/#/loyalty');
+    await expect(page.getByRole('heading', { name: /Club de Puntos del Barrio/i })).toBeVisible();
+    await expect(page.getByText('Don Carlos Restrepo')).toBeVisible();
+
+    // Otorgar bono +50 pts a Don Carlos (85 -> 135 pts)
+    await page.getByRole('button', { name: /Bono \/ Ajuste/i }).first().click();
+    const adjustDialog = page.getByRole('dialog', { name: /Bono o Ajuste/i });
+    await adjustDialog.getByRole('button', { name: '+50 pts' }).click();
+    await adjustDialog.getByLabel(/Motivo del ajuste o bono/i).fill('Bono cliente frecuente');
+    await adjustDialog.getByRole('button', { name: 'Aplicar Ajuste' }).click();
+    await expect(page.getByText('⭐ 135 pts')).toBeVisible();
+
+    // Crear cupón BARRIO15 en pestaña Cupones WhatsApp
+    await page.getByRole('tab', { name: /Cupones WhatsApp/i }).click();
+    await page.getByRole('button', { name: /Nuevo Cupón WhatsApp/i }).click();
+    const coupDialog = page.getByRole('dialog', { name: /Crear Cupón Promocional WhatsApp/i });
+    await coupDialog.getByLabel(/Código del Cupón/i).fill('BARRIO15');
+    await coupDialog.getByLabel(/Porcentaje de descuento/i).fill('15');
+    await coupDialog.getByLabel(/Compra Mínima/i).fill('5000');
+    await coupDialog.getByRole('button', { name: 'Crear Cupón' }).click();
+    await expect(page.getByText('BARRIO15')).toBeVisible();
+
+    // 2. POS (#/create-sale): consulta celular, canje de puntos + cupón BARRIO15 + tirilla
+    await page.goto('/#/create-sale');
+    const posList = page.getByRole('list', { name: 'Productos disponibles' });
+    const posAddMilk = posList.getByRole('button', { name: /Agregar Leche Entera Colanta 1L/i });
+    await posAddMilk.click();
+    await posAddMilk.click();
+    await posAddMilk.click(); // 3 uds = $11.400
+
+    const mobileCartBtn = page.getByRole('button', { name: /Ver carrito,/i });
+    if (await mobileCartBtn.isVisible()) {
+      await mobileCartBtn.click();
+    }
+
+    await page.getByRole('button', { name: /Club de Puntos \/ Cupón/i }).click();
+    await page.getByLabel(/Celular del Vecino/i).fill('3004567890');
+    await page.getByRole('button', { name: 'Consultar' }).click();
+    await expect(page.getByText('Don Carlos Restrepo')).toBeVisible();
+
+    await page.getByLabel(/Código de Cupón WhatsApp/i).fill('BARRIO15');
+    await page.getByRole('button', { name: 'Aplicar' }).click();
+    await expect(page.getByText(/🎟️ BARRIO15/i)).toBeVisible();
+
+    await page.getByRole('button', { name: /Canjear máx\./i }).click();
+    await page.getByRole('button', { name: /Pago exacto de/i }).click();
+    await page.getByRole('button', { name: /Confirmar venta/i }).click();
+
+    await expect(page.getByRole('status').filter({ hasText: 'Venta registrada exitosamente' })).toBeVisible();
+    await page.getByRole('button', { name: /Tirilla Térmica/i }).click();
+    const receiptDialog = page.getByRole('dialog');
+    await expect(receiptDialog).toContainText('Cupón BARRIO15:');
+    await expect(receiptDialog).toContainText('Canje Puntos');
+    await expect(receiptDialog).toContainText('Puntos Ganados Club:');
+    await receiptDialog.getByRole('button', { name: 'Cerrar' }).first().click();
+
+    // 3. Modo Kiosco iPad (#/kiosco/surtifacil): consulta puntos + canje + cupón VECINO10
+    await page.goto('/#/kiosco/surtifacil');
+    await page.getByRole('button', { name: 'Agregar Leche Entera Colanta 1L al pedido' }).click();
+    const kioskPlus = page.getByRole('button', {
+      name: 'Agregar otra unidad de Leche Entera Colanta 1L',
+      exact: true,
+    });
+    await kioskPlus.click();
+    await kioskPlus.click(); // 3 uds = $11.400
+
+    await page.getByRole('button', { name: /CONTINUAR PEDIDO/i }).click();
+    await page.getByLabel(/Teléfono WhatsApp/i).fill('3004567890');
+    await page.getByRole('button', { name: /Consultar mis Puntos/i }).click();
+    await expect(page.getByText(/Don Carlos R\./i)).toBeVisible();
+    await page.getByRole('button', { name: /Usar \d+ puntos/i }).click();
+    await page.getByRole('button', { name: /Siguiente: Forma de Pago/i }).click();
+
+    await page.getByLabel(/¿Tienes un cupón de descuento\?/i).fill('VECINO10');
+    await page.getByRole('button', { name: 'Aplicar' }).click();
+    await expect(page.getByText(/🎟️ VECINO10/i)).toBeVisible();
+    await page.getByRole('button', { name: /Confirmar y Sacar Turno/i }).click();
+
+    await expect(page.getByText(/¡Pedido Registrado con Éxito!/i)).toBeVisible();
+    await expect(page.getByText(/🎟️ Cupón VECINO10/i)).toBeVisible();
+
+    // 4. Tienda Vecinal (#/tienda/surtifacil): Doña Marta (3112345678, 40 pts) + cupón VECINO10 -> rastreo
+    await page.goto('/#/tienda/surtifacil');
+    await page.getByRole('button', { name: /Agregar Leche Entera Colanta 1L a la canasta/i }).click();
+    await page.getByRole('button', { name: /Abrir canasta y confirmar pedido/i }).click();
+    const storePlusBtn = page.getByRole('button', { name: 'Sumar uno de Leche Entera Colanta 1L' });
+    await storePlusBtn.click();
+    await storePlusBtn.click(); // 3 uds = $11.400
+
+    await page.getByRole('button', { name: /Retiro en Tienda/i }).click();
+    await page.getByLabel(/Teléfono \/ WhatsApp de Contacto/i).fill('3112345678');
+    await page.getByRole('button', { name: /Ver Puntos/i }).click();
+    await expect(page.getByText(/Doña Marta G\./i)).toBeVisible();
+    await page.getByRole('button', { name: /Usar \d+ puntos/i }).click();
+
+    await page.getByLabel(/¿Tienes un cupón de descuento\?/i).fill('VECINO10');
+    await page.getByRole('button', { name: 'Aplicar' }).click();
+    await expect(page.getByText(/🎟️ VECINO10/i)).toBeVisible();
+
+    await page.getByRole('button', { name: /Confirmar Pedido Vecinal/i }).click();
+    await expect(page).toHaveURL(/#\/pedido\//);
+    await expect(page.getByText(/🎟️ Cupón VECINO10:/i)).toBeVisible();
+    await expect(page.getByText(/Puntos por ganar al entregar:/i)).toBeVisible();
+  });
 });
