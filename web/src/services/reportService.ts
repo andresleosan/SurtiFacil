@@ -1,5 +1,6 @@
 import { Sale } from '../firebase/db';
 import { getSales } from './saleService';
+import { isSaleVoided } from '../utils/saleAccounting';
 
 export interface DailySales {
   date: string;
@@ -32,7 +33,7 @@ export interface SalesSummary {
  * Obtiene resumen de ventas
  */
 export async function getSalesSummary(): Promise<SalesSummary> {
-  const sales = await getSales();
+  const sales = (await getSales()).filter((s) => !isSaleVoided(s));
   const now = new Date();
 
   const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -79,7 +80,7 @@ export async function getSalesSummary(): Promise<SalesSummary> {
  * Obtiene ventas diarias de los últimos N días
  */
 export async function getDailySales(days: number = 7): Promise<DailySales[]> {
-  const sales = await getSales();
+  const sales = (await getSales()).filter((s) => !isSaleVoided(s));
   const result: DailySales[] = [];
   const now = new Date();
 
@@ -110,7 +111,7 @@ export async function getDailySales(days: number = 7): Promise<DailySales[]> {
  * Obtiene ventas semanales de las últimas N semanas
  */
 export async function getWeeklySales(weeks: number = 4): Promise<DailySales[]> {
-  const sales = await getSales();
+  const sales = (await getSales()).filter((s) => !isSaleVoided(s));
   const result: DailySales[] = [];
   const now = new Date();
 
@@ -141,7 +142,7 @@ export async function getWeeklySales(weeks: number = 4): Promise<DailySales[]> {
  * Obtiene los productos más vendidos
  */
 export async function getTopProducts(limit: number = 10): Promise<TopProduct[]> {
-  const sales = await getSales();
+  const sales = (await getSales()).filter((s) => !isSaleVoided(s));
   const productMap = new Map<string, { name: string; quantity: number; revenue: number }>();
 
   sales.forEach(sale => {
@@ -166,7 +167,7 @@ export async function getTopProducts(limit: number = 10): Promise<TopProduct[]> 
  * Obtiene ventas por categoría
  */
 export async function getSalesByCategory(): Promise<SalesByCategory[]> {
-  const sales = await getSales();
+  const sales = (await getSales()).filter((s) => !isSaleVoided(s));
   const categoryMap = new Map<string, number>();
   let totalRevenue = 0;
 

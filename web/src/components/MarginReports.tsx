@@ -18,14 +18,17 @@ import {
   getMarginDaily,
   getTopProductsByMargin,
   getMarginByCategory,
+  getNetProfitStatement,
   MarginSummary,
   MarginDaily,
   ProductMargin,
   CategoryMargin,
+  NetProfitStatement,
 } from '../services/marginService';
 import { formatCurrency } from '../services/reportService';
 import { useIsMobile } from '../hooks/useMediaQuery';
 import { PageHeader } from './ui/PageHeader';
+import NetProfitStatementCard from './NetProfitStatementCard';
 
 const PIE_COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884D8', '#82CA9D', '#FF6B6B', '#4ECDC4'];
 
@@ -51,6 +54,7 @@ const MarginReports = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [dateRange, setDateRange] = useState<7 | 14 | 30>(7);
+  const [netProfit, setNetProfit] = useState<NetProfitStatement | null>(null);
 
   useEffect(() => {
     loadReportData();
@@ -60,18 +64,20 @@ const MarginReports = () => {
     try {
       setLoading(true);
       setError(null);
-      const [summaryData, dailyData, topAbsData, topPctData, categoryData] = await Promise.all([
+      const [summaryData, dailyData, topAbsData, topPctData, categoryData, netProfitData] = await Promise.all([
         getMarginSummary(),
         getMarginDaily(dateRange),
         getTopProductsByMargin(10, 'absolute'),
         getTopProductsByMargin(10, 'percent'),
         getMarginByCategory(),
+        getNetProfitStatement(dateRange).catch(() => null),
       ]);
       setSummary(summaryData);
       setDailyMargin(dailyData);
       setTopByAbsolute(topAbsData);
       setTopByPercent(topPctData);
       setCategoryMargin(categoryData);
+      setNetProfit(netProfitData);
     } catch {
       console.error('Error loading margin reports.');
       setError('No se pudieron cargar los márgenes.');
@@ -280,6 +286,9 @@ const MarginReports = () => {
           </article>
         </div>
       )}
+
+      {/* Estado de Resultados: Utilidad Neta Real (descontando mermas y caja menor) */}
+      {netProfit && <NetProfitStatementCard statement={netProfit} dateRangeDays={dateRange} />}
 
       {/* Gráfica diaria de ingresos vs costos */}
       <div className="card p-4">

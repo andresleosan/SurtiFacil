@@ -126,7 +126,7 @@ export async function executeConsultarVentas(
          COALESCE(SUM(total_cents), 0) as total_sales_cents,
          COALESCE(SUM(total_cost_cents), 0) as total_cost_cents
        FROM sales
-       WHERE negocio_id = ? AND date(created_at, 'localtime') >= ${dateFilter}`
+       WHERE negocio_id = ? AND COALESCE(status, 'completed') != 'voided' AND date(created_at, 'localtime') >= ${dateFilter}`
     )
     .bind(negocioId)
     .first<{ count: number; total_sales_cents: number; total_cost_cents: number }>();
@@ -142,7 +142,7 @@ export async function executeConsultarVentas(
     .prepare(
       `SELECT payment_method, COUNT(*) as count, COALESCE(SUM(total_cents), 0) as total_cents
        FROM sales
-       WHERE negocio_id = ? AND date(created_at, 'localtime') >= ${dateFilter}
+       WHERE negocio_id = ? AND COALESCE(status, 'completed') != 'voided' AND date(created_at, 'localtime') >= ${dateFilter}
        GROUP BY payment_method`
     )
     .bind(negocioId)

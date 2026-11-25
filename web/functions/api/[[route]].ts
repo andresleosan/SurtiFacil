@@ -19,6 +19,13 @@ import {
   WholesaleTier,
 } from '../_lib/wholesalePricing';
 import {
+  calculateNetProfitStatement,
+  extractSalePaymentBuckets,
+  parsePaymentBreakdown,
+  resolveSalePaymentBreakdown,
+  type PaymentBreakdownEntry,
+} from '../_lib/saleAccounting';
+import {
   DEFAULT_LOYALTY_CONFIG,
   isValidCouponCode,
   isValidLoyaltyPhone,
@@ -83,6 +90,93 @@ function enrichProductRow<T extends Record<string, any> | null | undefined>(row:
   return {
     ...row,
     wholesale_tiers: parseWholesaleTiers(row.wholesale_tiers ?? row.wholesale_tiers_json),
+  };
+}
+
+function enrichSaleRow<T extends Record<string, any>>(row: T, items: any[] = []) {
+  const breakdown = parsePaymentBreakdown(
+    row.payment_breakdown_json ?? row.payment_breakdown,
+    row.payment_method || 'cash',
+    Number(row.total_cents ?? row.total ?? 0)
+  );
+  return {
+    ...row,
+    status: row.status === 'voided' ? 'voided' : 'completed',
+    payment_method: breakdown.length > 1 ? 'mixed' : (row.payment_method || breakdown[0]?.method || 'cash'),
+    payment_breakdown: breakdown,
+    items,
+  };
+}
+
+async function aggregateShiftSalesAndCredits(
+  db: D1Database,
+  negocioId: string,
+  openedAt: string
+): Promise<{
+  salesCashCents: number;
+  salesCashCount: number;
+  creditPaymentsCashCents: number;
+  creditPaymentsCashCount: number;
+  otherSales: Array<{ payment_method: string; count: number; total_cents: number }>;
+}> {
+  const shiftSalesRows = await db
+    .prepare(
+      "SELECT id, total_cents, payment_method, payment_breakdown_json, status FROM sales WHERE negocio_id = ? AND COALESCE(status, 'completed') != 'voided' AND created_at >= ?"
+    )
+    .bind(negocioId, openedAt)
+    .all<{
+      id: string;
+      total_cents: number;
+      payment_method: string;
+      payment_breakdown_json?: string | null;
+      status?: string | null;
+    }>();
+
+  let salesCashCents = 0;
+  let salesCashCount = 0;
+  const otherBuckets: Record<string, { count: number; total_cents: number }> = {};
+
+  for (const row of shiftSalesRows.results || []) {
+    const buckets = extractSalePaymentBuckets(row);
+    if (buckets.cash_cents > 0) {
+      salesCashCents += buckets.cash_cents;
+      salesCashCount += 1;
+    }
+    if (buckets.card_cents > 0) {
+      if (!otherBuckets.card) otherBuckets.card = { count: 0, total_cents: 0 };
+      otherBuckets.card.count += 1;
+      otherBuckets.card.total_cents += buckets.card_cents;
+    }
+    if (buckets.transfer_cents > 0) {
+      if (!otherBuckets.other) otherBuckets.other = { count: 0, total_cents: 0 };
+      otherBuckets.other.count += 1;
+      otherBuckets.other.total_cents += buckets.transfer_cents;
+    }
+    if (buckets.credit_cents > 0) {
+      if (!otherBuckets.credit) otherBuckets.credit = { count: 0, total_cents: 0 };
+      otherBuckets.credit.count += 1;
+      otherBuckets.credit.total_cents += buckets.credit_cents;
+    }
+  }
+
+  // Excluir reversiones de fiado generadas por anulación de ventas (sale_id != NULL)
+  const creditPaymentsRow = await db
+    .prepare(
+      "SELECT COUNT(*) as count, COALESCE(SUM(amount_cents), 0) as total_credit_cash_cents FROM credit_entries WHERE negocio_id = ? AND type = 'payment' AND (sale_id IS NULL OR sale_id = '') AND created_at >= ?"
+    )
+    .bind(negocioId, openedAt)
+    .first<{ count: number; total_credit_cash_cents: number }>();
+
+  return {
+    salesCashCents,
+    salesCashCount,
+    creditPaymentsCashCents: creditPaymentsRow?.total_credit_cash_cents || 0,
+    creditPaymentsCashCount: creditPaymentsRow?.count || 0,
+    otherSales: Object.entries(otherBuckets).map(([payment_method, data]) => ({
+      payment_method,
+      count: data.count,
+      total_cents: data.total_cents,
+    })),
   };
 }
 
@@ -266,7 +360,8 @@ interface SaleItemInput {
 }
 
 interface SaleInput {
-  payment_method: 'cash' | 'card' | 'other' | 'credit';
+  payment_method: 'cash' | 'card' | 'other' | 'credit' | 'mixed';
+  payment_breakdown?: Array<{ method: string; amount_cents: number }>;
   items: SaleItemInput[];
   credit_customer_id?: string;
   credit_customer_name?: string;
@@ -1605,19 +1700,16 @@ export const onRequest: PagesFunction<Env> = async (context) => {
           const items = await env.DB.prepare('SELECT * FROM sale_items WHERE sale_id = ?')
             .bind(singleSaleId)
             .all();
-          return jsonResponse({
-            ...sale,
-            items: items.results || [],
-          });
+          return jsonResponse(enrichSaleRow(sale, items.results || []));
         }
       }
 
       // GET /api/sales
       if (method === 'GET') {
-        // Soporte para totales agregados calculados en D1
+        // Soporte para totales agregados calculados en D1 (solo ventas vigentes)
         if (url.searchParams.get('totals') === 'true') {
           const row = await env.DB.prepare(
-            'SELECT COUNT(*) as count, COALESCE(SUM(total_cents), 0) as totalCents FROM sales WHERE negocio_id = ?'
+            "SELECT COUNT(*) as count, COALESCE(SUM(total_cents), 0) as totalCents FROM sales WHERE negocio_id = ? AND COALESCE(status, 'completed') != 'voided'"
           )
             .bind(auth.negocioId)
             .first<{ count: number; totalCents: number }>();
@@ -1659,14 +1751,193 @@ export const onRequest: PagesFunction<Env> = async (context) => {
             const items = await env.DB.prepare('SELECT * FROM sale_items WHERE sale_id = ?')
               .bind(sale.id)
               .all();
-            return {
-              ...sale,
-              items: items.results || [],
-            };
+            return enrichSaleRow(sale, items.results || []);
           })
         );
 
         return jsonResponse(enrichedSales);
+      }
+
+      // POST /api/sales/:id/void — Anulación/Devolución Atómica en D1 (Admin / Manager)
+      if (method === 'POST' && /^\/sales\/[^/]+\/void$/.test(path)) {
+        if (auth.user.role !== 'admin' && auth.user.role !== 'manager' && !auth.user.isSuperAdmin) {
+          return errorResponse('Solo administradores y gerentes pueden anular ventas.', 403);
+        }
+
+        const saleId = decodeURIComponent(path.replace(/^\/sales\//, '').replace(/\/void$/, '').trim());
+        if (!saleId) {
+          return errorResponse('ID de venta inválido.', 400);
+        }
+
+        const body = (await request.json().catch(() => ({}))) as { reason?: string };
+        const reason = typeof body.reason === 'string' ? body.reason.trim() : '';
+        if (reason.length < 3 || reason.length > 250) {
+          return errorResponse('Ingresa un motivo de anulación válido (entre 3 y 250 caracteres).', 400);
+        }
+
+        const sale = await env.DB.prepare('SELECT * FROM sales WHERE id = ? AND negocio_id = ?')
+          .bind(saleId, auth.negocioId)
+          .first<any>();
+        if (!sale) {
+          return errorResponse('Venta no encontrada en este local.', 404);
+        }
+        if (sale.status === 'voided') {
+          return errorResponse('Esta venta ya fue anulada previamente.', 409);
+        }
+
+        const itemsResult = await env.DB.prepare('SELECT * FROM sale_items WHERE sale_id = ?')
+          .bind(saleId)
+          .all<any>();
+        const saleItems = itemsResult.results || [];
+
+        const voidedAt = new Date().toISOString();
+        const actorName = auth.user.displayName || auth.user.email || auth.user.id;
+        const voidBatch: any[] = [
+          env.DB.prepare(
+            `UPDATE sales
+             SET status = 'voided', voided_at = ?, voided_by_uid = ?, voided_by_name = ?, void_reason = ?
+             WHERE id = ? AND negocio_id = ?`
+          ).bind(voidedAt, auth.user.id, actorName, reason, saleId, auth.negocioId),
+        ];
+
+        let restockedUnits = 0;
+        for (const item of saleItems) {
+          const qty = Math.max(0, Number(item.quantity) || 0);
+          if (qty > 0 && item.product_id) {
+            restockedUnits += qty;
+            voidBatch.push(
+              env.DB.prepare(
+                "UPDATE products SET stock = stock + ?, updated_at = datetime('now') WHERE id = ? AND negocio_id = ?"
+              ).bind(qty, item.product_id, auth.negocioId)
+            );
+          }
+        }
+
+        const buckets = extractSalePaymentBuckets(sale);
+        if (buckets.credit_cents > 0 && sale.credit_customer_id) {
+          const creditCust = await env.DB.prepare(
+            'SELECT id, balance_cents FROM credit_customers WHERE id = ? AND negocio_id = ?'
+          )
+            .bind(sale.credit_customer_id, auth.negocioId)
+            .first<{ id: string; balance_cents: number }>();
+
+          if (creditCust) {
+            const revEntryId = `centry-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+            voidBatch.push(
+              env.DB.prepare(
+                `INSERT INTO credit_entries (
+                  id, negocio_id, customer_id, type, amount_cents, description, sale_id, created_by_uid, created_by_role, created_at
+                ) VALUES (?, ?, ?, 'payment', ?, ?, ?, ?, ?, datetime('now'))`
+              ).bind(
+                revEntryId,
+                auth.negocioId,
+                sale.credit_customer_id,
+                buckets.credit_cents,
+                `Reversión por anulación venta #${saleId.slice(0, 8)}: ${reason}`.slice(0, 200),
+                saleId,
+                auth.user.id,
+                auth.user.role
+              )
+            );
+
+            voidBatch.push(
+              env.DB.prepare(
+                "UPDATE credit_customers SET balance_cents = MAX(0, balance_cents - ?), last_entry_at = datetime('now'), updated_at = datetime('now') WHERE id = ? AND negocio_id = ?"
+              ).bind(buckets.credit_cents, sale.credit_customer_id, auth.negocioId)
+            );
+          }
+        }
+
+        if (sale.coupon_code) {
+          voidBatch.push(
+            env.DB.prepare(
+              "UPDATE discount_coupons SET used_count = MAX(0, used_count - 1), updated_at = datetime('now') WHERE negocio_id = ? AND code = ?"
+            ).bind(auth.negocioId, normalizeCouponCode(String(sale.coupon_code)))
+          );
+        }
+
+        let loyaltyPointsDelta = 0;
+        const earnedPts = Math.max(0, Number(sale.loyalty_points_earned) || 0);
+        const redeemedPts = Math.max(0, Number(sale.loyalty_points_redeemed) || 0);
+        if (sale.loyalty_account_id && (earnedPts > 0 || redeemedPts > 0)) {
+          const loyAcc = await env.DB.prepare(
+            'SELECT * FROM loyalty_accounts WHERE id = ? AND negocio_id = ?'
+          )
+            .bind(sale.loyalty_account_id, auth.negocioId)
+            .first<any>();
+
+          if (loyAcc) {
+            loyaltyPointsDelta = redeemedPts - earnedPts;
+            const prevBalance = Number(loyAcc.points_balance) || 0;
+            const nextBalance = Math.max(0, prevBalance + loyaltyPointsDelta);
+            const spentToSubtract = Math.max(0, Number(sale.total_cents) || 0);
+
+            voidBatch.push(
+              env.DB.prepare(
+                `UPDATE loyalty_accounts
+                 SET points_balance = MAX(0, points_balance + ?),
+                     lifetime_points_earned = MAX(0, lifetime_points_earned - ?),
+                     lifetime_points_redeemed = MAX(0, lifetime_points_redeemed - ?),
+                     total_purchases_count = MAX(0, total_purchases_count - 1),
+                     total_spent_cents = MAX(0, total_spent_cents - ?),
+                     last_activity_at = datetime('now'),
+                     updated_at = datetime('now')
+                 WHERE id = ? AND negocio_id = ?`
+              ).bind(
+                loyaltyPointsDelta,
+                earnedPts,
+                redeemedPts,
+                spentToSubtract,
+                loyAcc.id,
+                auth.negocioId
+              )
+            );
+
+            const revMovId = `lmov-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+            voidBatch.push(
+              env.DB.prepare(
+                `INSERT INTO loyalty_movements (
+                  id, negocio_id, account_id, type, points_delta, balance_after, amount_cents, description, sale_id, created_by_uid, created_by_role, created_at
+                ) VALUES (?, ?, ?, 'adjust', ?, ?, ?, ?, ?, ?, ?, datetime('now'))`
+              ).bind(
+                revMovId,
+                auth.negocioId,
+                loyAcc.id,
+                loyaltyPointsDelta,
+                nextBalance,
+                spentToSubtract,
+                `Reversión por anulación venta #${saleId.slice(0, 8)}`,
+                saleId,
+                auth.user.id,
+                auth.user.role
+              )
+            );
+          }
+        }
+
+        await env.DB.batch(voidBatch);
+
+        const updatedSale = await env.DB.prepare('SELECT * FROM sales WHERE id = ? AND negocio_id = ?')
+          .bind(saleId, auth.negocioId)
+          .first<any>();
+
+        return jsonResponse({
+          success: true,
+          sale: enrichSaleRow(
+            updatedSale || {
+              ...sale,
+              status: 'voided',
+              voided_at: voidedAt,
+              voided_by_uid: auth.user.id,
+              voided_by_name: actorName,
+              void_reason: reason,
+            },
+            saleItems
+          ),
+          restocked_units: restockedUnits,
+          credit_reversed_cents: buckets.credit_cents,
+          loyalty_points_delta: loyaltyPointsDelta,
+        });
       }
 
       // POST /api/sales — Transacción atómica en D1
@@ -1799,6 +2070,29 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         }
 
         const finalTotalCents = settlement.final_total_cents;
+        const paymentResolution = resolveSalePaymentBreakdown({
+          totalCents: finalTotalCents,
+          paymentMethod: body.payment_method,
+          paymentBreakdown: body.payment_breakdown,
+          creditCustomerId: body.credit_customer_id,
+        });
+        if (!paymentResolution.ok) {
+          return errorResponse(paymentResolution.error, 400);
+        }
+
+        let resolvedCreditCustomerName: string | null = body.credit_customer_name || null;
+        if (paymentResolution.credit_cents > 0 && body.credit_customer_id) {
+          const dbCust = await env.DB.prepare(
+            'SELECT id, name, active FROM credit_customers WHERE id = ? AND negocio_id = ?'
+          )
+            .bind(body.credit_customer_id, auth.negocioId)
+            .first<{ id: string; name: string; active: number }>();
+          if (!dbCust) {
+            return errorResponse('Cliente de fiado no encontrado en este local.', 404);
+          }
+          resolvedCreditCustomerName = dbCust.name;
+        }
+
         const saleId = `sale-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
         const batchStatements: any[] = [];
 
@@ -1812,15 +2106,17 @@ export const onRequest: PagesFunction<Env> = async (context) => {
           }
         }
 
+        const breakdownJson = JSON.stringify(paymentResolution.breakdown);
+
         // 1. Insertar la venta
         batchStatements.push(
           env.DB.prepare(
             `INSERT INTO sales (
               id, negocio_id, total_cents, subtotal_cents, coupon_code, coupon_discount_cents,
               loyalty_account_id, loyalty_phone, loyalty_points_redeemed, loyalty_discount_cents, loyalty_points_earned,
-              payment_method, credit_customer_id, credit_customer_name,
+              payment_method, payment_breakdown_json, status, credit_customer_id, credit_customer_name,
               total_cost_cents, created_by_uid, created_by_role, schema_version, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 2, datetime('now'))`
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'completed', ?, ?, ?, ?, ?, 2, datetime('now'))`
           ).bind(
             saleId,
             auth.negocioId,
@@ -1833,9 +2129,10 @@ export const onRequest: PagesFunction<Env> = async (context) => {
             settlement.points_redeemed,
             settlement.points_discount_cents,
             settlement.points_earned,
-            body.payment_method,
-            body.credit_customer_id || null,
-            body.credit_customer_name || null,
+            paymentResolution.db_payment_method,
+            breakdownJson,
+            paymentResolution.credit_cents > 0 ? body.credit_customer_id || null : null,
+            paymentResolution.credit_cents > 0 ? resolvedCreditCustomerName : null,
             computedTotalCostCents,
             auth.user.id,
             auth.user.role
@@ -1871,8 +2168,8 @@ export const onRequest: PagesFunction<Env> = async (context) => {
           );
         }
 
-        // 3. Si fue fiado, crear cargo en credit_entries y sumar al balance del cliente
-        if (body.payment_method === 'credit' && body.credit_customer_id) {
+        // 3. Si incluyó fiado (total o parcial en pago mixto), crear cargo exacto por la porción fiada
+        if (paymentResolution.credit_cents > 0 && body.credit_customer_id) {
           const entryId = `centry-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
           batchStatements.push(
             env.DB.prepare(
@@ -1884,8 +2181,8 @@ export const onRequest: PagesFunction<Env> = async (context) => {
               auth.negocioId,
               body.credit_customer_id,
               'debt',
-              finalTotalCents,
-              'Venta a crédito en mostrador',
+              paymentResolution.credit_cents,
+              paymentResolution.is_mixed ? 'Saldo fiado en venta mixta' : 'Venta a crédito en mostrador',
               saleId,
               auth.user.id,
               auth.user.role
@@ -1895,7 +2192,7 @@ export const onRequest: PagesFunction<Env> = async (context) => {
           batchStatements.push(
             env.DB.prepare(
               "UPDATE credit_customers SET balance_cents = balance_cents + ?, last_entry_at = datetime('now'), updated_at = datetime('now') WHERE id = ? AND negocio_id = ?"
-            ).bind(finalTotalCents, body.credit_customer_id, auth.negocioId)
+            ).bind(paymentResolution.credit_cents, body.credit_customer_id, auth.negocioId)
           );
         }
 
@@ -2019,7 +2316,11 @@ export const onRequest: PagesFunction<Env> = async (context) => {
             loyalty_points_earned: settlement.points_earned,
             loyalty_balance_after: nextLoyaltyBalance,
             total_cost_cents: computedTotalCostCents,
-            payment_method: body.payment_method,
+            payment_method: paymentResolution.effective_payment_method,
+            payment_breakdown: paymentResolution.breakdown,
+            status: 'completed',
+            credit_customer_id: paymentResolution.credit_cents > 0 ? body.credit_customer_id || null : null,
+            credit_customer_name: paymentResolution.credit_cents > 0 ? resolvedCreditCustomerName : null,
             items: preparedItems,
             created_at: new Date().toISOString(),
           },
@@ -2089,21 +2390,13 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         const initialBaseParam = url.searchParams.get('initial_base_cents');
         const initialCashCents = initialBaseParam !== null ? Math.max(0, parseInt(initialBaseParam, 10) || 0) : 10000000;
 
-        // 1. Ventas en efectivo desde el último cierre
-        const salesCashRow = await env.DB.prepare(
-          "SELECT COUNT(*) as count, COALESCE(SUM(total_cents), 0) as total_cash_cents FROM sales WHERE negocio_id = ? AND payment_method = 'cash' AND created_at >= ?"
-        ).bind(auth.negocioId, openedAt).first<{ count: number; total_cash_cents: number }>();
-
-        const salesCashCents = salesCashRow?.total_cash_cents || 0;
-        const salesCashCount = salesCashRow?.count || 0;
-
-        // 2. Abonos de fiados recibidos en efectivo desde el último cierre
-        const creditPaymentsRow = await env.DB.prepare(
-          "SELECT COUNT(*) as count, COALESCE(SUM(amount_cents), 0) as total_credit_cash_cents FROM credit_entries WHERE negocio_id = ? AND type = 'payment' AND created_at >= ?"
-        ).bind(auth.negocioId, openedAt).first<{ count: number; total_credit_cash_cents: number }>();
-
-        const creditPaymentsCashCents = creditPaymentsRow?.total_credit_cash_cents || 0;
-        const creditPaymentsCashCount = creditPaymentsRow?.count || 0;
+        const {
+          salesCashCents,
+          salesCashCount,
+          creditPaymentsCashCents,
+          creditPaymentsCashCount,
+          otherSales,
+        } = await aggregateShiftSalesAndCredits(env.DB, auth.negocioId, openedAt);
 
         // 3. Salidas de caja menor en efectivo desde el último cierre
         const expensesCashRow = await env.DB.prepare(
@@ -2112,11 +2405,6 @@ export const onRequest: PagesFunction<Env> = async (context) => {
 
         const expensesCashCents = expensesCashRow?.total_expenses_cash_cents || 0;
         const expensesCashCount = expensesCashRow?.count || 0;
-
-        // 4. Ventas por otros medios (tarjeta, otros, fiado) para visibilidad gerencial
-        const otherSalesRows = await env.DB.prepare(
-          "SELECT payment_method, COUNT(*) as count, COALESCE(SUM(total_cents), 0) as total_cents FROM sales WHERE negocio_id = ? AND payment_method != 'cash' AND created_at >= ? GROUP BY payment_method"
-        ).bind(auth.negocioId, openedAt).all<{ payment_method: string; count: number; total_cents: number }>();
 
         const expectedCashCents = initialCashCents + salesCashCents + creditPaymentsCashCents - expensesCashCents;
 
@@ -2130,7 +2418,7 @@ export const onRequest: PagesFunction<Env> = async (context) => {
           expenses_cash_cents: expensesCashCents,
           expenses_cash_count: expensesCashCount,
           expected_cash_cents: expectedCashCents,
-          other_sales: otherSalesRows.results || [],
+          other_sales: otherSales,
         });
       }
 
@@ -2194,18 +2482,11 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         const startOfTodayIso = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
         const openedAt = lastClosing?.closed_at || startOfTodayIso;
 
-        const salesCashRow = await env.DB.prepare(
-          "SELECT COUNT(*) as count, COALESCE(SUM(total_cents), 0) as total_cash_cents FROM sales WHERE negocio_id = ? AND payment_method = 'cash' AND created_at >= ?"
-        ).bind(auth.negocioId, openedAt).first<{ count: number; total_cash_cents: number }>();
-
-        const salesCashCents = salesCashRow?.total_cash_cents || 0;
-        const totalSalesCount = salesCashRow?.count || 0;
-
-        const creditPaymentsRow = await env.DB.prepare(
-          "SELECT COUNT(*) as count, COALESCE(SUM(amount_cents), 0) as total_credit_cash_cents FROM credit_entries WHERE negocio_id = ? AND type = 'payment' AND created_at >= ?"
-        ).bind(auth.negocioId, openedAt).first<{ count: number; total_credit_cash_cents: number }>();
-
-        const creditPaymentsCashCents = creditPaymentsRow?.total_credit_cash_cents || 0;
+        const {
+          salesCashCents,
+          salesCashCount: totalSalesCount,
+          creditPaymentsCashCents,
+        } = await aggregateShiftSalesAndCredits(env.DB, auth.negocioId, openedAt);
 
         const expensesCashRow = await env.DB.prepare(
           "SELECT COUNT(*) as count, COALESCE(SUM(amount_cents), 0) as total_expenses_cash_cents FROM cash_expenses WHERE negocio_id = ? AND payment_method = 'cash' AND created_at >= ?"
@@ -4798,6 +5079,50 @@ export const onRequest: PagesFunction<Env> = async (context) => {
           );
         }
       }
+    }
+
+    // 15. Estado de Resultados de Utilidad Neta Real (/api/reports/net-profit)
+    if (path === '/reports/net-profit' && method === 'GET') {
+      const auth = await authenticateRequest(request, env);
+      const daysParam = Number(url.searchParams.get('days') || '30');
+      const safeDays = Math.min(Math.max(Math.floor(Number.isFinite(daysParam) ? daysParam : 30), 1), 365);
+
+      const nowDate = new Date();
+      const sinceDate = new Date(nowDate.getFullYear(), nowDate.getMonth(), nowDate.getDate());
+      sinceDate.setDate(sinceDate.getDate() - (safeDays - 1));
+      const sinceIso = sinceDate.toISOString();
+
+      const [salesRows, shrinkageRows, expenseRows] = await Promise.all([
+        env.DB.prepare('SELECT * FROM sales WHERE negocio_id = ? AND created_at >= ? ORDER BY created_at DESC')
+          .bind(auth.negocioId, sinceIso)
+          .all<any>(),
+        env.DB.prepare('SELECT * FROM inventory_shrinkage WHERE negocio_id = ? AND created_at >= ?')
+          .bind(auth.negocioId, sinceIso)
+          .all<any>(),
+        env.DB.prepare('SELECT * FROM cash_expenses WHERE negocio_id = ? AND created_at >= ?')
+          .bind(auth.negocioId, sinceIso)
+          .all<any>(),
+      ]);
+
+      const rawSales = salesRows.results || [];
+      const enrichedSales = await Promise.all(
+        rawSales.map(async (sale: any) => {
+          const itemsRes = await env.DB.prepare('SELECT * FROM sale_items WHERE sale_id = ?')
+            .bind(sale.id)
+            .all<any>();
+          return enrichSaleRow(sale, itemsRes.results || []);
+        })
+      );
+
+      const statement = calculateNetProfitStatement({
+        sales: enrichedSales,
+        shrinkageEntries: shrinkageRows.results || [],
+        cashExpenses: expenseRows.results || [],
+        days: safeDays,
+        now: nowDate,
+      });
+
+      return jsonResponse(statement);
     }
 
     return errorResponse(`Ruta API no encontrada: ${method} /api${path}`, 404);

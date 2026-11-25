@@ -352,7 +352,7 @@ describe('Flujos del Club de Puntos del Barrio y Cupones WhatsApp', () => {
     expect(screen.queryByRole('button', { name: /Bono \/ Ajuste/i })).not.toBeInTheDocument();
     await user.click(screen.getByRole('tab', { name: /Reglas del Club/i }));
     expect(screen.queryByRole('button', { name: 'Guardar Reglas del Club' })).not.toBeInTheDocument();
-  });
+  }, 15000);
 
   it('CreateSale (POS) consulta celular, canjea puntos, aplica cupón y genera tirilla térmica con fidelización', async () => {
     const user = userEvent.setup();

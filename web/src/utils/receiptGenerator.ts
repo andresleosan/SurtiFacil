@@ -2,6 +2,7 @@ import { Sale } from '../firebase/db';
 import { StoreSettings } from '../types/storeSettings';
 import { CashClosing, COLOMBIAN_BILLS, COLOMBIAN_COINS } from '../types/cashClosing';
 import { formatCentsCOP } from './currency';
+import { isSaleVoided, parsePaymentBreakdown } from './saleAccounting';
 
 export type ThermalWidth = '58mm' | '80mm';
 
@@ -95,6 +96,13 @@ export function generateSaleReceiptText(
   lines.push(formatTwoColumns(`Venta #${(sale.id || '').slice(0, 8)}`, saleDate.toLocaleDateString('es-CO'), colWidth));
   lines.push(formatTwoColumns(`Hora: ${saleDate.toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' })}`, `Cajero: ${sale.created_by_role || 'Caja'}`, colWidth));
 
+  if (isSaleVoided(sale)) {
+    lines.push(centerText('*** VENTA ANULADA / DEVUELTA ***', colWidth));
+    if (sale.void_reason) {
+      lines.push(centerText(`Motivo: ${sale.void_reason}`, colWidth));
+    }
+  }
+
   if (sale.credit_customer_name) {
     lines.push(formatTwoColumns('Cliente Fiado:', sale.credit_customer_name, colWidth));
   }
@@ -166,15 +174,28 @@ export function generateSaleReceiptText(
     card: 'Tarjeta',
     other: 'Nequi / Bancolombia',
     credit: 'Libro de Fiados',
+    mixed: 'Pago Mixto',
   };
-  const methodLabel = paymentMethodLabels[sale.payment_method] || sale.payment_method;
-  lines.push(formatTwoColumns('Forma de Pago:', methodLabel, colWidth));
+  const breakdown = parsePaymentBreakdown(sale.payment_breakdown, sale.payment_method, sale.total);
+  const isMixedPayment = breakdown.length > 1 || sale.payment_method === 'mixed';
 
-  if (sale.payment_method === 'cash' && typeof sale.received_cash_cents === 'number') {
+  if (isMixedPayment) {
+    lines.push(formatTwoColumns('Forma de Pago:', 'Pago Mixto', colWidth));
+    for (const entry of breakdown) {
+      const entryLabel = `  - ${paymentMethodLabels[entry.method] || entry.method}:`;
+      lines.push(formatTwoColumns(entryLabel, formatCentsCOP(entry.amount_cents), colWidth));
+    }
+  } else {
+    const methodLabel = paymentMethodLabels[sale.payment_method] || sale.payment_method;
+    lines.push(formatTwoColumns('Forma de Pago:', methodLabel, colWidth));
+  }
+
+  const cashPortionCents = breakdown.find((entry) => entry.method === 'cash')?.amount_cents || 0;
+  if (cashPortionCents > 0 && typeof sale.received_cash_cents === 'number') {
     lines.push(formatTwoColumns('Efectivo Recibido:', formatCentsCOP(sale.received_cash_cents), colWidth));
     const change = typeof sale.change_cents === 'number'
       ? sale.change_cents
-      : Math.max(0, sale.received_cash_cents - sale.total);
+      : Math.max(0, sale.received_cash_cents - cashPortionCents);
     lines.push(formatTwoColumns('Vueltas a Entregar:', formatCentsCOP(change), colWidth));
   }
 
@@ -209,10 +230,19 @@ export function generateSaleWhatsAppText(sale: Sale, store: Partial<StoreSetting
     card: '💳 Tarjeta',
     other: '📱 Transferencia Nequi / Bancolombia',
     credit: '📒 Libro de Fiados',
+    mixed: '🔀 Pago Mixto',
   };
-  const methodLabel = paymentMethodLabels[sale.payment_method] || sale.payment_method;
+  const breakdown = parsePaymentBreakdown(sale.payment_breakdown, sale.payment_method, sale.total);
+  const isMixedPayment = breakdown.length > 1 || sale.payment_method === 'mixed';
+  const methodLabel = isMixedPayment
+    ? paymentMethodLabels.mixed
+    : paymentMethodLabels[sale.payment_method] || sale.payment_method;
 
   let text = `🧾 *COMPROBANTE DE COMPRA — ${storeName.toUpperCase()}*\n`;
+  if (isSaleVoided(sale)) {
+    text += `🚫 *ESTADO: VENTA ANULADA / DEVUELTA*\n`;
+    if (sale.void_reason) text += `📝 *Motivo:* ${sale.void_reason}\n`;
+  }
   if (store.barrio) text += `📍 ${store.barrio}, Medellín\n`;
   text += `📅 Fecha: ${dateStr} · ${timeStr}\n`;
   text += `🔢 Comprobante: #${(sale.id || '').slice(0, 8)}\n`;
@@ -243,12 +273,18 @@ export function generateSaleWhatsAppText(sale: Sale, store: Partial<StoreSetting
   }
   text += `\n💰 *TOTAL A PAGAR:* *${formatCentsCOP(sale.total)}*\n`;
   text += `💳 *Medio de pago:* ${methodLabel}\n`;
+  if (isMixedPayment) {
+    for (const entry of breakdown) {
+      text += `  • ${paymentMethodLabels[entry.method] || entry.method}: ${formatCentsCOP(entry.amount_cents)}\n`;
+    }
+  }
 
-  if (sale.payment_method === 'cash' && typeof sale.received_cash_cents === 'number') {
+  const cashPortionCents = breakdown.find((entry) => entry.method === 'cash')?.amount_cents || 0;
+  if (cashPortionCents > 0 && typeof sale.received_cash_cents === 'number') {
     text += `💵 *Efectivo Recibido:* ${formatCentsCOP(sale.received_cash_cents)}\n`;
     const change = typeof sale.change_cents === 'number'
       ? sale.change_cents
-      : Math.max(0, sale.received_cash_cents - sale.total);
+      : Math.max(0, sale.received_cash_cents - cashPortionCents);
     text += `🪙 *Vueltas a Entregar:* ${formatCentsCOP(change)}\n`;
   }
 

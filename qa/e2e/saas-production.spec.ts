@@ -675,4 +675,101 @@ test.describe('Suite E2E de Certificación de Producción — SurtiFácil SaaS',
     await expect(page.getByText(/🎟️ Cupón VECINO10:/i)).toBeVisible();
     await expect(page.getByText(/Puntos por ganar al entregar:/i)).toBeVisible();
   });
+
+  test('12. Pagos Mixtos en POS, Anulación Atómica con Reintegro en #/sales y Estado de Resultados de Utilidad Neta Real en #/reports y #/margins', async ({
+    page,
+  }) => {
+    await setupProductionE2EHarness(page);
+
+    // 1. Login como Admin en #/login
+    await page.goto('/#/login');
+    await page.getByLabel('Correo electrónico').fill('andres.san1404@gmail.com');
+    await page.getByLabel('Contraseña').fill('TestPass123!');
+    await page.getByRole('button', { name: 'Iniciar Sesión' }).click();
+
+    // 2. POS (#/create-sale): 3 leches ($ 11.400 COP) en Pago Mixto Efectivo ($ 6.400) + Fiado ($ 5.000)
+    await page.goto('/#/create-sale');
+    const posList = page.getByRole('list', { name: 'Productos disponibles' });
+    const posAddMilk = posList.getByRole('button', { name: /Agregar Leche Entera Colanta 1L/i });
+    await posAddMilk.click();
+    await posAddMilk.click();
+    await posAddMilk.click();
+
+    const mobileCartBtn = page.getByRole('button', { name: /Ver carrito,/i });
+    if (await mobileCartBtn.isVisible()) {
+      await mobileCartBtn.click();
+    }
+
+    await page.getByRole('radio', { name: /Mixto/i }).click();
+    const mixedRegion = page.getByRole('region', { name: 'Desglose de pago mixto' });
+    await expect(mixedRegion).toBeVisible();
+    await mixedRegion.getByRole('button', { name: /Efectivo \+ 📒 Fiado/i }).click();
+
+    const mixedCashInput = mixedRegion.getByLabel(/Efectivo \(COP\)/i);
+    await mixedCashInput.fill('6400');
+    await expect(mixedRegion).toContainText('Cuadre exacto');
+
+    await page.getByLabel('Cliente al que se le fía').selectOption('cc-marta-1');
+    await page.getByRole('button', { name: /Confirmar venta/i }).click();
+
+    const successBanner = page.getByRole('status').filter({ hasText: 'Venta registrada exitosamente' });
+    await expect(successBanner).toBeVisible();
+    await expect(successBanner).toContainText('Pago Mixto');
+
+    await page.getByRole('button', { name: /Tirilla Térmica/i }).click();
+    const receiptDialog = page.getByRole('dialog');
+    await expect(receiptDialog).toContainText('Pago Mixto');
+    await expect(receiptDialog).toContainText('$ 6.400');
+    await expect(receiptDialog).toContainText('$ 5.000');
+    await receiptDialog.getByRole('button', { name: 'Cerrar' }).first().click();
+
+    // 3. Historial (#/sales): auditoría de Pago Mixto y Anulación Atómica con reintegro de stock
+    await page.goto('/#/sales');
+    await expect(page.getByText(/Pago Mixto/i).first()).toBeVisible();
+    await page.getByRole('button', { name: 'Ver detalles' }).first().click();
+    await expect(page.getByText('🔀 Desglose de Pago Mixto')).toBeVisible();
+
+    await page.getByRole('button', { name: /Anular \/ Devolver Venta/i }).click();
+    const voidDialog = page.getByRole('dialog', { name: /Anular Venta/i });
+    await expect(voidDialog).toBeVisible();
+    await voidDialog.getByRole('button', { name: 'Devolución del cliente' }).click();
+    await voidDialog.getByRole('button', { name: /Confirmar Anulación y Reintegrar Stock/i }).click();
+
+    await expect(page.getByText(/anulada\. Se reintegraron 3 unidades/i)).toBeVisible();
+    await expect(page.getByText('🚫 Anulada').first()).toBeVisible();
+    await expect(page.getByText('Devolución del cliente').first()).toBeVisible();
+
+    // 4. Registrar 1 venta vigente ($ 8.400) + 1 gasto Caja Menor ($ 5.000) y validar P&G en #/reports y #/margins
+    await page.goto('/#/create-sale');
+    const posList2 = page.getByRole('list', { name: 'Productos disponibles' });
+    const posAddMilk2 = posList2.getByRole('button', { name: /Agregar Leche Entera Colanta 1L/i });
+    await posAddMilk2.click();
+    await posAddMilk2.click();
+    await page.getByRole('button', { name: /Pago exacto de/i }).click();
+    await page.getByRole('button', { name: /Confirmar venta/i }).click();
+    await expect(page.getByRole('status').filter({ hasText: 'Venta registrada exitosamente' })).toBeVisible();
+
+    await page.getByRole('button', { name: /Caja Menor/i }).first().click();
+    const pettyDialog = page.getByRole('dialog', { name: /Caja Menor y Gastos del Turno/i });
+    await pettyDialog.getByRole('button', { name: /Bolsas e Insumos/i }).click();
+    await pettyDialog.getByRole('button', { name: '$ 5.000' }).click();
+    await pettyDialog.getByLabel(/Concepto \/ Descripción/i).fill('Bolsas turno');
+    await pettyDialog.getByRole('button', { name: /Registrar Salida de Caja/i }).click();
+    await expect(pettyDialog.getByRole('status')).toContainText('Salida registrada: $ 5.000');
+    await pettyDialog.getByRole('button', { name: 'Listo' }).click();
+
+    await page.goto('/#/reports');
+    const pnlReports = page.getByRole('region', { name: 'Estado de Resultados de Utilidad Neta Real' });
+    await expect(pnlReports).toBeVisible();
+    await expect(pnlReports).toContainText('1 anulada excluida');
+    await expect(pnlReports).toContainText('Ingresos Netos');
+    await expect(pnlReports).toContainText('Margen Bruto');
+    await expect(pnlReports).toContainText('-$ 5.000');
+    await expect(pnlReports).toContainText('UTILIDAD NETA REAL');
+
+    await page.goto('/#/margins');
+    const pnlMargins = page.getByRole('region', { name: 'Estado de Resultados de Utilidad Neta Real' });
+    await expect(pnlMargins).toBeVisible();
+    await expect(pnlMargins).toContainText('UTILIDAD NETA REAL');
+  });
 });

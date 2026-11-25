@@ -1,6 +1,7 @@
 import { apiClient, emitDataChange, hasAuthSession } from './apiClient';
 import { getLocalSales } from './mockData';
 import { getMockShiftCashExpenses } from './cashExpenseService';
+import { extractSalePaymentBuckets, isSaleVoided } from '../utils/saleAccounting';
 import {
   CashClosing,
   CashClosingInput,
@@ -52,28 +53,42 @@ export async function getCashShiftSummary(initialBaseCents = 10000000): Promise<
     const threshold = new Date(openedAt).getTime();
 
     const currentShiftSales = localSales.filter((s) => {
+      if (isSaleVoided(s)) return false;
       const saleDate = s.date instanceof Date ? s.date.getTime() : new Date((s as any).createdAt || s.date).getTime();
       return saleDate >= threshold;
     });
 
-    const cashSales = currentShiftSales.filter((s) => s.payment_method === 'cash');
-    const salesCashCents = cashSales.reduce((acc, s) => acc + (s.total || 0), 0);
-    const salesCashCount = cashSales.length;
+    let salesCashCents = 0;
+    let salesCashCount = 0;
+    const otherMethods: Record<string, { count: number; total_cents: number }> = {};
+
+    for (const s of currentShiftSales) {
+      const buckets = extractSalePaymentBuckets(s);
+      if (buckets.cash_cents > 0) {
+        salesCashCents += buckets.cash_cents;
+        salesCashCount += 1;
+      }
+      if (buckets.card_cents > 0) {
+        if (!otherMethods.card) otherMethods.card = { count: 0, total_cents: 0 };
+        otherMethods.card.count += 1;
+        otherMethods.card.total_cents += buckets.card_cents;
+      }
+      if (buckets.transfer_cents > 0) {
+        if (!otherMethods.other) otherMethods.other = { count: 0, total_cents: 0 };
+        otherMethods.other.count += 1;
+        otherMethods.other.total_cents += buckets.transfer_cents;
+      }
+      if (buckets.credit_cents > 0) {
+        if (!otherMethods.credit) otherMethods.credit = { count: 0, total_cents: 0 };
+        otherMethods.credit.count += 1;
+        otherMethods.credit.total_cents += buckets.credit_cents;
+      }
+    }
 
     const creditPaymentsCashCents = 0; // En mock por defecto
     const creditPaymentsCashCount = 0;
 
     const shiftExpenses = getMockShiftCashExpenses(openedAt);
-
-    const otherMethods: Record<string, { count: number; total_cents: number }> = {};
-    for (const s of currentShiftSales) {
-      if (s.payment_method !== 'cash') {
-        const method = s.payment_method || 'other';
-        if (!otherMethods[method]) otherMethods[method] = { count: 0, total_cents: 0 };
-        otherMethods[method].count += 1;
-        otherMethods[method].total_cents += s.total || 0;
-      }
-    }
 
     const otherSales = Object.entries(otherMethods).map(([payment_method, data]) => ({
       payment_method,

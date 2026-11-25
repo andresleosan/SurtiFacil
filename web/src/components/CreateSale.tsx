@@ -1,6 +1,15 @@
 import { useMemo, useState } from 'react';
-import { CreditCustomer, PaymentMethod, Product, SaleItem, Sale } from '../firebase/db';
+import {
+  CreditCustomer,
+  PaymentBreakdownEntry,
+  PaymentMethod,
+  Product,
+  SaleItem,
+  Sale,
+  SinglePaymentMethod,
+} from '../firebase/db';
 import { createSale } from '../services/saleService';
+import { resolveSalePaymentBreakdown } from '../utils/saleAccounting';
 import { useProducts } from '../hooks/useProducts';
 import { useCreditCustomers } from '../hooks/useCreditCustomers';
 import { useIsMobile } from '../hooks/useMediaQuery';
@@ -41,7 +50,43 @@ const PAYMENT_OPTIONS: Array<{ value: PaymentMethod; label: string; emoji: strin
   { value: 'card', label: 'Tarjeta', emoji: '💳' },
   { value: 'other', label: 'Otro', emoji: '📱' },
   { value: 'credit', label: 'Fiado', emoji: '📒' },
+  { value: 'mixed', label: 'Mixto', emoji: '🔀' },
 ];
+
+type MixedPreset = 'cash_transfer' | 'cash_credit' | 'transfer_credit' | 'custom';
+type MixedAmountsCents = Record<SinglePaymentMethod, number>;
+
+const EMPTY_MIXED_AMOUNTS: MixedAmountsCents = { cash: 0, other: 0, card: 0, credit: 0 };
+
+const MIXED_PRESET_PAIRS: Record<
+  Exclude<MixedPreset, 'custom'>,
+  { label: string; primary: SinglePaymentMethod; secondary: SinglePaymentMethod }
+> = {
+  cash_transfer: { label: '💵 Efectivo + 📱 Nequi', primary: 'cash', secondary: 'other' },
+  cash_credit: { label: '💵 Efectivo + 📒 Fiado', primary: 'cash', secondary: 'credit' },
+  transfer_credit: { label: '📱 Nequi + 📒 Fiado', primary: 'other', secondary: 'credit' },
+};
+
+function buildDefaultMixedAmounts(preset: MixedPreset, totalCents: number): MixedAmountsCents {
+  const safeTotal = Math.max(0, Math.round(totalCents));
+  if (safeTotal <= 0 || preset === 'custom') return { ...EMPTY_MIXED_AMOUNTS };
+  const wholePesos = Math.floor(safeTotal / 100);
+  const firstHalf = wholePesos >= 2 ? Math.floor(wholePesos / 2) * 100 : Math.floor(safeTotal / 2);
+  const secondHalf = safeTotal - firstHalf;
+  const pair = MIXED_PRESET_PAIRS[preset];
+  return {
+    ...EMPTY_MIXED_AMOUNTS,
+    [pair.primary]: firstHalf,
+    [pair.secondary]: secondHalf,
+  };
+}
+
+function amountsToBreakdown(amounts: MixedAmountsCents): PaymentBreakdownEntry[] {
+  const order: SinglePaymentMethod[] = ['cash', 'other', 'card', 'credit'];
+  return order
+    .filter((method) => amounts[method] > 0)
+    .map((method) => ({ method, amount_cents: amounts[method] }));
+}
 
 const formatPrice = (cents: number) => `$${(cents / 100).toFixed(2)}`;
 
@@ -86,6 +131,8 @@ const CreateSale = () => {
   const [pettyCashModalOpen, setPettyCashModalOpen] = useState(false);
   const [notifPermission, setNotifPermission] = useState<NotificationPermission>(() => getNotificationPermission());
   const [receivedCashCents, setReceivedCashCents] = useState<number | null>(null);
+  const [mixedPreset, setMixedPreset] = useState<MixedPreset>('cash_transfer');
+  const [mixedAmountsCents, setMixedAmountsCents] = useState<MixedAmountsCents>(EMPTY_MIXED_AMOUNTS);
 
   // Estado Club de Puntos del Barrio y Cupones
   const [loyaltyPanelOpen, setLoyaltyPanelOpen] = useState(false);
@@ -388,12 +435,78 @@ const CreateSale = () => {
     }
   };
 
+  const handleSelectMixedPreset = (preset: Exclude<MixedPreset, 'custom'>) => {
+    setMixedPreset(preset);
+    setMixedAmountsCents(buildDefaultMixedAmounts(preset, total));
+  };
+
+  const handleMixedAmountChange = (method: SinglePaymentMethod, rawValue: string) => {
+    const digits = rawValue.replace(/\D/g, '');
+    const cents = digits ? Math.max(0, parseInt(digits, 10) * 100) : 0;
+
+    if (mixedPreset !== 'custom') {
+      const pair = MIXED_PRESET_PAIRS[mixedPreset];
+      if (method === pair.primary) {
+        setMixedAmountsCents({
+          ...EMPTY_MIXED_AMOUNTS,
+          [pair.primary]: cents,
+          [pair.secondary]: Math.max(0, total - cents),
+        });
+        return;
+      }
+      if (method === pair.secondary) {
+        setMixedAmountsCents((prev) => ({
+          ...prev,
+          [method]: cents,
+        }));
+        return;
+      }
+      setMixedPreset('custom');
+    }
+
+    setMixedAmountsCents((prev) => ({
+      ...prev,
+      [method]: cents,
+    }));
+  };
+
+  const handleCompleteMixedMethod = (method: SinglePaymentMethod) => {
+    const othersSum = (Object.entries(mixedAmountsCents) as Array<[SinglePaymentMethod, number]>)
+      .filter(([key]) => key !== method)
+      .reduce((acc, [, val]) => acc + val, 0);
+    const remaining = Math.max(0, total - othersSum);
+    setMixedAmountsCents((prev) => ({
+      ...prev,
+      [method]: remaining,
+    }));
+  };
+
+  const handleSplitCashShortage = (targetMethod: 'other' | 'credit') => {
+    const cashPortion = Math.max(0, receivedCashCents || 0);
+    const remainder = Math.max(0, total - cashPortion);
+    setPaymentMethod('mixed');
+    setReceivedCashCents(null);
+    if (targetMethod === 'other') {
+      setMixedPreset('cash_transfer');
+      setMixedAmountsCents({ cash: cashPortion, other: remainder, card: 0, credit: 0 });
+    } else {
+      setMixedPreset('cash_credit');
+      setMixedAmountsCents({ cash: cashPortion, other: 0, card: 0, credit: remainder });
+    }
+    setError('');
+  };
+
   const handleConfirmSale = async () => {
     if (cartItems.length === 0) {
       setError('El carrito está vacío');
       return;
     }
-    if (paymentMethod === 'credit' && !creditCustomerId) {
+    const mixedBreakdown = paymentMethod === 'mixed' ? amountsToBreakdown(mixedAmountsCents) : undefined;
+    const usesCredit =
+      paymentMethod === 'credit' ||
+      (paymentMethod === 'mixed' && mixedAmountsCents.credit > 0);
+
+    if (usesCredit && !creditCustomerId) {
       setError('Selecciona el cliente al que se le fía');
       return;
     }
@@ -401,11 +514,24 @@ const CreateSale = () => {
       setError(`Monto recibido insuficiente. Faltan ${formatPrice(total - receivedCashCents)}.`);
       return;
     }
+    if (paymentMethod === 'mixed') {
+      const check = resolveSalePaymentBreakdown({
+        totalCents: total,
+        paymentMethod: 'mixed',
+        paymentBreakdown: mixedBreakdown,
+        creditCustomerId,
+      });
+      if (!check.ok) {
+        setError(check.error);
+        return;
+      }
+    }
     try {
       setSubmitting(true);
       setError('');
       const itemsSnapshot = [...cartItems];
       const methodSnapshot = paymentMethod;
+      const breakdownSnapshot = mixedBreakdown;
       const creditCust = creditCustomers.find((c) => c.id === creditCustomerId);
       const actualReceivedCents = methodSnapshot === 'cash'
         ? (receivedCashCents !== null ? receivedCashCents : total)
@@ -429,9 +555,18 @@ const CreateSale = () => {
           }
         : undefined;
 
-      const saleId = loyaltyOptions
-        ? await createSale(cartItems, paymentMethod, paymentMethod === 'credit' ? creditCustomerId : undefined, loyaltyOptions)
-        : await createSale(cartItems, paymentMethod, paymentMethod === 'credit' ? creditCustomerId : undefined);
+      const saleId =
+        methodSnapshot === 'mixed'
+          ? await createSale(
+              cartItems,
+              methodSnapshot,
+              usesCredit ? creditCustomerId : undefined,
+              loyaltyOptions,
+              breakdownSnapshot,
+            )
+          : loyaltyOptions
+          ? await createSale(cartItems, methodSnapshot, usesCredit ? creditCustomerId : undefined, loyaltyOptions)
+          : await createSale(cartItems, methodSnapshot, usesCredit ? creditCustomerId : undefined);
 
       const expectedBalanceAfter = hasValidPhone
         ? Math.max(0, accountPointsBalance - saleSettlement.points_redeemed + saleSettlement.points_earned)
@@ -450,8 +585,13 @@ const CreateSale = () => {
         loyalty_points_earned: saleSettlement.points_earned,
         loyalty_balance_after: expectedBalanceAfter,
         payment_method: methodSnapshot,
-        credit_customer_id: creditCust?.id,
-        credit_customer_name: creditCust?.name,
+        payment_breakdown:
+          methodSnapshot === 'mixed'
+            ? breakdownSnapshot
+            : [{ method: methodSnapshot as SinglePaymentMethod, amount_cents: total }],
+        status: 'completed',
+        credit_customer_id: usesCredit ? creditCust?.id : undefined,
+        credit_customer_name: usesCredit ? creditCust?.name : undefined,
         items: itemsSnapshot,
         createdAt: new Date(),
         received_cash_cents: actualReceivedCents,
@@ -461,6 +601,8 @@ const CreateSale = () => {
       setSuccess(true);
       setCartItems([]);
       setPaymentMethod('cash');
+      setMixedPreset('cash_transfer');
+      setMixedAmountsCents(EMPTY_MIXED_AMOUNTS);
       setCreditCustomerId('');
       setReceivedCashCents(null);
       setLoyaltyPhoneInput('');
@@ -495,7 +637,19 @@ const CreateSale = () => {
         if (method !== 'cash') {
           setReceivedCashCents(null);
         }
+        if (method === 'mixed') {
+          const currentSum = Object.values(mixedAmountsCents).reduce((a, b) => a + b, 0);
+          if (currentSum === 0 && total > 0) {
+            setMixedAmountsCents(buildDefaultMixedAmounts(mixedPreset, total));
+          }
+        }
       }}
+      mixedPreset={mixedPreset}
+      mixedAmountsCents={mixedAmountsCents}
+      onSelectMixedPreset={handleSelectMixedPreset}
+      onMixedAmountChange={handleMixedAmountChange}
+      onCompleteMixedMethod={handleCompleteMixedMethod}
+      onSplitCashShortage={handleSplitCashShortage}
       onConfirm={handleConfirmSale}
       compact={isMobile}
       creditCustomers={creditCustomers.filter((customer) => customer.active)}
@@ -651,6 +805,7 @@ const CreateSale = () => {
                       <div className="space-y-1">
                         <span className="text-xs text-green-800 block">
                           Comprobante #{lastCreatedSale.id.slice(0, 8)} · {formatCentsCOP(lastCreatedSale.total)}
+                          {lastCreatedSale.payment_method === 'mixed' ? ' · 🔀 Pago Mixto' : ''}
                           {lastCreatedSale.id.startsWith('offline_') ? ' · 📡 Encolada en Modo Offline (FIFO)' : ''}
                         </span>
                         {((lastCreatedSale.loyalty_points_earned || 0) > 0 || lastCreatedSale.coupon_code) && (
@@ -896,6 +1051,12 @@ interface CartPanelProps {
   onChangeQuantity: (productId: string, delta: number) => void;
   onRemove: (productId: string) => void;
   onPaymentChange: (method: PaymentMethod) => void;
+  mixedPreset: MixedPreset;
+  mixedAmountsCents: MixedAmountsCents;
+  onSelectMixedPreset: (preset: Exclude<MixedPreset, 'custom'>) => void;
+  onMixedAmountChange: (method: SinglePaymentMethod, rawValue: string) => void;
+  onCompleteMixedMethod: (method: SinglePaymentMethod) => void;
+  onSplitCashShortage: (targetMethod: 'other' | 'credit') => void;
   onConfirm: () => void;
   receivedCashCents: number | null;
   onReceivedCashChange: (cents: number | null) => void;
@@ -938,6 +1099,12 @@ function CartPanel({
   onChangeQuantity,
   onRemove,
   onPaymentChange,
+  mixedPreset,
+  mixedAmountsCents,
+  onSelectMixedPreset,
+  onMixedAmountChange,
+  onCompleteMixedMethod,
+  onSplitCashShortage,
   onConfirm,
   receivedCashCents,
   onReceivedCashChange,
@@ -967,6 +1134,19 @@ function CartPanel({
 }: CartPanelProps) {
   const wholesaleSavings = items.reduce((sum, item) => sum + (item.wholesale_savings_cents || 0), 0);
   const hasPhoneDigits = isValidLoyaltyPhone(normalizeLoyaltyPhone(loyaltyPhoneInput));
+  const mixedBreakdown = amountsToBreakdown(mixedAmountsCents);
+  const mixedAssignedCents = mixedBreakdown.reduce((sum, entry) => sum + entry.amount_cents, 0);
+  const mixedValidation =
+    paymentMethod === 'mixed'
+      ? resolveSalePaymentBreakdown({
+          totalCents: total,
+          paymentMethod: 'mixed',
+          paymentBreakdown: mixedBreakdown,
+          creditCustomerId,
+        })
+      : null;
+  const showCreditCustomerSelect =
+    paymentMethod === 'credit' || (paymentMethod === 'mixed' && mixedAmountsCents.credit > 0);
 
   return (
     <div className="space-y-4">
@@ -1240,7 +1420,7 @@ function CartPanel({
 
       <fieldset>
         <legend className="mb-2 text-sm font-medium text-sf-text">Método de pago</legend>
-        <div className="grid grid-cols-4 gap-2" role="radiogroup">
+        <div className="grid grid-cols-3 sm:grid-cols-5 gap-1.5" role="radiogroup">
           {PAYMENT_OPTIONS.map((option) => {
             const selected = option.value === paymentMethod;
             return (
@@ -1250,7 +1430,7 @@ function CartPanel({
                 role="radio"
                 aria-checked={selected}
                 onClick={() => onPaymentChange(option.value)}
-                className={`flex min-h-[44px] flex-col items-center justify-center rounded-lg border px-2 text-xs font-medium transition ${
+                className={`flex min-h-[44px] flex-col items-center justify-center rounded-lg border px-1.5 text-[11px] font-semibold transition ${
                   selected ? 'border-sf-primary bg-sf-primary/10 text-sf-primary' : 'border-gray-300 text-gray-700 hover:bg-gray-50'
                 }`}
               >
@@ -1262,7 +1442,102 @@ function CartPanel({
         </div>
       </fieldset>
 
-      {paymentMethod === 'credit' && (
+      {paymentMethod === 'mixed' && items.length > 0 && (
+        <div
+          role="region"
+          aria-label="Desglose de pago mixto"
+          className="rounded-2xl border border-purple-200 bg-purple-50/40 p-3 space-y-3"
+        >
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <span className="text-xs font-bold uppercase tracking-wide text-purple-950">
+              🔀 Dividir Cobro Mixto
+            </span>
+            <span
+              className={`rounded-full px-2.5 py-0.5 text-[11px] font-bold tabular-nums ${
+                mixedAssignedCents === total
+                  ? 'bg-emerald-100 text-emerald-900'
+                  : 'bg-amber-100 text-amber-900'
+              }`}
+            >
+              {mixedAssignedCents === total
+                ? `✅ Cuadre exacto (${formatCentsCOP(total)})`
+                : mixedAssignedCents < total
+                ? `Faltan ${formatCentsCOP(total - mixedAssignedCents)}`
+                : `Excede por ${formatCentsCOP(mixedAssignedCents - total)}`}
+            </span>
+          </div>
+
+          <div className="flex flex-wrap gap-1.5">
+            {(Object.keys(MIXED_PRESET_PAIRS) as Array<Exclude<MixedPreset, 'custom'>>).map((presetKey) => (
+              <button
+                key={presetKey}
+                type="button"
+                aria-pressed={mixedPreset === presetKey}
+                onClick={() => onSelectMixedPreset(presetKey)}
+                className={`min-h-[44px] rounded-xl border px-2.5 text-[11px] font-bold transition ${
+                  mixedPreset === presetKey
+                    ? 'border-sf-primary bg-sf-primary text-white shadow-xs'
+                    : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                }`}
+              >
+                {MIXED_PRESET_PAIRS[presetKey].label}
+              </button>
+            ))}
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            {(
+              [
+                { method: 'cash' as SinglePaymentMethod, label: '💵 Efectivo (COP)', inputId: 'mixed-cash-cop' },
+                { method: 'other' as SinglePaymentMethod, label: '📱 Nequi / Transf. (COP)', inputId: 'mixed-other-cop' },
+                { method: 'credit' as SinglePaymentMethod, label: '📒 Fiado (COP)', inputId: 'mixed-credit-cop' },
+                { method: 'card' as SinglePaymentMethod, label: '💳 Tarjeta (COP)', inputId: 'mixed-card-cop' },
+              ]
+            ).map((field) => {
+              const cents = mixedAmountsCents[field.method];
+              const displayPesos = cents > 0 ? String(Math.round(cents / 100)) : '';
+              return (
+                <div key={field.method} className="rounded-xl border border-slate-200 bg-white p-2 space-y-1">
+                  <div className="flex items-center justify-between gap-1">
+                    <label htmlFor={field.inputId} className="text-[11px] font-bold text-slate-700">
+                      {field.label}
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => onCompleteMixedMethod(field.method)}
+                      className="min-h-[28px] rounded px-1.5 text-[10px] font-bold text-sf-primary hover:bg-sf-primary/10"
+                    >
+                      Completar
+                    </button>
+                  </div>
+                  <div className="relative">
+                    <span className="pointer-events-none absolute inset-y-0 left-2 flex items-center text-xs font-bold text-slate-400">
+                      $
+                    </span>
+                    <input
+                      id={field.inputId}
+                      type="text"
+                      inputMode="numeric"
+                      value={displayPesos}
+                      onChange={(e) => onMixedAmountChange(field.method, e.target.value)}
+                      placeholder="0"
+                      className="input min-h-[44px] pl-6 text-sm font-bold tabular-nums text-slate-900"
+                    />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {mixedValidation && !mixedValidation.ok && (
+            <p role="alert" className="text-xs font-semibold text-rose-700">
+              {mixedValidation.error}
+            </p>
+          )}
+        </div>
+      )}
+
+      {showCreditCustomerSelect && (
         <div>
           <label htmlFor="credit-customer" className="mb-1 block text-sm font-medium text-sf-text">Cliente al que se le fía</label>
           <select
@@ -1294,6 +1569,33 @@ function CartPanel({
         />
       )}
 
+      {paymentMethod === 'cash' &&
+        receivedCashCents !== null &&
+        receivedCashCents > 0 &&
+        receivedCashCents < total && (
+          <div className="rounded-xl border border-amber-200 bg-amber-50 p-2.5 space-y-2">
+            <p className="text-[11px] font-bold text-amber-900">
+              💡 ¿El cliente paga la diferencia por otro medio?
+            </p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+              <button
+                type="button"
+                onClick={() => onSplitCashShortage('other')}
+                className="min-h-[44px] rounded-lg border border-blue-300 bg-white px-2.5 py-1.5 text-xs font-bold text-blue-800 hover:bg-blue-50"
+              >
+                🔀 Faltante a Nequi ({formatCentsCOP(total - receivedCashCents)})
+              </button>
+              <button
+                type="button"
+                onClick={() => onSplitCashShortage('credit')}
+                className="min-h-[44px] rounded-lg border border-amber-400 bg-white px-2.5 py-1.5 text-xs font-bold text-amber-900 hover:bg-amber-100"
+              >
+                📒 Faltante a Fiado ({formatCentsCOP(total - receivedCashCents)})
+              </button>
+            </div>
+          </div>
+        )}
+
       {paymentMethod === 'cash' && receivedCashCents !== null && receivedCashCents < total ? (
         <button
           type="button"
@@ -1307,7 +1609,12 @@ function CartPanel({
         <button
           type="button"
           onClick={onConfirm}
-          disabled={submitting || items.length === 0 || (paymentMethod === 'credit' && !creditCustomerId)}
+          disabled={
+            submitting ||
+            items.length === 0 ||
+            (paymentMethod === 'credit' && !creditCustomerId) ||
+            (paymentMethod === 'mixed' && Boolean(mixedValidation && !mixedValidation.ok))
+          }
           className="btn-success w-full py-3 text-base"
         >
           {submitting ? 'Procesando...' : `Confirmar venta · ${formatPrice(total)}`}

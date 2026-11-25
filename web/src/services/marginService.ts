@@ -1,5 +1,19 @@
 import { getSales } from './saleService';
+import { getShrinkageHistory } from './shrinkageService';
+import { getCashExpenses } from './cashExpenseService';
+import { apiClient, hasAuthSession } from './apiClient';
 import { Sale, Product, SaleItem } from '../firebase/db';
+import {
+  calculateNetProfitStatement,
+  isSaleVoided,
+  type NetProfitStatement,
+} from '../utils/saleAccounting';
+
+export { calculateNetProfitStatement, type NetProfitStatement };
+
+function isMockMode(): boolean {
+  return import.meta.env.VITE_USE_MOCK_DATA === 'true';
+}
 
 /**
  * Escapa un valor para exportación CSV evitando CSV injection (CWE-1236).
@@ -122,7 +136,7 @@ function itemCategory(item: SaleItem): string {
 }
 
 export async function getMarginSummary(): Promise<MarginSummary> {
-  const sales = await getSales();
+  const sales = (await getSales()).filter((s) => !isSaleVoided(s));
 
   const now = new Date();
   const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -177,7 +191,7 @@ export async function getMarginSummary(): Promise<MarginSummary> {
 
 export async function getMarginDaily(days: number = 30): Promise<MarginDaily[]> {
   const safeDays = Math.min(Math.max(Math.floor(days), 1), 365);
-  const sales = await getSales();
+  const sales = (await getSales()).filter((s) => !isSaleVoided(s));
   const result: MarginDaily[] = [];
   const now = new Date();
 
@@ -223,7 +237,7 @@ export async function getTopProductsByMargin(
   sortBy: 'absolute' | 'percent' = 'absolute'
 ): Promise<ProductMargin[]> {
   const safeLimit = Math.min(Math.max(Math.floor(limit), 1), 100);
-  const sales = await getSales();
+  const sales = (await getSales()).filter((s) => !isSaleVoided(s));
 
   const totals = new Map<
     string,
@@ -276,7 +290,7 @@ export async function getTopProductsByMargin(
 }
 
 export async function getMarginByCategory(): Promise<CategoryMargin[]> {
-  const sales = await getSales();
+  const sales = (await getSales()).filter((s) => !isSaleVoided(s));
 
   const buckets = new Map<string, { revenue: number; cost: number }>();
 
@@ -304,4 +318,38 @@ export async function getMarginByCategory(): Promise<CategoryMargin[]> {
       };
     })
     .sort((a, b) => b.margin_cents - a.margin_cents);
+}
+
+/**
+ * Obtiene el Estado de Resultados de Utilidad Neta Real del período (Ingresos - CMV - Mermas - Caja Menor).
+ */
+export async function getNetProfitStatement(days: number = 30): Promise<NetProfitStatement> {
+  const safeDays = Math.min(Math.max(Math.floor(Number(days) || 30), 1), 365);
+
+  if (!isMockMode() && hasAuthSession()) {
+    try {
+      return await apiClient.get<NetProfitStatement>(`/reports/net-profit?days=${safeDays}`);
+    } catch {
+      // Fallback a consolidación local si el endpoint no responde
+    }
+  }
+
+  const now = new Date();
+  const sinceDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  sinceDate.setDate(sinceDate.getDate() - (safeDays - 1));
+  const sinceIso = sinceDate.toISOString();
+
+  const [sales, shrinkageEntries, cashExpenses] = await Promise.all([
+    getSales(),
+    getShrinkageHistory({ since: sinceIso }).catch(() => []),
+    getCashExpenses({ since: sinceIso }).catch(() => []),
+  ]);
+
+  return calculateNetProfitStatement({
+    sales,
+    shrinkageEntries,
+    cashExpenses,
+    days: safeDays,
+    now,
+  });
 }

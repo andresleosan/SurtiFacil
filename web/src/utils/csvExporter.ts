@@ -1,5 +1,6 @@
 import { Sale } from '../firebase/db';
 import { CashClosing } from '../types/cashClosing';
+import { isSaleVoided, NetProfitStatement, parsePaymentBreakdown } from './saleAccounting';
 
 /**
  * Escapa valores para formato CSV seguro contra inyección de fórmulas (DDE/CSV injection)
@@ -38,16 +39,19 @@ export function downloadCSV(csvText: string, filename: string): void {
 export function exportSalesToCSV(sales: Sale[], filename?: string): void {
   const headers = [
     'ID Venta',
+    'Estado',
     'Fecha',
     'Hora',
     'Cajero',
     'Cliente Fiado',
     'Método de Pago',
+    'Desglose Pago',
     'Artículos',
     'Total (COP)',
     'Costo Estimado (COP)',
     'Ganancia (COP)',
     'Detalle de Productos',
+    'Motivo Anulación',
   ];
 
   const paymentMethodLabels: Record<string, string> = {
@@ -55,6 +59,7 @@ export function exportSalesToCSV(sales: Sale[], filename?: string): void {
     card: 'Tarjeta',
     other: 'Nequi / Bancolombia',
     credit: 'Fiado',
+    mixed: 'Pago Mixto',
   };
 
   const rows = sales.map((sale) => {
@@ -66,6 +71,11 @@ export function exportSalesToCSV(sales: Sale[], filename?: string): void {
     const costPesos = Math.round((sale.total_cost_cents || 0) / 100);
     const profitPesos = totalPesos - costPesos;
 
+    const breakdown = parsePaymentBreakdown(sale.payment_breakdown, sale.payment_method, sale.total);
+    const breakdownText = breakdown
+      .map((entry) => `${paymentMethodLabels[entry.method] || entry.method}: $${Math.round(entry.amount_cents / 100)}`)
+      .join(' + ');
+
     const itemCount = (sale.items || []).reduce((acc, it) => acc + it.quantity, 0);
     const itemsDetail = (sale.items || [])
       .map((it) => `${it.quantity}x ${it.product_name} ($${Math.round(it.price_cents / 100)})`)
@@ -73,16 +83,19 @@ export function exportSalesToCSV(sales: Sale[], filename?: string): void {
 
     return [
       sale.id,
+      isSaleVoided(sale) ? 'Anulada' : 'Vigente',
       dateStr,
       timeStr,
       sale.created_by_role || 'Caja',
       sale.credit_customer_name || 'Venta directa',
       paymentMethodLabels[sale.payment_method] || sale.payment_method,
+      breakdownText,
       String(itemCount),
       String(totalPesos),
       String(costPesos),
       String(profitPesos),
       itemsDetail,
+      sale.void_reason || '',
     ];
   });
 
@@ -148,5 +161,28 @@ export function exportClosingsToCSV(closings: CashClosing[], filename?: string):
     .join('\n');
 
   const defaultFilename = `cierres-caja-surtifacil-${new Date().toISOString().split('T')[0]}.csv`;
+  downloadCSV(csvContent, filename || defaultFilename);
+}
+
+/**
+ * Exporta el Estado de Resultados de Utilidad Neta Real a CSV compatible con Excel.
+ */
+export function exportNetProfitStatementToCSV(
+  statement: NetProfitStatement,
+  filename?: string
+): void {
+  const rows: string[][] = [
+    ['Concepto Contable', 'Detalle / Cantidad', 'Valor (COP)'],
+    ['Ingresos Netos por Ventas Vigentes', `${statement.active_sales_count} ventas`, String(Math.round(statement.revenue_cents / 100))],
+    ['(-) Costo de Mercancía Vendida (CMV)', 'Costo de adquisición', String(-Math.round(statement.cogs_cents / 100))],
+    ['(=) Margen Bruto Comercial', `${statement.gross_margin_percent.toFixed(1)}%`, String(Math.round(statement.gross_profit_cents / 100))],
+    ['(-) Mermas, Averías y Vencimientos', `${statement.shrinkage_count} bajas`, String(-Math.round(statement.shrinkage_loss_cents / 100))],
+    ['(-) Gastos Operativos Caja Menor', `${statement.expenses_count} egresos`, String(-Math.round(statement.operating_expenses_cents / 100))],
+    ['(=) UTILIDAD NETA REAL', `${statement.net_margin_percent.toFixed(1)}%`, String(Math.round(statement.net_profit_cents / 100))],
+    ['Ventas Anuladas Excluidas', `${statement.voided_sales_count} anuladas`, String(Math.round(statement.voided_sales_cents / 100))],
+  ];
+
+  const csvContent = rows.map((row) => row.map(escapeCsvValue).join(',')).join('\n');
+  const defaultFilename = `estado-resultados-${statement.period_days}d-${new Date().toISOString().split('T')[0]}.csv`;
   downloadCSV(csvContent, filename || defaultFilename);
 }

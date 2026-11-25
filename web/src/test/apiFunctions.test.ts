@@ -332,9 +332,34 @@ class MockD1Database implements D1Database {
           return { results: [{ count: sales.length, total_cash_cents: totalCash } as unknown as T], success: true };
         }
 
+        if (q.includes('FROM sales') && q.includes("COALESCE(status, 'completed') != 'voided'") && q.includes('totalCents')) {
+          const activeSales = db.tables.sales.filter(
+            (s) => s.negocio_id === boundValues[0] && (s.status || 'completed') !== 'voided'
+          );
+          const totalCents = activeSales.reduce((acc, s) => acc + (s.total_cents || s.total || 0), 0);
+          return { results: [{ count: activeSales.length, totalCents } as unknown as T], success: true };
+        }
+
+        if (q.includes('FROM sales') && q.includes("COALESCE(status, 'completed') != 'voided'")) {
+          const sinceIso = boundValues[1];
+          const activeSales = db.tables.sales.filter(
+            (s) =>
+              s.negocio_id === boundValues[0] &&
+              (s.status || 'completed') !== 'voided' &&
+              (!sinceIso || s.created_at >= sinceIso)
+          );
+          return { results: activeSales as T[], success: true };
+        }
+
         if (q.includes('FROM credit_entries') && q.includes("type = 'payment'")) {
+          const excludeSaleReversals = q.includes('sale_id IS NULL');
+          const sinceIso = boundValues[1];
           const entries = db.tables.credit_entries.filter(
-            (e) => e.negocio_id === boundValues[0] && e.type === 'payment'
+            (e) =>
+              e.negocio_id === boundValues[0] &&
+              e.type === 'payment' &&
+              (!excludeSaleReversals || !e.sale_id) &&
+              (!sinceIso || e.created_at >= sinceIso)
           );
           const totalCash = entries.reduce((acc, e) => acc + (e.amount_cents || 0), 0);
           return { results: [{ count: entries.length, total_credit_cash_cents: totalCash } as unknown as T], success: true };
@@ -345,6 +370,14 @@ class MockD1Database implements D1Database {
             (sale) => sale.id === boundValues[0] && sale.negocio_id === boundValues[1]
           );
           return { results: s ? [s as T] : [], success: true };
+        }
+
+        if (q.includes('FROM sales WHERE negocio_id = ? AND created_at >= ?')) {
+          const sinceIso = boundValues[1];
+          const s = db.tables.sales.filter(
+            (sale) => sale.negocio_id === boundValues[0] && (!sinceIso || sale.created_at >= sinceIso)
+          );
+          return { results: s as T[], success: true };
         }
 
         if (q.includes('FROM sales WHERE negocio_id = ?')) {
@@ -731,7 +764,35 @@ class MockD1Database implements D1Database {
         }
 
         if (q.startsWith('INSERT INTO sales')) {
-          if (q.includes('total_cost_cents')) {
+          if (q.includes('payment_breakdown_json')) {
+            const [
+              id, negocio_id, total_cents, subtotal_cents, coupon_code, coupon_discount_cents,
+              loyalty_account_id, loyalty_phone, loyalty_points_redeemed, loyalty_discount_cents, loyalty_points_earned,
+              payment_method, payment_breakdown_json, credit_customer_id, credit_customer_name, total_cost_cents, created_by_uid, created_by_role,
+            ] = boundValues;
+            db.tables.sales.push({
+              id,
+              negocio_id,
+              total_cents,
+              subtotal_cents,
+              coupon_code,
+              coupon_discount_cents,
+              loyalty_account_id,
+              loyalty_phone,
+              loyalty_points_redeemed,
+              loyalty_discount_cents,
+              loyalty_points_earned,
+              payment_method,
+              payment_breakdown_json,
+              status: 'completed',
+              credit_customer_id,
+              credit_customer_name,
+              total_cost_cents,
+              created_by_uid,
+              created_by_role,
+              created_at: new Date().toISOString(),
+            });
+          } else if (q.includes('total_cost_cents')) {
             const [
               id, negocio_id, total_cents, subtotal_cents, coupon_code, coupon_discount_cents,
               loyalty_account_id, loyalty_phone, loyalty_points_redeemed, loyalty_discount_cents, loyalty_points_earned,
@@ -750,6 +811,7 @@ class MockD1Database implements D1Database {
               loyalty_discount_cents,
               loyalty_points_earned,
               payment_method,
+              status: 'completed',
               credit_customer_id,
               credit_customer_name,
               total_cost_cents,
@@ -776,12 +838,25 @@ class MockD1Database implements D1Database {
               loyalty_discount_cents,
               loyalty_points_earned,
               payment_method,
+              status: 'completed',
               credit_customer_id,
               credit_customer_name,
               created_by_uid,
               created_by_role,
               created_at: new Date().toISOString(),
             });
+          }
+        }
+
+        if (q.startsWith('UPDATE sales') && q.includes("SET status = 'voided'")) {
+          const [voided_at, voided_by_uid, voided_by_name, void_reason, saleId, negId] = boundValues;
+          const sale = db.tables.sales.find((s) => s.id === saleId && s.negocio_id === negId);
+          if (sale) {
+            sale.status = 'voided';
+            sale.voided_at = voided_at;
+            sale.voided_by_uid = voided_by_uid;
+            sale.voided_by_name = voided_by_name;
+            sale.void_reason = void_reason;
           }
         }
 
@@ -823,6 +898,14 @@ class MockD1Database implements D1Database {
             (c) => c.id === customer_id && c.negocio_id === negId
           );
           if (cust) cust.balance_cents += delta;
+        }
+
+        if (q.startsWith('UPDATE credit_customers SET balance_cents = MAX(0, balance_cents - ?)')) {
+          const [delta, customer_id, negId] = boundValues;
+          const cust = db.tables.credit_customers.find(
+            (c) => c.id === customer_id && c.negocio_id === negId
+          );
+          if (cust) cust.balance_cents = Math.max(0, cust.balance_cents - delta);
         }
 
         if (q.startsWith('INSERT INTO purchase_orders')) {
@@ -1102,6 +1185,13 @@ class MockD1Database implements D1Database {
               acc.lifetime_points_redeemed += addRedeemed;
               acc.total_purchases_count += 1;
               acc.total_spent_cents += addSpent;
+            } else if (q.includes('points_balance = MAX(0, points_balance + ?)')) {
+              const [delta, subEarned, subRedeemed, subSpent] = boundValues;
+              acc.points_balance = Math.max(0, acc.points_balance + delta);
+              acc.lifetime_points_earned = Math.max(0, acc.lifetime_points_earned - subEarned);
+              acc.lifetime_points_redeemed = Math.max(0, acc.lifetime_points_redeemed - subRedeemed);
+              acc.total_purchases_count = Math.max(0, acc.total_purchases_count - 1);
+              acc.total_spent_cents = Math.max(0, acc.total_spent_cents - subSpent);
             } else if (q.includes('points_balance = MAX(0, points_balance - ?)')) {
               const [redeemed, addRedeemed] = boundValues;
               acc.points_balance = Math.max(0, acc.points_balance - redeemed);
@@ -1140,7 +1230,18 @@ class MockD1Database implements D1Database {
               } else {
                 const [id, negocio_id, account_id, points_delta, balance_after, amount_cents, description, sale_id, uid, role] = boundValues;
                 db.tables.loyalty_movements.push({
-                  id, negocio_id, account_id, type: q.includes("'redeem'") ? 'redeem' : 'earn', points_delta, balance_after, amount_cents, description, sale_id, created_by_uid: uid, created_by_role: role, created_at: new Date().toISOString(),
+                  id,
+                  negocio_id,
+                  account_id,
+                  type: q.includes("'redeem'") ? 'redeem' : q.includes("'adjust'") ? 'adjust' : 'earn',
+                  points_delta,
+                  balance_after,
+                  amount_cents,
+                  description,
+                  sale_id,
+                  created_by_uid: uid,
+                  created_by_role: role,
+                  created_at: new Date().toISOString(),
                 });
               }
             } else if (q.includes("'bonus'")) {
@@ -2872,6 +2973,290 @@ describe('Cloudflare Pages Functions API (/api/*)', () => {
       expect(cancelRes.status).toBe(200);
       expect(db.tables.loyalty_accounts.find((a) => a.id === 'loy-carlos')?.points_balance).toBe(76);
       expect(db.tables.discount_coupons.find((c) => c.code === 'VECINO10')?.used_count).toBe(1);
+    });
+  });
+
+  describe('Tarea 30 — Pagos Mixtos, Anulación Atómica (/api/sales/:id/void) y Utilidad Neta Real (/api/reports/net-profit)', () => {
+    it('registra ventas con pago mixto (Efectivo + Fiado), carga solo la porción fiada y refleja el desglose en arqueo de caja', async () => {
+      const db = new MockD1Database();
+      const initialDebt = db.tables.credit_customers.find((c) => c.id === 'cust-1')!.balance_cents; // 5.000.000
+
+      // 2 unidades de p-1 ($4.500 c/u = $9.000 = 900.000 cents)
+      // Desglose incorrecto debe fallar con 400
+      const badCtx = createMockContext(
+        'POST',
+        'http://localhost/api/sales',
+        { Authorization: 'Bearer mock:cashier-1:cajero@surtifacil.com:cashier' },
+        {
+          items: [{ product_id: 'p-1', quantity: 2 }],
+          payment_method: 'mixed',
+          payment_breakdown: [
+            { method: 'cash', amount_cents: 400000 },
+            { method: 'other', amount_cents: 400000 },
+          ],
+        },
+        db
+      );
+      const badRes = await onRequest(badCtx as any);
+      expect(badRes.status).toBe(400);
+
+      // Desglose exacto: $4.000 efectivo + $5.000 fiado a Doña Gloria (cust-1)
+      const okCtx = createMockContext(
+        'POST',
+        'http://localhost/api/sales',
+        { Authorization: 'Bearer mock:cashier-1:cajero@surtifacil.com:cashier' },
+        {
+          items: [{ product_id: 'p-1', quantity: 2 }],
+          payment_method: 'mixed',
+          credit_customer_id: 'cust-1',
+          payment_breakdown: [
+            { method: 'cash', amount_cents: 400000 },
+            { method: 'credit', amount_cents: 500000 },
+          ],
+        },
+        db
+      );
+      const okRes = await onRequest(okCtx as any);
+      expect(okRes.status).toBe(201);
+      const okData = await okRes.json();
+      expect(okData.payment_method).toBe('mixed');
+      expect(okData.payment_breakdown).toEqual([
+        { method: 'cash', amount_cents: 400000 },
+        { method: 'credit', amount_cents: 500000 },
+      ]);
+      expect(db.tables.credit_customers.find((c) => c.id === 'cust-1')?.balance_cents).toBe(
+        initialDebt + 500000
+      );
+
+      // El arqueo de caja solo suma los $4.000 en efectivo y reporta $5.000 en credit
+      const closingCtx = createMockContext(
+        'GET',
+        'http://localhost/api/cash-closings/summary?initial_base_cents=10000000',
+        { Authorization: 'Bearer mock:cashier-1:cajero@surtifacil.com:cashier' },
+        undefined,
+        db
+      );
+      const closingRes = await onRequest(closingCtx as any);
+      expect(closingRes.status).toBe(200);
+      const summary = await closingRes.json();
+      expect(summary.sales_cash_cents).toBe(400000);
+      expect(summary.credit_payments_cash_cents).toBe(0);
+      expect(summary.expected_cash_cents).toBe(10400000);
+      expect(summary.other_sales).toContainEqual({
+        payment_method: 'credit',
+        count: 1,
+        total_cents: 500000,
+      });
+    });
+
+    it('POST /api/sales/:id/void exige rol admin/manager, reintegra stock, revierte fiado/puntos/cupón sin inflar arqueo y excluye de totales', async () => {
+      const db = new MockD1Database();
+      const stockBefore = db.tables.products.find((p) => p.id === 'p-1')!.stock; // 20
+      const debtBefore = db.tables.credit_customers.find((c) => c.id === 'cust-1')!.balance_cents; // 5.000.000
+      const pointsBefore = db.tables.loyalty_accounts.find((a) => a.id === 'loy-carlos')!.points_balance; // 85
+
+      // 1. Crear venta de 3x p-1 ($13.500 = 1.350.000) con cupón VECINO10 (-$1.350) + canje 10 pts (-$1.000) => $11.150
+      // Pago mixto: $6.150 efectivo + $5.000 fiado
+      const saleCtx = createMockContext(
+        'POST',
+        'http://localhost/api/sales',
+        { Authorization: 'Bearer mock:cashier-1:cajero@surtifacil.com:cashier' },
+        {
+          items: [{ product_id: 'p-1', quantity: 3 }],
+          payment_method: 'mixed',
+          credit_customer_id: 'cust-1',
+          payment_breakdown: [
+            { method: 'cash', amount_cents: 665000 },
+            { method: 'credit', amount_cents: 500000 },
+          ],
+          loyalty_phone: '3004567890',
+          loyalty_points_redeemed: 10,
+          coupon_code: 'VECINO10',
+        },
+        db
+      );
+      const saleRes = await onRequest(saleCtx as any);
+      expect(saleRes.status).toBe(201);
+      const saleData = await saleRes.json();
+
+      expect(db.tables.products.find((p) => p.id === 'p-1')?.stock).toBe(stockBefore - 3);
+      expect(db.tables.credit_customers.find((c) => c.id === 'cust-1')?.balance_cents).toBe(debtBefore + 500000);
+      expect(db.tables.discount_coupons.find((c) => c.code === 'VECINO10')?.used_count).toBe(1);
+
+      // 2. Cajero NO puede anular (403)
+      const cashierVoidCtx = createMockContext(
+        'POST',
+        `http://localhost/api/sales/${saleData.id}/void`,
+        { Authorization: 'Bearer mock:cashier-1:cajero@surtifacil.com:cashier' },
+        { reason: 'Devolución del cliente' },
+        db
+      );
+      const cashierVoidRes = await onRequest(cashierVoidCtx as any);
+      expect(cashierVoidRes.status).toBe(403);
+
+      // 3. Motivo corto falla (400)
+      const shortReasonCtx = createMockContext(
+        'POST',
+        `http://localhost/api/sales/${saleData.id}/void`,
+        { Authorization: 'Bearer mock:admin-1:admin@surtifacil.com:admin' },
+        { reason: 'no' },
+        db
+      );
+      expect((await onRequest(shortReasonCtx as any)).status).toBe(400);
+
+      // 4. Otro negocio NO puede anular venta ajena (404)
+      const crossTenantCtx = createMockContext(
+        'POST',
+        `http://localhost/api/sales/${saleData.id}/void`,
+        {
+          Authorization: 'Bearer mock:admin-1:admin@surtifacil.com:admin',
+          'X-Negocio-Id': 'otra-tienda',
+        },
+        { reason: 'Intento cruzado' },
+        db
+      );
+      expect((await onRequest(crossTenantCtx as any)).status).toBe(404);
+
+      // 5. Admin anula exitosamente
+      const voidCtx = createMockContext(
+        'POST',
+        `http://localhost/api/sales/${saleData.id}/void`,
+        { Authorization: 'Bearer mock:admin-1:admin@surtifacil.com:admin' },
+        { reason: 'Devolución del cliente en mostrador' },
+        db
+      );
+      const voidRes = await onRequest(voidCtx as any);
+      expect(voidRes.status).toBe(200);
+      const voidPayload = await voidRes.json();
+      expect(voidPayload.restocked_units).toBe(3);
+      expect(voidPayload.credit_reversed_cents).toBe(500000);
+      expect(voidPayload.sale.status).toBe('voided');
+
+      // Stock, fiado, cupón y puntos revertidos exactamente
+      expect(db.tables.products.find((p) => p.id === 'p-1')?.stock).toBe(stockBefore);
+      expect(db.tables.credit_customers.find((c) => c.id === 'cust-1')?.balance_cents).toBe(debtBefore);
+      expect(db.tables.discount_coupons.find((c) => c.code === 'VECINO10')?.used_count).toBe(0);
+      expect(db.tables.loyalty_accounts.find((a) => a.id === 'loy-carlos')?.points_balance).toBe(pointsBefore);
+
+      // 6. Doble anulación bloqueada con 409
+      const doubleVoidCtx = createMockContext(
+        'POST',
+        `http://localhost/api/sales/${saleData.id}/void`,
+        { Authorization: 'Bearer mock:admin-1:admin@surtifacil.com:admin' },
+        { reason: 'Intento duplicado de anulación' },
+        db
+      );
+      const doubleVoidRes = await onRequest(doubleVoidCtx as any);
+      expect(doubleVoidRes.status).toBe(409);
+
+      // 7. Totales excluyen la venta anulada y el arqueo NO cuenta la reversión de fiado como efectivo entrante
+      const totalsCtx = createMockContext(
+        'GET',
+        'http://localhost/api/sales?totals=true',
+        { Authorization: 'Bearer mock:admin-1:admin@surtifacil.com:admin' },
+        undefined,
+        db
+      );
+      const totalsData = await (await onRequest(totalsCtx as any)).json();
+      expect(totalsData).toEqual({ count: 0, totalCents: 0 });
+
+      const summaryCtx = createMockContext(
+        'GET',
+        'http://localhost/api/cash-closings/summary?initial_base_cents=10000000',
+        { Authorization: 'Bearer mock:admin-1:admin@surtifacil.com:admin' },
+        undefined,
+        db
+      );
+      const summaryData = await (await onRequest(summaryCtx as any)).json();
+      expect(summaryData.sales_cash_cents).toBe(0);
+      expect(summaryData.credit_payments_cash_cents).toBe(0);
+      expect(summaryData.expected_cash_cents).toBe(10000000);
+    });
+
+    it('GET /api/reports/net-profit consolida ingresos vigentes, CMV, mermas y caja menor en Utilidad Neta Real', async () => {
+      const db = new MockD1Database();
+
+      // Venta vigente: 2x p-1 (PVP $4.500 c/u = $9.000, costo $3.500 c/u = $7.000 -> Margen bruto $2.000)
+      await onRequest(
+        createMockContext(
+          'POST',
+          'http://localhost/api/sales',
+          { Authorization: 'Bearer mock:admin-1:admin@surtifacil.com:admin' },
+          {
+            items: [{ product_id: 'p-1', quantity: 2 }],
+            payment_method: 'cash',
+          },
+          db
+        ) as any
+      );
+
+      // Venta anulada (no debe sumar ni ingresos ni CMV)
+      const voidTargetRes = await onRequest(
+        createMockContext(
+          'POST',
+          'http://localhost/api/sales',
+          { Authorization: 'Bearer mock:admin-1:admin@surtifacil.com:admin' },
+          {
+            items: [{ product_id: 'p-1', quantity: 1 }],
+            payment_method: 'other',
+          },
+          db
+        ) as any
+      );
+      const voidTarget = await voidTargetRes.json();
+      await onRequest(
+        createMockContext(
+          'POST',
+          `http://localhost/api/sales/${voidTarget.id}/void`,
+          { Authorization: 'Bearer mock:admin-1:admin@surtifacil.com:admin' },
+          { reason: 'Anulada para prueba de P&G' },
+          db
+        ) as any
+      );
+
+      // Merma de 1 unidad de p-1 ($3.500 al costo = 350.000 cents)
+      await onRequest(
+        createMockContext(
+          'POST',
+          'http://localhost/api/shrinkage',
+          { Authorization: 'Bearer mock:admin-1:admin@surtifacil.com:admin' },
+          { product_id: 'p-1', quantity: 1, reason: 'damaged' },
+          db
+        ) as any
+      );
+
+      // Gasto Caja Menor de $1.000 (100.000 cents)
+      await onRequest(
+        createMockContext(
+          'POST',
+          'http://localhost/api/cash-expenses',
+          { Authorization: 'Bearer mock:admin-1:admin@surtifacil.com:admin' },
+          { category: 'insumos_bolsas', description: 'Bolsas biodegradables', amount_cents: 100000, payment_method: 'cash' },
+          db
+        ) as any
+      );
+
+      const pnlRes = await onRequest(
+        createMockContext(
+          'GET',
+          'http://localhost/api/reports/net-profit?days=30',
+          { Authorization: 'Bearer mock:admin-1:admin@surtifacil.com:admin' },
+          undefined,
+          db
+        ) as any
+      );
+      expect(pnlRes.status).toBe(200);
+      const pnl = await pnlRes.json();
+
+      expect(pnl.active_sales_count).toBe(1);
+      expect(pnl.voided_sales_count).toBe(1);
+      expect(pnl.revenue_cents).toBe(900000);
+      expect(pnl.cogs_cents).toBe(700000);
+      expect(pnl.gross_profit_cents).toBe(200000);
+      expect(pnl.shrinkage_loss_cents).toBe(350000);
+      expect(pnl.operating_expenses_cents).toBe(100000);
+      expect(pnl.total_deductions_cents).toBe(450000);
+      expect(pnl.net_profit_cents).toBe(-250000);
     });
   });
 });

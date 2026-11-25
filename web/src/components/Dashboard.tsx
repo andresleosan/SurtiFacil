@@ -7,6 +7,7 @@ import CashClosingModal from './CashClosingModal';
 import PettyCashModal from './PettyCashModal';
 import { Icon } from './ui/Icon';
 import { PageHeader } from './ui/PageHeader';
+import { isSaleVoided } from '../utils/saleAccounting';
 
 interface DashboardMetrics {
   todayCents: number;
@@ -46,7 +47,8 @@ const Dashboard = () => {
       startOfWeek.setDate(startOfToday.getDate() - startOfToday.getDay());
 
       // Solo se descargan las ventas de la semana; el histórico llega agregado desde el servidor.
-      const [weekSales, totals] = await Promise.all([getSalesSince(startOfWeek), getSalesTotals()]);
+      const [rawWeekSales, totals] = await Promise.all([getSalesSince(startOfWeek), getSalesTotals()]);
+      const weekSales = rawWeekSales.filter((sale) => !isSaleVoided(sale));
 
       const todayCents = weekSales
         .filter((sale) => saleDate(sale.date) >= startOfToday)

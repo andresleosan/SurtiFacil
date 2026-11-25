@@ -246,4 +246,35 @@ describe('Generador de Tirillas Térmicas y Exportación Excel CSV', () => {
     expect(text80).toContain('$ 145.600');
     expect(text80).toContain('NO RESPONSABLE DE IVA (ART. 616-1 E.T.)');
   });
+
+  it('imprime desglose de pago mixto y marca de venta anulada respetando columnas 58mm/80mm y WhatsApp', () => {
+    const mixedVoidedSale: Sale = {
+      ...mockSale,
+      total: 1000000, // $ 10.000
+      payment_method: 'mixed',
+      payment_breakdown: [
+        { method: 'cash', amount_cents: 600000 },
+        { method: 'credit', amount_cents: 400000 },
+      ],
+      credit_customer_name: 'Doña Marta',
+      received_cash_cents: 1000000, // paga $10.000 sobre porción de $6.000 -> vueltas $4.000
+      status: 'voided',
+      void_reason: 'Devolución por cambio',
+    };
+
+    const text58 = generateSaleReceiptText(mixedVoidedSale, mockStore, { width: '58mm' });
+    for (const line of text58.split('\n')) {
+      expect(line.length).toBeLessThanOrEqual(32);
+    }
+    expect(text58).toContain('VENTA ANULADA / DEVUELTA');
+    expect(text58).toContain('Pago Mixto');
+    expect(text58).toContain('$ 6.000');
+    expect(text58).toContain('$ 4.000');
+
+    const wa = generateSaleWhatsAppText(mixedVoidedSale, mockStore);
+    expect(wa).toContain('VENTA ANULADA / DEVUELTA');
+    expect(wa).toContain('Pago Mixto');
+    expect(wa).toContain('$ 6.000');
+    expect(wa).toContain('Vueltas a Entregar:* $ 4.000');
+  });
 });

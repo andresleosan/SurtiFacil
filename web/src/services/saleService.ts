@@ -1,4 +1,4 @@
-import { PaymentMethod, Product, SaleItem, Sale } from '../firebase/db';
+import { PaymentBreakdownEntry, PaymentMethod, Product, SaleItem, Sale } from '../firebase/db';
 import { mockProducts, addLocalSale, getLocalSales, mockCreditCustomers, addLocalCreditEntry } from './mockData';
 import { mapProductRow, refreshProducts } from './productService';
 import { apiClient, ApiError, emitDataChange, hasAuthSession } from './apiClient';
@@ -9,6 +9,12 @@ import {
   isOfflineModeActive,
 } from './offlineSyncService';
 import { resolveProductUnitPricing } from '../utils/wholesalePricing';
+import {
+  extractSalePaymentBuckets,
+  isSaleVoided,
+  parsePaymentBreakdown,
+  resolveSalePaymentBreakdown,
+} from '../utils/saleAccounting';
 import {
   isValidLoyaltyPhone,
   normalizeCouponCode,
@@ -28,6 +34,15 @@ function isMockMode(): boolean {
 
 function mapSale(row: any): Sale {
   const createdDate = row.created_at ? new Date(row.created_at) : new Date();
+  const totalCents = row.total_cents ?? row.total ?? 0;
+  const breakdown = parsePaymentBreakdown(
+    row.payment_breakdown ?? row.payment_breakdown_json,
+    row.payment_method || 'cash',
+    Number(totalCents) || 0,
+  );
+  const resolvedMethod: PaymentMethod =
+    breakdown.length > 1 ? 'mixed' : (row.payment_method || breakdown[0]?.method || 'cash');
+
   return {
     id: row.id,
     date: {
@@ -35,7 +50,7 @@ function mapSale(row: any): Sale {
       toDate: () => createdDate,
       toISOString: () => createdDate.toISOString(),
     },
-    total: row.total_cents ?? row.total,
+    total: totalCents,
     subtotal_cents: row.subtotal_cents ?? undefined,
     coupon_code: row.coupon_code ?? undefined,
     coupon_discount_cents: row.coupon_discount_cents ?? undefined,
@@ -45,7 +60,13 @@ function mapSale(row: any): Sale {
     loyalty_discount_cents: row.loyalty_discount_cents ?? undefined,
     loyalty_points_earned: row.loyalty_points_earned ?? undefined,
     total_cost_cents: row.total_cost_cents ?? 0,
-    payment_method: row.payment_method,
+    payment_method: resolvedMethod,
+    payment_breakdown: breakdown,
+    status: row.status === 'voided' ? 'voided' : 'completed',
+    voided_at: row.voided_at ?? null,
+    voided_by_uid: row.voided_by_uid ?? null,
+    voided_by_name: row.voided_by_name ?? null,
+    void_reason: row.void_reason ?? null,
     credit_customer_id: row.credit_customer_id || undefined,
     credit_customer_name: row.credit_customer_name || undefined,
     schema_version: row.schema_version ?? 2,
@@ -106,11 +127,14 @@ export async function createSale(
   paymentMethod: PaymentMethod,
   creditCustomerId?: string,
   loyaltyOptions?: CreateSaleLoyaltyOptions,
+  paymentBreakdown?: PaymentBreakdownEntry[],
 ): Promise<string> {
   if (!cartItems || cartItems.length === 0) {
     throw new Error('El carrito está vacío');
   }
-  if (paymentMethod === 'credit' && !creditCustomerId) {
+  const hasCreditPortion =
+    paymentMethod === 'credit' || (paymentBreakdown || []).some((entry) => entry.method === 'credit' && entry.amount_cents > 0);
+  if (hasCreditPortion && !creditCustomerId) {
     throw new Error('Selecciona el cliente al que se le fía');
   }
 
@@ -121,13 +145,14 @@ export async function createSale(
       creditCustomerId,
       undefined,
       loyaltyOptions,
+      paymentBreakdown,
     );
     return queued.id;
   }
 
   if (isMockMode()) {
     console.log('ℹ️ Creando venta en datos mock (Firebase no configurado)');
-    return createMockSale(cartItems, paymentMethod, creditCustomerId, loyaltyOptions);
+    return createMockSale(cartItems, paymentMethod, creditCustomerId, loyaltyOptions, paymentBreakdown);
   }
 
   if (!hasAuthSession()) {
@@ -149,7 +174,8 @@ export async function createSale(
     const payload: Record<string, unknown> = {
       items: cartItems.map(({ product_id, quantity }) => ({ product_id, quantity })),
       payment_method: paymentMethod,
-      ...(paymentMethod === 'credit' ? { credit_customer_id: creditCustomerId } : {}),
+      ...(paymentBreakdown && paymentBreakdown.length > 0 ? { payment_breakdown: paymentBreakdown } : {}),
+      ...(hasCreditPortion && creditCustomerId ? { credit_customer_id: creditCustomerId } : {}),
       ...(normalizedPhone ? { loyalty_phone: normalizedPhone } : {}),
       ...(loyaltyOptions?.loyalty_customer_name?.trim()
         ? { loyalty_customer_name: loyaltyOptions.loyalty_customer_name.trim() }
@@ -166,7 +192,7 @@ export async function createSale(
 
     emitDataChange('sales');
     emitDataChange('products');
-    if (paymentMethod === 'credit') {
+    if (hasCreditPortion) {
       emitDataChange('credits');
     }
     if (normalizedPhone || normalizedCoupon || pointsRedeemed > 0) {
@@ -200,11 +226,14 @@ function createMockSale(
   paymentMethod: PaymentMethod,
   creditCustomerId?: string,
   loyaltyOptions?: CreateSaleLoyaltyOptions,
+  paymentBreakdown?: PaymentBreakdownEntry[],
 ): string {
-  const creditCustomer = paymentMethod === 'credit'
+  const usesCredit =
+    paymentMethod === 'credit' || (paymentBreakdown || []).some((entry) => entry.method === 'credit' && entry.amount_cents > 0);
+  const creditCustomer = usesCredit
     ? mockCreditCustomers.find((candidate) => candidate.id === creditCustomerId && candidate.active)
     : undefined;
-  if (paymentMethod === 'credit' && !creditCustomer) {
+  if (usesCredit && !creditCustomer) {
     throw new Error('Cliente de fiado no encontrado');
   }
 
@@ -272,6 +301,15 @@ function createMockSale(
     throw new Error(settlement.error);
   }
   const total = settlement.final_total_cents;
+  const paymentResolution = resolveSalePaymentBreakdown({
+    totalCents: total,
+    paymentMethod,
+    paymentBreakdown,
+    creditCustomerId,
+  });
+  if (!paymentResolution.ok) {
+    throw new Error(paymentResolution.error);
+  }
   const saleId = `sale_${Date.now()}`;
 
   if (mockAcc) {
@@ -302,24 +340,28 @@ function createMockSale(
     loyalty_points_earned: settlement.points_earned,
     loyalty_balance_after: mockAcc?.points_balance ?? null,
     total_cost_cents: totalCost,
-    payment_method: paymentMethod,
+    payment_method: paymentResolution.effective_payment_method,
+    payment_breakdown: paymentResolution.breakdown,
+    status: 'completed',
     items: snapshotItems,
     createdAt: new Date(),
     schema_version: 2,
     created_by_uid: 'mock-user',
     created_by_role: 'cashier',
-    ...(creditCustomer ? { credit_customer_id: creditCustomer.id, credit_customer_name: creditCustomer.name } : {}),
+    ...(creditCustomer && paymentResolution.credit_cents > 0
+      ? { credit_customer_id: creditCustomer.id, credit_customer_name: creditCustomer.name }
+      : {}),
   };
 
-  if (creditCustomer) {
-    creditCustomer.balance_cents += total;
+  if (creditCustomer && paymentResolution.credit_cents > 0) {
+    creditCustomer.balance_cents += paymentResolution.credit_cents;
     creditCustomer.last_entry_at = new Date();
     addLocalCreditEntry({
       id: `entry_${Date.now()}`,
       customer_id: creditCustomer.id,
       type: 'debt',
-      amount_cents: total,
-      description: 'Venta fiada',
+      amount_cents: paymentResolution.credit_cents,
+      description: paymentResolution.is_mixed ? 'Saldo fiado en venta mixta' : 'Venta fiada',
       sale_id: saleId,
       created_by_uid: 'mock-user',
       created_by_role: 'cashier',
@@ -441,7 +483,7 @@ export interface SalesTotals {
 /** Totales históricos calculados en el servidor (una sola lectura agregada). */
 export async function getSalesTotals(): Promise<SalesTotals> {
   if (isMockMode()) {
-    const sales = getLocalSales();
+    const sales = getLocalSales().filter((sale) => !isSaleVoided(sale));
     return {
       count: sales.length,
       totalCents: sales.reduce((total, sale) => total + (sale.total || 0), 0),
@@ -455,4 +497,139 @@ export async function getSalesTotals(): Promise<SalesTotals> {
     console.error('Error getting sales totals from Firebase');
     throw new Error('Error al cargar ventas');
   }
+}
+
+export interface VoidSaleResult {
+  success: boolean;
+  sale: Sale;
+  restocked_units: number;
+  credit_reversed_cents: number;
+  loyalty_points_delta: number;
+}
+
+/**
+ * Anula o devuelve una venta de forma atómica (reintegra inventario, revierte deuda fiada y fidelización).
+ */
+export async function voidSale(saleId: string, reason: string): Promise<VoidSaleResult> {
+  const cleanId = saleId?.trim();
+  if (!cleanId) {
+    throw new Error('ID de venta inválido.');
+  }
+
+  const trimmedReason = reason?.trim() || '';
+  if (trimmedReason.length < 3 || trimmedReason.length > 250) {
+    throw new Error('Ingresa un motivo de anulación válido (mínimo 3 caracteres).');
+  }
+
+  if (isOfflineModeActive()) {
+    throw new Error('No es posible anular ventas sin conexión. Conéctate a internet para sincronizar primero.');
+  }
+
+  if (isMockMode()) {
+    const sale = getLocalSales().find((candidate) => candidate.id === cleanId);
+    if (!sale) {
+      throw new Error('Venta no encontrada.');
+    }
+    if (isSaleVoided(sale)) {
+      throw new Error('Esta venta ya fue anulada previamente.');
+    }
+
+    const buckets = extractSalePaymentBuckets({ ...sale, status: 'completed' });
+    let restockedUnits = 0;
+    for (const item of sale.items || []) {
+      const prod = mockProducts.find((candidate) => candidate.id === item.product_id);
+      const qty = Math.max(0, Number(item.quantity) || 0);
+      restockedUnits += qty;
+      if (prod && qty > 0) {
+        prod.stock += qty;
+      }
+    }
+
+    if (buckets.credit_cents > 0 && sale.credit_customer_id) {
+      const cust = mockCreditCustomers.find((c) => c.id === sale.credit_customer_id);
+      if (cust) {
+        cust.balance_cents = Math.max(0, cust.balance_cents - buckets.credit_cents);
+        cust.last_entry_at = new Date();
+        addLocalCreditEntry({
+          id: `entry_void_${Date.now()}`,
+          customer_id: cust.id,
+          type: 'payment',
+          amount_cents: buckets.credit_cents,
+          description: `Reversión por anulación venta #${sale.id.slice(0, 8)}: ${trimmedReason}`,
+          sale_id: sale.id,
+          created_by_uid: 'mock-admin',
+          created_by_role: 'admin',
+          createdAt: new Date(),
+        });
+      }
+    }
+
+    if (sale.coupon_code) {
+      const coupon = getMockCouponsSnapshot().find((c) => c.code === normalizeCouponCode(sale.coupon_code || ''));
+      if (coupon) {
+        coupon.used_count = Math.max(0, coupon.used_count - 1);
+      }
+    }
+
+    let loyaltyDelta = 0;
+    const earned = Math.max(0, Number(sale.loyalty_points_earned) || 0);
+    const redeemed = Math.max(0, Number(sale.loyalty_points_redeemed) || 0);
+    if (sale.loyalty_phone && (earned > 0 || redeemed > 0)) {
+      const acc = getMockLoyaltyAccountsSnapshot().find((a) => a.phone === normalizeLoyaltyPhone(sale.loyalty_phone || ''));
+      if (acc) {
+        loyaltyDelta = redeemed - earned;
+        acc.points_balance = Math.max(0, acc.points_balance + loyaltyDelta);
+        acc.lifetime_points_earned = Math.max(0, acc.lifetime_points_earned - earned);
+        acc.lifetime_points_redeemed = Math.max(0, acc.lifetime_points_redeemed - redeemed);
+        acc.total_purchases_count = Math.max(0, acc.total_purchases_count - 1);
+        acc.total_spent_cents = Math.max(0, acc.total_spent_cents - (Number(sale.total) || 0));
+      }
+    }
+
+    sale.status = 'voided';
+    sale.voided_at = new Date().toISOString();
+    sale.voided_by_uid = 'mock-admin';
+    sale.voided_by_name = 'Administrador Local';
+    sale.void_reason = trimmedReason;
+
+    refreshProducts();
+    emitDataChange('sales');
+    emitDataChange('products');
+    if (buckets.credit_cents > 0) emitDataChange('credits');
+    if (sale.coupon_code || loyaltyDelta !== 0) emitDataChange('loyalty');
+
+    return {
+      success: true,
+      sale: { ...sale },
+      restocked_units: restockedUnits,
+      credit_reversed_cents: buckets.credit_cents,
+      loyalty_points_delta: loyaltyDelta,
+    };
+  }
+
+  if (!hasAuthSession()) {
+    throw new Error('Debes iniciar sesión para anular una venta');
+  }
+
+  const res = await apiClient.post<{
+    success: boolean;
+    sale: any;
+    restocked_units: number;
+    credit_reversed_cents: number;
+    loyalty_points_delta: number;
+  }>(`/sales/${encodeURIComponent(cleanId)}/void`, { reason: trimmedReason });
+
+  const mappedSale = mapSale(res.sale);
+  emitDataChange('sales');
+  emitDataChange('products');
+  emitDataChange('credits');
+  emitDataChange('loyalty');
+
+  return {
+    success: Boolean(res.success),
+    sale: mappedSale,
+    restocked_units: Number(res.restocked_units) || 0,
+    credit_reversed_cents: Number(res.credit_reversed_cents) || 0,
+    loyalty_points_delta: Number(res.loyalty_points_delta) || 0,
+  };
 }

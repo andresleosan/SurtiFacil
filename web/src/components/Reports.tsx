@@ -26,8 +26,10 @@ import { useIsMobile } from '../hooks/useMediaQuery';
 import { PageHeader } from './ui/PageHeader';
 import { downloadCSV } from '../utils/csvExporter';
 import { getSales } from '../services/saleService';
+import { getNetProfitStatement, type NetProfitStatement } from '../services/marginService';
 import type { Sale } from '../firebase/db';
 import FiscalLedgerModal from './FiscalLedgerModal';
+import NetProfitStatementCard from './NetProfitStatementCard';
 
 const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884D8', '#82CA9D'];
 
@@ -49,6 +51,7 @@ const Reports = () => {
   const [dateRange, setDateRange] = useState<7 | 14 | 30>(7);
   const [fiscalModalOpen, setFiscalModalOpen] = useState(false);
   const [salesList, setSalesList] = useState<Sale[]>([]);
+  const [netProfit, setNetProfit] = useState<NetProfitStatement | null>(null);
 
   useEffect(() => {
     loadReportData();
@@ -58,16 +61,18 @@ const Reports = () => {
     try {
       setLoading(true);
       setError(null);
-      const [summaryData, dailyData, topData, salesData] = await Promise.all([
+      const [summaryData, dailyData, topData, salesData, netProfitData] = await Promise.all([
         getSalesSummary(),
         getDailySales(dateRange),
         getTopProducts(5),
         getSales().catch(() => []),
+        getNetProfitStatement(dateRange).catch(() => null),
       ]);
       setSummary(summaryData);
       setDailySales(dailyData);
       setTopProducts(topData);
       setSalesList(salesData);
+      setNetProfit(netProfitData);
     } catch {
       console.error('Error loading reports.');
       setError('No se pudieron cargar los reportes.');
@@ -169,6 +174,9 @@ const Reports = () => {
           </article>
         </div>
       )}
+
+      {/* Estado de Resultados: Utilidad Neta Real */}
+      {netProfit && <NetProfitStatementCard statement={netProfit} dateRangeDays={dateRange} />}
 
       <div className="grid gap-4 md:gap-6 lg:grid-cols-2">
         {/* Gráfica de ventas diarias */}

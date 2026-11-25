@@ -13,6 +13,12 @@ import {
   settleOrderLoyaltyAndCoupon,
   validateCouponForSubtotal,
 } from '../../web/functions/_lib/loyaltyEngine';
+import {
+  calculateNetProfitStatement,
+  extractSalePaymentBuckets,
+  isSaleVoided,
+  resolveSalePaymentBreakdown,
+} from '../../web/functions/_lib/saleAccounting';
 
 export function createFakeFirebaseJwt(uid: string, email: string): string {
   const toBase64Url = (obj: Record<string, unknown>) =>
@@ -815,12 +821,89 @@ export async function setupProductionE2EHarness(page: Page) {
     // Ventas POS
     if (pathname === '/sales' && method === 'GET') {
       if (urlObj.searchParams.get('totals') === 'true') {
+        const activeSales = sales.filter((s) => !isSaleVoided(s));
         return jsonResponse({
-          count: sales.length,
-          totalCents: sales.reduce((sum, s) => sum + (s.total_cents || 0), 0),
+          count: activeSales.length,
+          totalCents: activeSales.reduce((sum, s) => sum + (s.total_cents || 0), 0),
         });
       }
       return jsonResponse(sales);
+    }
+
+    if (pathname.startsWith('/sales/') && pathname.endsWith('/void') && method === 'POST') {
+      if (actor.role !== 'admin' && actor.role !== 'manager') {
+        return jsonResponse({ error: 'Solo administradores y gerentes pueden anular ventas.' }, 403);
+      }
+      const saleId = decodeURIComponent(pathname.replace(/^\/sales\//, '').replace(/\/void$/, ''));
+      const found = sales.find((s) => s.id === saleId);
+      if (!found) {
+        return jsonResponse({ error: 'Venta no encontrada.' }, 404);
+      }
+      if (isSaleVoided(found)) {
+        return jsonResponse({ error: 'Esta venta ya fue anulada previamente.' }, 409);
+      }
+      const reason = String(body.reason || '').trim();
+      if (reason.length < 3) {
+        return jsonResponse({ error: 'Motivo de anulación inválido.' }, 400);
+      }
+
+      const buckets = extractSalePaymentBuckets(found);
+      let restockedUnits = 0;
+      for (const item of found.items || []) {
+        const qty = Number(item.quantity || 0);
+        restockedUnits += qty;
+        const prod = products.find((p) => p.id === item.product_id);
+        if (prod) prod.stock += qty;
+      }
+
+      if (buckets.credit_cents > 0 && found.credit_customer_id) {
+        const cust = creditCustomers.find((c) => c.id === found.credit_customer_id);
+        if (cust) {
+          cust.balance_cents = Math.max(0, cust.balance_cents - buckets.credit_cents);
+          creditEntries.unshift({
+            id: `ce-void-${Date.now()}`,
+            negocio_id: 'surtifacil',
+            customer_id: cust.id,
+            type: 'payment',
+            amount_cents: buckets.credit_cents,
+            description: `Reversión por anulación venta #${found.id.slice(0, 8)}: ${reason}`,
+            sale_id: found.id,
+            created_by_uid: actor.id,
+            created_by_role: actor.role,
+            created_at: new Date().toISOString(),
+          });
+        }
+      }
+
+      if (found.coupon_code) {
+        const c = discountCoupons.find((cp) => cp.code === found.coupon_code);
+        if (c) c.used_count = Math.max(0, c.used_count - 1);
+      }
+
+      let loyaltyDelta = 0;
+      const earned = Number(found.loyalty_points_earned || 0);
+      const redeemed = Number(found.loyalty_points_redeemed || 0);
+      if (found.loyalty_phone && (earned > 0 || redeemed > 0)) {
+        const acc = loyaltyAccounts.find((a) => a.phone === normalizeLoyaltyPhone(found.loyalty_phone));
+        if (acc) {
+          loyaltyDelta = redeemed - earned;
+          acc.points_balance = Math.max(0, acc.points_balance + loyaltyDelta);
+        }
+      }
+
+      found.status = 'voided';
+      found.void_reason = reason;
+      found.voided_by_uid = actor.id;
+      found.voided_by_name = actor.displayName;
+      found.voided_at = new Date().toISOString();
+
+      return jsonResponse({
+        success: true,
+        sale: found,
+        restocked_units: restockedUnits,
+        credit_reversed_cents: buckets.credit_cents,
+        loyalty_points_delta: loyaltyDelta,
+      });
     }
 
     if (pathname === '/sales' && method === 'POST') {
@@ -830,18 +913,22 @@ export async function setupProductionE2EHarness(page: Page) {
         const qty = Math.max(1, Number(it.quantity || 1));
         prod.stock = Math.max(0, prod.stock - qty);
         const pricing = resolveProductUnitPricing(prod, qty);
+        const unitCost = prod.last_cost_cents ?? Math.round(pricing.unit_price_cents * 0.7);
         return {
           product_id: prod.id,
           product_name: prod.name,
           quantity: qty,
           price_cents: pricing.unit_price_cents,
           subtotal_cents: pricing.subtotal_cents,
+          unit_cost_cents: unitCost,
+          cost_subtotal_cents: unitCost * qty,
           regular_price_cents: pricing.active_base_unit_price_cents,
           applied_wholesale_tier: pricing.applied_tier,
           wholesale_savings_cents: pricing.wholesale_savings_cents,
         };
       });
       const subtotalCents = mappedItems.reduce((s: number, i: any) => s + i.subtotal_cents, 0);
+      const totalCostCents = mappedItems.reduce((s: number, i: any) => s + i.cost_subtotal_cents, 0);
       const normalizedPhone = body.loyalty_phone ? normalizeLoyaltyPhone(body.loyalty_phone) : '';
       const hasValidPhone = Boolean(normalizedPhone && isValidLoyaltyPhone(normalizedPhone));
       const requestedCouponCode = normalizeCouponCode(body.coupon_code || '');
@@ -864,6 +951,17 @@ export async function setupProductionE2EHarness(page: Page) {
       if (!settlement.ok) {
         return jsonResponse({ error: settlement.error }, 400);
       }
+
+      const paymentResolution = resolveSalePaymentBreakdown({
+        totalCents: settlement.final_total_cents,
+        paymentMethod: body.payment_method || 'cash',
+        paymentBreakdown: body.payment_breakdown,
+        creditCustomerId: body.credit_customer_id,
+      });
+      if (!paymentResolution.ok) {
+        return jsonResponse({ error: paymentResolution.error }, 400);
+      }
+
       if (dbCoupon && settlement.coupon_code) {
         dbCoupon.used_count += 1;
       }
@@ -896,18 +994,42 @@ export async function setupProductionE2EHarness(page: Page) {
         }
       }
 
+      const creditCust =
+        paymentResolution.credit_cents > 0 && body.credit_customer_id
+          ? creditCustomers.find((c) => c.id === body.credit_customer_id)
+          : undefined;
+      if (creditCust && paymentResolution.credit_cents > 0) {
+        creditCust.balance_cents += paymentResolution.credit_cents;
+        creditEntries.unshift({
+          id: `ce-${Date.now()}`,
+          negocio_id: 'surtifacil',
+          customer_id: creditCust.id,
+          type: 'debt',
+          amount_cents: paymentResolution.credit_cents,
+          description: paymentResolution.is_mixed ? 'Saldo fiado en venta mixta' : 'Venta fiada en mostrador',
+          sale_id: saleId,
+          created_by_uid: actor.id,
+          created_by_role: actor.role,
+          created_at: new Date().toISOString(),
+        });
+      }
+
       const createdSale = {
         id: saleId,
         total_cents: settlement.final_total_cents,
         subtotal_cents: subtotalCents,
+        total_cost_cents: totalCostCents,
         coupon_code: settlement.coupon_code,
         coupon_discount_cents: settlement.coupon_discount_cents,
         loyalty_phone: hasValidPhone ? normalizedPhone : null,
         loyalty_points_redeemed: settlement.points_redeemed,
         loyalty_discount_cents: settlement.points_discount_cents,
         loyalty_points_earned: settlement.points_earned,
-        payment_method: body.payment_method || 'cash',
-        credit_customer_id: body.credit_customer_id,
+        payment_method: paymentResolution.effective_payment_method,
+        payment_breakdown: paymentResolution.breakdown,
+        status: 'completed',
+        credit_customer_id: creditCust?.id,
+        credit_customer_name: creditCust?.name,
         items: mappedItems,
         created_at: new Date().toISOString(),
       };
@@ -917,13 +1039,28 @@ export async function setupProductionE2EHarness(page: Page) {
         saleId,
         total_cents: settlement.final_total_cents,
         subtotal_cents: subtotalCents,
+        total_cost_cents: totalCostCents,
         coupon_code: settlement.coupon_code,
         coupon_discount_cents: settlement.coupon_discount_cents,
         loyalty_points_redeemed: settlement.points_redeemed,
         loyalty_discount_cents: settlement.points_discount_cents,
         loyalty_points_earned: settlement.points_earned,
+        payment_method: paymentResolution.effective_payment_method,
+        payment_breakdown: paymentResolution.breakdown,
+        status: 'completed',
         items: mappedItems,
       }, 201);
+    }
+
+    if (pathname === '/reports/net-profit' && method === 'GET') {
+      const days = Number(urlObj.searchParams.get('days') || '30');
+      const statement = calculateNetProfitStatement({
+        sales,
+        shrinkageEntries,
+        cashExpenses,
+        days,
+      });
+      return jsonResponse(statement);
     }
 
     // Club de Puntos y Cupones (Admin / Staff)

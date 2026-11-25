@@ -1,4 +1,12 @@
 import type { WholesaleTier } from '../utils/wholesalePricing';
+import type {
+  PaymentBreakdownEntry,
+  PaymentMethod,
+  SaleStatus,
+  SinglePaymentMethod,
+} from '../utils/saleAccounting';
+
+export type { PaymentBreakdownEntry, PaymentMethod, SaleStatus, SinglePaymentMethod };
 
 /**
  * Tipo para un producto en Firestore
@@ -66,10 +74,8 @@ export interface SaleItem {
   category?: string;
 }
 
-export type PaymentMethod = 'cash' | 'card' | 'other' | 'credit';
-
 /**
- * Tipo para una venta en Firestore
+ * Tipo para una venta en Firestore / Cloudflare D1
  */
 export interface Sale {
   id: string;
@@ -85,6 +91,12 @@ export interface Sale {
   loyalty_points_earned?: number;
   loyalty_balance_after?: number | null;
   payment_method: PaymentMethod;
+  payment_breakdown?: PaymentBreakdownEntry[];
+  status?: SaleStatus;
+  voided_at?: string | null;
+  voided_by_uid?: string | null;
+  voided_by_name?: string | null;
+  void_reason?: string | null;
   items: SaleItem[];
   credit_customer_id?: string;
   credit_customer_name?: string;

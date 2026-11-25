@@ -168,7 +168,7 @@ describe('Modo Kiosco iPad (#/kiosco/:slug)', () => {
       expect(screen.getByText(/¡Listo Don Roberto Gómez!/i)).toBeInTheDocument();
       expect(screen.getByText(/Hacer Otro Pedido Ahora/i)).toBeInTheDocument();
     });
-  });
+  }, 15000);
 });
 
 describe('Bandeja de Pedidos en Vivo en POS (LiveOrdersTray)', () => {

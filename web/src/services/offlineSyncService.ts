@@ -1,7 +1,16 @@
-import { CreditCustomer, CreditEntryType, PaymentMethod, Product, SaleItem, UserRole } from '../firebase/db';
+import {
+  CreditCustomer,
+  CreditEntryType,
+  PaymentBreakdownEntry,
+  PaymentMethod,
+  Product,
+  SaleItem,
+  UserRole,
+} from '../firebase/db';
 import { apiClient, emitDataChange, getActiveNegocioId } from './apiClient';
 import { addLocalCreditEntry, addLocalSale, mockCreditCustomers, mockProducts } from './mockData';
 import { resolveProductUnitPricing } from '../utils/wholesalePricing';
+import { resolveSalePaymentBreakdown } from '../utils/saleAccounting';
 import type { CreateSaleLoyaltyOptions } from '../types/loyalty';
 
 const DB_NAME = 'surtifacil_offline_v1';
@@ -23,6 +32,7 @@ export interface OfflineSalePayload {
     subtotal: number;
   }>;
   payment_method: PaymentMethod;
+  payment_breakdown?: PaymentBreakdownEntry[];
   credit_customer_id?: string;
   credit_customer_name?: string;
   total_cents: number;
@@ -417,11 +427,14 @@ export async function enqueueOfflineSale(
   creditCustomerId?: string,
   explicitNegocioId?: string,
   loyaltyOptions?: CreateSaleLoyaltyOptions,
+  paymentBreakdown?: PaymentBreakdownEntry[],
 ): Promise<OfflineQueueItem> {
   if (!cartItems || cartItems.length === 0) {
     throw new Error('El carrito está vacío');
   }
-  if (paymentMethod === 'credit' && !creditCustomerId) {
+  const hasCreditPortion =
+    paymentMethod === 'credit' || (paymentBreakdown || []).some((e) => e.method === 'credit' && e.amount_cents > 0);
+  if (hasCreditPortion && !creditCustomerId) {
     throw new Error('Selecciona el cliente al que se le fía');
   }
 
@@ -443,7 +456,7 @@ export async function enqueueOfflineSale(
   }
 
   let creditCustomerName: string | undefined;
-  if (paymentMethod === 'credit' && creditCustomerId) {
+  if (hasCreditPortion && creditCustomerId) {
     const cachedCust = custMap.get(creditCustomerId);
     creditCustomerName = cachedCust?.name;
   }
@@ -470,6 +483,11 @@ export async function enqueueOfflineSale(
   });
 
   const totalCents = normalizedItems.reduce((sum, it) => sum + it.subtotal, 0);
+  const creditCents = hasCreditPortion
+    ? paymentMethod === 'credit'
+      ? totalCents
+      : (paymentBreakdown || []).find((e) => e.method === 'credit')?.amount_cents || 0
+    : 0;
   const nowIso = new Date().toISOString();
 
   // Descontar stock localmente en el caché del tenant
@@ -490,13 +508,13 @@ export async function enqueueOfflineSale(
     }
   }
 
-  // Si es venta fiada, incrementar el saldo del cliente en el caché local
-  if (paymentMethod === 'credit' && creditCustomerId) {
+  // Si incluye fiado (total o parcial en mixto), incrementar solo esa porción al saldo del cliente en caché local
+  if (hasCreditPortion && creditCustomerId && creditCents > 0) {
     const cachedCust = custMap.get(creditCustomerId);
     if (cachedCust) {
       const updatedCust: CreditCustomer = {
         ...cachedCust,
-        balance_cents: cachedCust.balance_cents + totalCents,
+        balance_cents: cachedCust.balance_cents + creditCents,
         last_entry_at: nowIso,
       };
       custMap.set(creditCustomerId, updatedCust);
@@ -521,6 +539,7 @@ export async function enqueueOfflineSale(
     sale_payload: {
       items: normalizedItems,
       payment_method: paymentMethod,
+      ...(paymentBreakdown && paymentBreakdown.length > 0 ? { payment_breakdown: paymentBreakdown } : {}),
       ...(creditCustomerId ? { credit_customer_id: creditCustomerId } : {}),
       ...(creditCustomerName ? { credit_customer_name: creditCustomerName } : {}),
       total_cents: totalCents,
@@ -540,7 +559,7 @@ export async function enqueueOfflineSale(
 
   emitDataChange('products');
   emitDataChange('sales');
-  if (paymentMethod === 'credit') {
+  if (hasCreditPortion) {
     emitDataChange('credits');
   }
   await notifyOfflineListeners();
@@ -637,6 +656,7 @@ async function replaySingleQueueItem(item: OfflineQueueItem): Promise<void> {
         total: payload.total_cents,
         total_cost_cents: Math.floor(payload.total_cents / 2),
         payment_method: payload.payment_method,
+        ...(payload.payment_breakdown ? { payment_breakdown: payload.payment_breakdown } : {}),
         credit_customer_id: payload.credit_customer_id,
         credit_customer_name: payload.credit_customer_name,
         items: payload.items,
@@ -654,6 +674,9 @@ async function replaySingleQueueItem(item: OfflineQueueItem): Promise<void> {
           quantity: it.quantity,
         })),
         payment_method: payload.payment_method,
+        ...(payload.payment_breakdown && payload.payment_breakdown.length > 0
+          ? { payment_breakdown: payload.payment_breakdown }
+          : {}),
         ...(payload.credit_customer_id ? { credit_customer_id: payload.credit_customer_id } : {}),
         ...(payload.loyalty_phone ? { loyalty_phone: payload.loyalty_phone } : {}),
         ...(payload.loyalty_customer_name ? { loyalty_customer_name: payload.loyalty_customer_name } : {}),

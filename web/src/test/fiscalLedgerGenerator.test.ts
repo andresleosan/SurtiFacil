@@ -76,4 +76,38 @@ describe('fiscalLedgerGenerator (Libro Fiscal DIAN)', () => {
     expect(csv).toContain('"Total Ingresos Diarios (COP)"');
     expect(csv).toContain('"TOTAL CONSOLIDADO:"');
   });
+
+  it('excluye ventas anuladas y distribuye ventas con pago mixto entre canales DIAN', () => {
+    const mixedAndVoided: Sale[] = [
+      ...mockSales,
+      {
+        id: 's-mixed',
+        date: new Date('2026-11-02T12:00:00Z'),
+        total: 1000000, // $ 10.000: $ 6.000 efectivo + $ 4.000 Nequi
+        payment_method: 'mixed',
+        payment_breakdown: [
+          { method: 'cash', amount_cents: 600000 },
+          { method: 'other', amount_cents: 400000 },
+        ],
+        status: 'completed',
+        items: [],
+      },
+      {
+        id: 's-void',
+        date: new Date('2026-11-02T15:00:00Z'),
+        total: 9000000,
+        payment_method: 'cash',
+        status: 'voided',
+        items: [],
+      },
+    ];
+
+    const summary = buildFiscalLedger(mixedAndVoided, { nombre: 'SurtiFácil' });
+    const day2 = summary.entries.find((e) => e.date === '2026-11-02')!;
+    expect(day2.receiptsCount).toBe(2); // s3 + s-mixed (excluye s-void)
+    expect(day2.cashSalesCents).toBe(600000);
+    expect(day2.transferSalesCents).toBe(400000);
+    expect(day2.creditSalesCents).toBe(500000);
+    expect(day2.totalSalesCents).toBe(1500000);
+  });
 });

@@ -7,6 +7,7 @@
 
 import type { Sale } from '../firebase/db';
 import { formatCOP } from '../utils/currency';
+import { extractSalePaymentBuckets, isSaleVoided } from '../utils/saleAccounting';
 
 export interface DailyFiscalEntry {
   date: string; // YYYY-MM-DD
@@ -48,6 +49,7 @@ export function buildFiscalLedger(
   const dayMap = new Map<string, DailyFiscalEntry>();
 
   for (const sale of sales) {
+    if (isSaleVoided(sale)) continue;
     const saleDate = sale.date instanceof Date ? sale.date : new Date(sale.date);
     const yyyy = saleDate.getFullYear();
     const mm = String(saleDate.getMonth() + 1).padStart(2, '0');
@@ -70,17 +72,12 @@ export function buildFiscalLedger(
     }
 
     const totalCents = Number(sale.total) || 0;
+    const buckets = extractSalePaymentBuckets(sale);
     entry.receiptsCount += 1;
     entry.totalSalesCents += totalCents;
-
-    if (sale.payment_method === 'cash') {
-      entry.cashSalesCents += totalCents;
-    } else if (sale.payment_method === 'credit') {
-      entry.creditSalesCents += totalCents;
-    } else {
-      // 'card' o 'other' (Nequi, Daviplata, Bancolombia)
-      entry.transferSalesCents += totalCents;
-    }
+    entry.cashSalesCents += buckets.cash_cents;
+    entry.transferSalesCents += buckets.card_cents + buckets.transfer_cents;
+    entry.creditSalesCents += buckets.credit_cents;
   }
 
   // Ordenar cronológicamente
