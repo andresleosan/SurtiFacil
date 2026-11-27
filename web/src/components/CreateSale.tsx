@@ -1352,7 +1352,7 @@ function CartPanel({
                     value={loyaltyPhoneInput}
                     onChange={(e) => onLoyaltyPhoneChange(e.target.value)}
                     placeholder="Ej: 300 456 7890"
-                    className="input min-h-[44px] flex-1 text-sm"
+                    className="input min-h-[44px] flex-1 text-base sm:text-sm"
                   />
                   <button
                     type="button"
@@ -1386,7 +1386,7 @@ function CartPanel({
                               <button
                                 type="button"
                                 onClick={() => onPointsToRedeemChange(0)}
-                                className={`min-h-[36px] rounded-lg px-2.5 text-[11px] font-bold border ${
+                                className={`min-h-[44px] rounded-lg px-2.5 text-[11px] font-bold border ${
                                   pointsToRedeem === 0
                                     ? 'bg-sf-primary text-white border-sf-primary'
                                     : 'bg-white text-slate-700 border-slate-200'
@@ -1397,7 +1397,7 @@ function CartPanel({
                               <button
                                 type="button"
                                 onClick={() => onPointsToRedeemChange(maxRedeemablePoints)}
-                                className={`min-h-[36px] rounded-lg px-2.5 text-[11px] font-bold border ${
+                                className={`min-h-[44px] rounded-lg px-2.5 text-[11px] font-bold border ${
                                   pointsToRedeem === maxRedeemablePoints
                                     ? 'bg-emerald-600 text-white border-emerald-600'
                                     : 'bg-white text-emerald-800 border-emerald-300'
@@ -1421,7 +1421,7 @@ function CartPanel({
                                     Math.max(0, Math.min(maxRedeemablePoints, Math.round(Number(e.target.value) || 0)))
                                   )
                                 }
-                                className="input min-h-[36px] w-24 text-xs py-1"
+                                className="input min-h-[44px] w-24 text-base sm:text-sm py-1"
                               />
                             </div>
                           </div>
@@ -1459,7 +1459,7 @@ function CartPanel({
                     <button
                       type="button"
                       onClick={onRemoveCoupon}
-                      className="text-xs font-bold text-red-600 hover:underline px-2 py-1"
+                      className="min-h-[44px] px-3 text-xs font-bold text-red-600 hover:underline"
                     >
                       Quitar
                     </button>
@@ -1472,7 +1472,7 @@ function CartPanel({
                       value={couponInput}
                       onChange={(e) => onCouponInputChange(e.target.value.toUpperCase())}
                       placeholder="Ej: VECINO10"
-                      className="input min-h-[44px] flex-1 font-mono text-sm uppercase"
+                      className="input min-h-[44px] flex-1 font-mono text-base sm:text-sm uppercase"
                     />
                     <button
                       type="button"
@@ -1607,7 +1607,7 @@ function CartPanel({
                     <button
                       type="button"
                       onClick={() => onCompleteMixedMethod(field.method)}
-                      className="min-h-[28px] rounded px-1.5 text-[10px] font-bold text-sf-primary hover:bg-sf-primary/10"
+                      className="min-h-[44px] rounded-lg px-2.5 text-[10px] font-bold text-sf-primary hover:bg-sf-primary/10"
                     >
                       Completar
                     </button>
@@ -1623,7 +1623,7 @@ function CartPanel({
                       value={displayPesos}
                       onChange={(e) => onMixedAmountChange(field.method, e.target.value)}
                       placeholder="0"
-                      className="input min-h-[44px] pl-6 text-sm font-bold tabular-nums text-slate-900"
+                      className="input min-h-[44px] pl-6 text-base sm:text-sm font-bold tabular-nums text-slate-900"
                     />
                   </div>
                 </div>

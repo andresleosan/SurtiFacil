@@ -208,7 +208,7 @@ export const ProductKardexModal: React.FC<ProductKardexModalProps> = ({
           type="button"
           onClick={() => downloadProductKardexCSV(activeProduct, entries)}
           disabled={entries.length === 0}
-          className="btn-secondary min-h-[40px] px-3 text-xs font-semibold disabled:opacity-40"
+          className="btn-secondary min-h-[44px] px-3 text-xs font-semibold disabled:opacity-40"
         >
           📥 Exportar Excel CSV
         </button>
@@ -345,7 +345,7 @@ export const ProductKardexModal: React.FC<ProductKardexModalProps> = ({
                   value={adjustReason}
                   onChange={(e) => setAdjustReason(e.target.value)}
                   placeholder="Ej: Conteo físico de báscula"
-                  className="input min-h-[44px] text-sm"
+                  className="input min-h-[44px] text-base sm:text-sm"
                 />
               </div>
             </div>
@@ -356,7 +356,7 @@ export const ProductKardexModal: React.FC<ProductKardexModalProps> = ({
                   key={r}
                   type="button"
                   onClick={() => setAdjustReason(r)}
-                  className="min-h-[36px] rounded-full border border-slate-200 bg-slate-50 px-3 text-xs font-medium text-slate-700 hover:bg-slate-100"
+                  className="min-h-[44px] rounded-full border border-slate-200 bg-slate-50 px-3 text-xs font-medium text-slate-700 hover:bg-slate-100"
                 >
                   {r}
                 </button>

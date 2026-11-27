@@ -1440,6 +1440,9 @@ export async function setupProductionE2EHarness(page: Page) {
       return jsonResponse(created, 201);
     }
     if (pathname.startsWith('/coupons/') && method === 'PUT') {
+      if (actor.role === 'cashier') {
+        return jsonResponse({ error: 'Solo administradores y gerentes pueden gestionar cupones.' }, 403);
+      }
       const id = decodeURIComponent(pathname.replace('/coupons/', ''));
       const c = discountCoupons.find((cp) => cp.id === id);
       if (c) {
@@ -1449,6 +1452,9 @@ export async function setupProductionE2EHarness(page: Page) {
       return jsonResponse(c || { ok: true });
     }
     if (pathname.startsWith('/coupons/') && method === 'DELETE') {
+      if (actor.role === 'cashier') {
+        return jsonResponse({ error: 'Solo administradores y gerentes pueden gestionar cupones.' }, 403);
+      }
       const id = decodeURIComponent(pathname.replace('/coupons/', ''));
       discountCoupons = discountCoupons.filter((cp) => cp.id !== id);
       return jsonResponse({ success: true, id });
@@ -1636,7 +1642,10 @@ export async function setupProductionE2EHarness(page: Page) {
           urlObj.searchParams.get('initial_cash_cents') ||
           10000000,
       );
-      const salesCashCents = 5000000; // $50.000 COP
+      const dynamicSalesCashCents = sales
+        .filter((s) => !isSaleVoided(s))
+        .reduce((sum, s) => sum + extractSalePaymentBuckets(s).cash_cents, 0);
+      const salesCashCents = 5000000 + dynamicSalesCashCents; // $50.000 COP base + ventas vigentes en efectivo
       const cashExpList = cashExpenses.filter((e) => e.payment_method === 'cash');
       const expensesCashCents = cashExpList.reduce((sum, e) => sum + (e.amount_cents || 0), 0);
       return jsonResponse({
@@ -1644,7 +1653,7 @@ export async function setupProductionE2EHarness(page: Page) {
         opened_at: new Date(Date.now() - 3600000 * 6).toISOString(),
         initial_cash_cents: initialCashCents,
         sales_cash_cents: salesCashCents,
-        sales_cash_count: 8,
+        sales_cash_count: 8 + sales.filter((s) => !isSaleVoided(s) && extractSalePaymentBuckets(s).cash_cents > 0).length,
         credit_payments_cash_cents: 0,
         credit_payments_cash_count: 0,
         expenses_cash_cents: expensesCashCents,
@@ -1655,7 +1664,10 @@ export async function setupProductionE2EHarness(page: Page) {
     }
     if (pathname === '/cash-closings' && method === 'POST') {
       const initialCashCents = Number(body.initial_cash_cents || 10000000);
-      const salesCashCents = 5000000;
+      const dynamicSalesCashCents = sales
+        .filter((s) => !isSaleVoided(s))
+        .reduce((sum, s) => sum + extractSalePaymentBuckets(s).cash_cents, 0);
+      const salesCashCents = 5000000 + dynamicSalesCashCents;
       const expensesCashCents = cashExpenses
         .filter((e) => e.payment_method === 'cash')
         .reduce((sum, e) => sum + (e.amount_cents || 0), 0);

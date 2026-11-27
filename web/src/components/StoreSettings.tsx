@@ -598,7 +598,7 @@ const StoreSettings = () => {
 
           <div className="grid gap-4 sm:grid-cols-2">
             {/* Tarjeta DeepSeek IA */}
-            <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-4 flex flex-col justify-between space-y-3">
+            <div className="min-w-0 rounded-xl border border-slate-200 bg-slate-50/60 p-4 flex flex-col justify-between space-y-3">
               <div>
                 <div className="flex items-center justify-between">
                   <span className="font-bold text-slate-800 text-sm flex items-center gap-1.5">
@@ -622,7 +622,7 @@ const StoreSettings = () => {
                   type="button"
                   disabled={testingDeepSeek}
                   onClick={handleTestDeepSeek}
-                  className="btn-secondary w-full min-h-[40px] text-xs font-bold text-slate-700 flex items-center justify-center gap-2"
+                  className="btn-secondary w-full min-h-[44px] text-xs font-bold text-slate-700 flex items-center justify-center gap-2"
                 >
                   <Icon name="refresh" className={testingDeepSeek ? 'animate-spin' : ''} size={14} />
                   <span>{testingDeepSeek ? 'Probando latencia...' : 'Probar Conexión DeepSeek'}</span>
@@ -640,7 +640,7 @@ const StoreSettings = () => {
             </div>
 
             {/* Tarjeta WhatsApp Cloud API */}
-            <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-4 flex flex-col justify-between space-y-3">
+            <div className="min-w-0 rounded-xl border border-slate-200 bg-slate-50/60 p-4 flex flex-col justify-between space-y-3">
               <div>
                 <div className="flex items-center justify-between">
                   <span className="font-bold text-slate-800 text-sm flex items-center gap-1.5">
@@ -663,7 +663,7 @@ const StoreSettings = () => {
                     type="text"
                     readOnly
                     value={integrations?.whatsapp?.webhook_url || 'https://surtifacil.pages.dev/api/webhooks/whatsapp'}
-                    className="input text-xs py-1.5 bg-white text-slate-600 font-mono select-all flex-1"
+                    className="input min-w-0 text-xs py-1.5 bg-white text-slate-600 font-mono select-all flex-1"
                   />
                   <button
                     type="button"

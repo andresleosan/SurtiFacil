@@ -265,4 +265,45 @@ describe('offlineSyncService & Multi-Tenant Offline Resilience', () => {
       subtotal: 1200000,
     });
   });
+
+  it('evita doble sincronización concurrente al reconectar desde modo offline simulado', async () => {
+    setSimulatedOfflineMode(true);
+
+    await cacheProductsForTenant(
+      [{ id: 'p-sync-race', name: 'Papa Criolla', price_cents: 400000, stock: 20, allow_fractional: true }],
+      'surtifacil',
+    );
+
+    await enqueueOfflineSale(
+      [
+        {
+          product_id: 'p-sync-race',
+          product_name: 'Papa Criolla',
+          quantity: 0.25,
+          price_cents: 400000,
+          subtotal: 100000,
+        },
+      ],
+      'cash',
+      undefined,
+      'surtifacil',
+    );
+
+    const postSpy = vi.spyOn(apiClient, 'post').mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          setTimeout(() => resolve({ id: 'sale-single-sync' } as any), 25);
+        }),
+    );
+
+    setSimulatedOfflineMode(false);
+    const [resA, resB] = await Promise.all([
+      syncPendingQueue('surtifacil'),
+      syncPendingQueue('surtifacil'),
+    ]);
+
+    expect(postSpy).toHaveBeenCalledTimes(1);
+    expect(resA.synced).toBe(1);
+    expect(resB.synced).toBe(1);
+  });
 });

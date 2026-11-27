@@ -539,7 +539,7 @@ const Sales = () => {
                   setVoidError('');
                 }}
                 placeholder="Ej: Devolución del cliente o error de digitación en mostrador..."
-                className="input min-h-[64px] py-2 text-sm"
+                className="input min-h-[64px] py-2 text-base sm:text-sm"
               />
             </div>
 

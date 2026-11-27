@@ -550,12 +550,24 @@ Para maximizar la eficiencia de tokens y la precisión de razonamiento en cada s
     - Calculadora bidireccional peso ⇄ valor COP (`BulkWeightCalculatorModal.tsx`) integrada en POS (`CreateSale.tsx`), Kiosco iPad (`KioskMode.tsx`) y Tienda Vecinal (`PublicStorefront.tsx`), visor/ajuste/CSV (`ProductKardexModal.tsx`) en `Inventory.tsx`, y soporte fraccionado en `AddProductModal.tsx`, `ShrinkageModal.tsx`, `LiveOrdersTray.tsx` y `Sales.tsx`.
     - Verificación: `npm test` (`67/67` archivos, `506/506` pruebas en verde incluyendo `bulkWeight.test.ts`, `kardexAndBulkFlows.test.tsx` y `apiFunctions.test.ts`), `npm run build:web` limpio (767 módulos), y Playwright E2E `npm run test:e2e` (`43` aprobadas, `7` omitidas por credenciales live, `0` fallos, incluyendo Escenario 13 multi-flujo granel + Kardex).
 
-- [ ] **Tarea 32 — Suite E2E Multi-Dispositivo de Certificación Total de Fase 7 y Despliegue en Vivo:**
+- [x] **Tarea 32 — Suite E2E Multi-Dispositivo de Certificación Total de Fase 7 y Despliegue en Vivo:**
   - **Nivel Recomendado:** `Argon (High)`
+  - **Estado:** ✅ Completada y Desplegada
   - **Objetivo:** Certificar de extremo a extremo con Vitest y Playwright multi-dispositivo (`chromium`, `mobile-chromium` y `tablet-chromium`) todos los flujos de seguridad comercial, fidelización/cupones, devoluciones/pagos mixtos/utilidad neta real y venta a granel/Kardex de la Fase 7.
-  - **Alcance Planificado:**
-    - Suite `qa/e2e/phase7-certification.spec.ts` cubriendo Club de Puntos/Cupones omnicanal, pagos divididos y anulación de venta con reintegro de stock, Utilidad Neta Real en reportes, venta fraccionada con Kardex y endurecimiento de acceso comercial.
-    - Verificación limpia de `npm test`, `npm run build:web` y `npm run test:e2e` al 100 % y despliegue final en producción (`https://surtifacil.pages.dev`).
+  - **Evidencia Técnica de Implementación:**
+    1. **Correcciones Reales Detectadas en Certificación:**
+       - **Condición de carrera en sincronización offline (`web/src/services/offlineSyncService.ts`):** Serializada la ejecución concurrente de `syncPendingQueue` mediante `activeSyncPromise` asignado síncronamente antes del primer `await`, evitando el doble envío de ventas FIFO al pulsar *Reconectar y Sincronizar*, más prueba unitaria de regresión en [`web/src/test/offlineSyncService.test.tsx`](../web/src/test/offlineSyncService.test.tsx).
+       - **Desbordamiento horizontal a `1280px` (`AppShell.tsx`, `StoreSettings.tsx`, `StoreQRCard.tsx`):** Ajustado `DesktopTopBar` (`min-w-0`, `truncate`, `2xl:inline-flex` en el chip de sede) y `min-w-0` en tarjetas/inputs de URLs largas para eliminar los `13px` de overflow en desktop.
+       - **Paridad RBAC de Kardex y Ergonomía Táctil (`>= 44×44 px` y `text-base sm:text-sm`):** Habilitado el botón de consulta de Kardex en tabla desktop/tablet para rol `cashier` en [`Inventory.tsx`](../web/src/components/Inventory.tsx) y estandarizados objetivos táctiles e inputs móviles en [`ProductKardexModal.tsx`](../web/src/components/ProductKardexModal.tsx), [`CreateSale.tsx`](../web/src/components/CreateSale.tsx), [`SuperAdminStores.tsx`](../web/src/components/SuperAdminStores.tsx), [`StoreSettings.tsx`](../web/src/components/StoreSettings.tsx) y [`Sales.tsx`](../web/src/components/Sales.tsx).
+    2. **Suite E2E Multi-Dispositivo de Fase 7 (`qa/e2e/phase7-certification.spec.ts`, `qa/e2e/productionHarness.ts`, `qa/playwright.config.ts`):**
+       - **`P7-1`:** Blindaje comercial pre-lanzamiento (control de Modo Demo en `#/super-admin`, tarjeta criptográfica en `#/settings`, ocultamiento de acceso rápido en `#/login` + rechazo HTTP `403`, y reingreso con credenciales).
+       - **`P7-2`:** Club de Puntos y Cupones WhatsApp omnicanal (`#/loyalty`, POS `#/create-sale` + tirilla térmica, Kiosco iPad `#/kiosco/surtifacil`, Tienda Vecinal `#/tienda/surtifacil` -> `#/pedido/:token`, y bloqueo RBAC `403` para Cajero).
+       - **`P7-3`:** Pagos mixtos, impacto real en Arqueo COP, anulación atómica con reintegro de stock/fiado/arqueo, Estado de Resultados de Utilidad Neta Real P&G en `#/reports` y `#/margins`, y bloqueo RBAC `403` de anulación para Cajero.
+       - **`P7-4`:** Venta a granel (peso y valor COP) en POS, Voz Sarin fraccionada, Modo Offline FIFO fraccionado, Kardex trazable con ajuste manual en `#/inventory`, Kiosco iPad (`>= 56px`), Tienda Vecinal y lectura permitida / ajuste bloqueado (`403`) para Cajero.
+    3. **100% de Pruebas en Verde tras la Edición Final:**
+       - **Vitest (`npm test`):** `67` archivos de prueba y `507` tests aprobados al 100% en `53.57s`.
+       - **Build de Producción (`npm run build:web`):** `tsc && vite build` completado sin errores (`767` módulos en `6.25s`, PWA precache `76 entries` / `2000.44 KiB`).
+       - **Playwright E2E (`npm run test:e2e`):** `55` pruebas activas aprobadas y `0` fallidas en `2.5m` (`chromium`, `mobile-chromium` Pixel 7 y `tablet-chromium` iPad landscape; `7` omitidas condicionales de credenciales `QA_USER_EMAIL`).
 
 
 

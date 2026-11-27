@@ -930,11 +930,9 @@ const Inventory = () => {
                     <th scope="col" className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide">
                       Stock
                     </th>
-                    {canEdit && (
-                      <th scope="col" className="px-4 py-3 text-center text-xs font-semibold uppercase tracking-wide">
-                        Acciones
-                      </th>
-                    )}
+                    <th scope="col" className="px-4 py-3 text-center text-xs font-semibold uppercase tracking-wide">
+                      Acciones
+                    </th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100 bg-white">
@@ -997,48 +995,50 @@ const Inventory = () => {
                             {tone.label && <span className={`chip ${tone.chip}`}>{tone.label}</span>}
                           </div>
                         </td>
-                        {canEdit && (
-                          <td className="px-4 py-2 text-center">
-                            <div className="flex justify-center gap-1">
-                              <button
-                                type="button"
-                                onClick={() => setKardexProduct(product)}
-                                aria-label={`Ver Kardex de ${product.name}`}
-                                title="Historial Kardex y Ajuste"
-                                className="icon-btn h-10 w-10 text-slate-700 hover:bg-slate-100"
-                              >
-                                <span aria-hidden="true">📋</span>
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => openShrinkage(product.id)}
-                                aria-label={`Registrar merma de ${product.name}`}
-                                title="Registrar merma / avería"
-                                className="icon-btn h-10 w-10 text-amber-700 hover:bg-amber-50"
-                              >
-                                <span aria-hidden="true">📉</span>
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => openEdit(product)}
-                                aria-label={`Editar ${product.name}`}
-                                className="icon-btn h-10 w-10 text-sf-primary hover:bg-sf-light"
-                              >
-                                <Icon name="pencil" size={18} />
-                              </button>
-                              {canDelete && (
+                        <td className="px-4 py-2 text-center">
+                          <div className="flex justify-center gap-1">
+                            <button
+                              type="button"
+                              onClick={() => setKardexProduct(product)}
+                              aria-label={`Ver Kardex de ${product.name}`}
+                              title="Historial Kardex y Ajuste"
+                              className="icon-btn min-h-[44px] min-w-[44px] text-slate-700 hover:bg-slate-100"
+                            >
+                              <span aria-hidden="true">📋</span>
+                            </button>
+                            {canEdit && (
+                              <>
                                 <button
                                   type="button"
-                                  onClick={() => handleDelete(product)}
-                                  aria-label={`Eliminar ${product.name}`}
-                                  className="icon-btn h-10 w-10 text-red-600 hover:bg-red-50"
+                                  onClick={() => openShrinkage(product.id)}
+                                  aria-label={`Registrar merma de ${product.name}`}
+                                  title="Registrar merma / avería"
+                                  className="icon-btn min-h-[44px] min-w-[44px] text-amber-700 hover:bg-amber-50"
                                 >
-                                  <Icon name="trash" size={18} />
+                                  <span aria-hidden="true">📉</span>
                                 </button>
-                              )}
-                            </div>
-                          </td>
-                        )}
+                                <button
+                                  type="button"
+                                  onClick={() => openEdit(product)}
+                                  aria-label={`Editar ${product.name}`}
+                                  className="icon-btn min-h-[44px] min-w-[44px] text-sf-primary hover:bg-sf-light"
+                                >
+                                  <Icon name="pencil" size={18} />
+                                </button>
+                                {canDelete && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDelete(product)}
+                                    aria-label={`Eliminar ${product.name}`}
+                                    className="icon-btn min-h-[44px] min-w-[44px] text-red-600 hover:bg-red-50"
+                                  >
+                                    <Icon name="trash" size={18} />
+                                  </button>
+                                )}
+                              </>
+                            )}
+                          </div>
+                        </td>
                       </tr>
                     );
                   })}

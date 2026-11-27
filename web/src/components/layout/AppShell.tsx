@@ -405,11 +405,11 @@ function DesktopTopBar({
   const operatedId = getActiveNegocioId();
 
   return (
-    <header className="sticky top-0 z-20 flex h-16 items-center justify-between border-b border-slate-200 bg-white px-6 shadow-sm">
-      <div className="flex items-center gap-3">
-        <h1 className="text-lg font-bold text-sf-text">{current?.label ?? 'SurtiFácil'}</h1>
+    <header className="sticky top-0 z-20 flex h-16 items-center justify-between gap-3 border-b border-slate-200 bg-white px-4 xl:px-6 shadow-sm">
+      <div className="flex min-w-0 items-center gap-2.5">
+        <h1 className="truncate text-lg font-bold text-sf-text">{current?.label ?? 'SurtiFácil'}</h1>
         {operatedId ? (
-          <span className="rounded-full bg-amber-100 border border-amber-300 px-2.5 py-0.5 text-xs font-semibold text-amber-900 inline-flex items-center gap-1.5">
+          <span className="rounded-full bg-amber-100 border border-amber-300 px-2.5 py-0.5 text-xs font-semibold text-amber-900 inline-flex items-center gap-1.5 shrink-0">
             <span className="h-1.5 w-1.5 rounded-full bg-amber-500 animate-pulse" />
             Operando: {operatedId}
             <button
@@ -424,7 +424,7 @@ function DesktopTopBar({
             </button>
           </span>
         ) : (
-          <span className="hidden rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-600 xl:inline-flex items-center gap-1.5">
+          <span className="hidden rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-600 2xl:inline-flex items-center gap-1.5 shrink-0">
             <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
             Sede Central Medellín
           </span>

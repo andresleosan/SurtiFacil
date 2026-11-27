@@ -35,13 +35,13 @@ export default defineConfig({
       // Teléfono Android típico de caja (412x915, táctil, DPR 2.6).
       name: 'mobile-chromium',
       use: { ...devices['Pixel 7'], browserName: 'chromium' },
-      testMatch: /(responsive-smoke|phase6-certification)\.spec\.ts/,
+      testMatch: /(responsive-smoke|phase6-certification|phase7-certification)\.spec\.ts/,
     },
     {
       // Tablet en horizontal, el formato habitual de un POS de mostrador.
       name: 'tablet-chromium',
       use: { ...devices['iPad (gen 7) landscape'], browserName: 'chromium' },
-      testMatch: /(responsive-smoke|phase6-certification)\.spec\.ts/,
+      testMatch: /(responsive-smoke|phase6-certification|phase7-certification)\.spec\.ts/,
     },
   ],
   webServer: {

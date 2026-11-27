@@ -142,7 +142,7 @@ export default function SuperAdminStores() {
               <button
                 type="button"
                 onClick={handleStopOperating}
-                className="btn-secondary text-xs min-h-[40px] border-amber-300 text-amber-800 bg-amber-50 hover:bg-amber-100"
+                className="btn-secondary text-xs min-h-[44px] border-amber-300 text-amber-800 bg-amber-50 hover:bg-amber-100"
               >
                 Volver a Modo Global
               </button>
@@ -151,7 +151,7 @@ export default function SuperAdminStores() {
               type="button"
               onClick={() => void loadData()}
               disabled={loading}
-              className="btn-secondary text-xs min-h-[40px] flex items-center gap-1.5"
+              className="btn-secondary text-xs min-h-[44px] flex items-center gap-1.5"
             >
               <Icon name="refresh" size={16} />
               <span>Actualizar</span>

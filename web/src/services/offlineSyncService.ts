@@ -102,6 +102,7 @@ const lastSyncedByTenant = new Map<string, string>();
 let sequenceCounter = 1;
 let simulatedOffline = readInitialSimulatedOffline();
 let syncInProgress = false;
+let activeSyncPromise: Promise<{ synced: number; failed: number }> | null = null;
 const listeners = new Set<(snapshot: OfflineSyncSnapshot) => void>();
 
 function readInitialSimulatedOffline(): boolean {
@@ -733,65 +734,76 @@ export async function syncPendingQueue(
   explicitNegocioId?: string,
 ): Promise<{ synced: number; failed: number }> {
   const negocioId = resolveOfflineNegocioId(explicitNegocioId);
-  if (syncInProgress || isOfflineModeActive()) {
+  if (isOfflineModeActive()) {
     return { synced: 0, failed: 0 };
   }
-
-  const queue = await getOfflineQueueForTenant(negocioId);
-  if (queue.length === 0) {
-    return { synced: 0, failed: 0 };
+  if (activeSyncPromise) {
+    return activeSyncPromise;
   }
 
   syncInProgress = true;
-  await notifyOfflineListeners();
-
-  let synced = 0;
-  let failed = 0;
-
-  try {
-    // Procesamiento estricto FIFO (ordenado por sequence ascendente)
-    for (const item of queue) {
-      if (isOfflineModeActive()) break;
-
-      const syncingItem: OfflineQueueItem = {
-        ...item,
-        status: 'syncing',
-        attempts: item.attempts + 1,
-      };
-      memoryQueue.set(item.id, syncingItem);
-      await idbPutRecord(STORE_QUEUE, syncingItem);
-      await notifyOfflineListeners();
-
-      try {
-        await replaySingleQueueItem(syncingItem);
-        memoryQueue.delete(item.id);
-        await idbDeleteRecord(STORE_QUEUE, item.id);
-        synced += 1;
-      } catch (err: unknown) {
-        const errorMsg = err instanceof Error ? err.message : 'Error al sincronizar con el servidor';
-        const failedItem: OfflineQueueItem = {
-          ...syncingItem,
-          status: 'failed',
-          last_error: errorMsg,
-        };
-        memoryQueue.set(item.id, failedItem);
-        await idbPutRecord(STORE_QUEUE, failedItem);
-        failed += 1;
-      }
+  activeSyncPromise = (async () => {
+    const queue = await getOfflineQueueForTenant(negocioId);
+    if (queue.length === 0) {
+      return { synced: 0, failed: 0 };
     }
 
-    if (synced > 0) {
-      lastSyncedByTenant.set(negocioId, new Date().toISOString());
-      emitDataChange('products');
-      emitDataChange('sales');
-      emitDataChange('credits');
-    }
-  } finally {
-    syncInProgress = false;
     await notifyOfflineListeners();
-  }
 
-  return { synced, failed };
+    let synced = 0;
+    let failed = 0;
+
+    try {
+      // Procesamiento estricto FIFO (ordenado por sequence ascendente)
+      for (const item of queue) {
+        if (isOfflineModeActive()) break;
+
+        const syncingItem: OfflineQueueItem = {
+          ...item,
+          status: 'syncing',
+          attempts: item.attempts + 1,
+        };
+        memoryQueue.set(item.id, syncingItem);
+        await idbPutRecord(STORE_QUEUE, syncingItem);
+        await notifyOfflineListeners();
+
+        try {
+          await replaySingleQueueItem(syncingItem);
+          memoryQueue.delete(item.id);
+          await idbDeleteRecord(STORE_QUEUE, item.id);
+          synced += 1;
+        } catch (err: unknown) {
+          const errorMsg = err instanceof Error ? err.message : 'Error al sincronizar con el servidor';
+          const failedItem: OfflineQueueItem = {
+            ...syncingItem,
+            status: 'failed',
+            last_error: errorMsg,
+          };
+          memoryQueue.set(item.id, failedItem);
+          await idbPutRecord(STORE_QUEUE, failedItem);
+          failed += 1;
+        }
+      }
+
+      if (synced > 0) {
+        lastSyncedByTenant.set(negocioId, new Date().toISOString());
+        emitDataChange('products');
+        emitDataChange('sales');
+        emitDataChange('credits');
+      }
+    } finally {
+      syncInProgress = false;
+      activeSyncPromise = null;
+      await notifyOfflineListeners();
+    }
+
+    return { synced, failed };
+  })().finally(() => {
+    syncInProgress = false;
+    activeSyncPromise = null;
+  });
+
+  return activeSyncPromise;
 }
 
 export async function removeOfflineQueueItem(
@@ -859,6 +871,7 @@ export async function clearOfflineStateForTests(): Promise<void> {
   lastSyncedByTenant.clear();
   simulatedOffline = false;
   syncInProgress = false;
+  activeSyncPromise = null;
   sequenceCounter = 1;
   try {
     if (typeof window !== 'undefined' && window.localStorage) {

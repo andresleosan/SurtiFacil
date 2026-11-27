@@ -177,7 +177,7 @@ export function StoreQRCard({
         </div>
 
         {/* Columna Derecha: Código QR nítido, enlace y botones de descarga */}
-        <div className="md:col-span-7 space-y-4">
+        <div className="md:col-span-7 min-w-0 space-y-4">
           {/* Tarjeta de información del canal */}
           <div className="rounded-xl border border-slate-200/80 bg-slate-50/70 p-4">
             <div className="flex items-start gap-4">
@@ -227,7 +227,7 @@ export function StoreQRCard({
                 readOnly
                 value={targetUrl}
                 aria-label="Enlace público del código QR"
-                className="input py-1.5 text-xs text-slate-700 bg-white font-mono"
+                className="input min-w-0 flex-1 py-1.5 text-xs text-slate-700 bg-white font-mono"
               />
               <button
                 type="button"
