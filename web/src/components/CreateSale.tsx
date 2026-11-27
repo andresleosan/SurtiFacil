@@ -19,7 +19,15 @@ import { Icon } from './ui/Icon';
 import { Modal } from './ui/Modal';
 import { PageHeader } from './ui/PageHeader';
 import { ProductImage } from './ui/ProductImage';
+import { BulkWeightCalculatorModal } from './ui/BulkWeightCalculatorModal';
 import { formatCentsCOP } from '../utils/currency';
+import {
+  formatQuantityNumber,
+  formatQuantityWithUnit,
+  getBulkStep,
+  getUnitShortLabel,
+  roundQuantity,
+} from '../utils/bulkWeight';
 import { LiveOrdersTray } from './LiveOrdersTray';
 import type { CustomerOrder } from '../types/customerOrder';
 import { SarinVoicePOS } from './SarinVoicePOS';
@@ -98,13 +106,16 @@ function normalize(value: string): string {
 }
 
 function buildSaleCartItem(product: Product, quantity: number): SaleItem {
-  const pricing = resolveProductUnitPricing(product, quantity);
+  const cleanQty = roundQuantity(quantity, Boolean(product.allow_fractional));
+  const pricing = resolveProductUnitPricing(product, cleanQty);
   return {
     product_id: product.id,
     product_name: product.name,
-    quantity,
+    quantity: cleanQty,
     price_cents: pricing.unit_price_cents,
     subtotal: pricing.subtotal_cents,
+    unit: product.unit || 'unidad',
+    allow_fractional: Boolean(product.allow_fractional),
     regular_price_cents: pricing.regular_unit_price_cents,
     applied_wholesale_tier: pricing.applied_tier,
     wholesale_savings_cents: pricing.wholesale_savings_cents,
@@ -129,6 +140,8 @@ const CreateSale = () => {
   const [receiptModalOpen, setReceiptModalOpen] = useState(false);
   const [closingModalOpen, setClosingModalOpen] = useState(false);
   const [pettyCashModalOpen, setPettyCashModalOpen] = useState(false);
+  const [bulkProduct, setBulkProduct] = useState<Product | null>(null);
+  const [bulkInitialQty, setBulkInitialQty] = useState<number | undefined>(undefined);
   const [notifPermission, setNotifPermission] = useState<NotificationPermission>(() => getNotificationPermission());
   const [receivedCashCents, setReceivedCashCents] = useState<number | null>(null);
   const [mixedPreset, setMixedPreset] = useState<MixedPreset>('cash_transfer');
@@ -245,7 +258,10 @@ const CreateSale = () => {
   }, [products, search]);
 
   const subtotal = cartItems.reduce((sum, item) => sum + item.subtotal, 0);
-  const unitCount = cartItems.reduce((sum, item) => sum + item.quantity, 0);
+  const unitCount = roundQuantity(
+    cartItems.reduce((sum, item) => sum + item.quantity, 0),
+    true
+  );
 
   const activeLoyaltyConfig = loyaltyLookup?.config || DEFAULT_LOYALTY_CONFIG;
   const normalizedPhone = normalizeLoyaltyPhone(loyaltyPhoneInput);
@@ -365,7 +381,7 @@ const CreateSale = () => {
       return false;
     }
     const existing = cartItems.find((item) => item.product_id === product.id);
-    const nextQuantity = (existing?.quantity ?? 0) + quantity;
+    const nextQuantity = roundQuantity((existing?.quantity ?? 0) + quantity, Boolean(product.allow_fractional));
     if (nextQuantity > product.stock) {
       setError(`Stock insuficiente para ${product.name}. Disponible: ${product.stock}`);
       return false;
@@ -381,16 +397,50 @@ const CreateSale = () => {
     return true;
   };
 
+  const setCartItemQuantity = (product: Product, nextQuantity: number): boolean => {
+    setError('');
+    setSuccess(false);
+    const cleanQty = roundQuantity(nextQuantity, Boolean(product.allow_fractional));
+    if (cleanQty <= 0) {
+      setCartItems((prev) => prev.filter((item) => item.product_id !== product.id));
+      return true;
+    }
+    if (cleanQty > product.stock) {
+      setError(`Stock insuficiente para ${product.name}. Disponible: ${product.stock}`);
+      return false;
+    }
+    const updatedItem = buildSaleCartItem(product, cleanQty);
+    setCartItems((prev) => {
+      const exists = prev.some((item) => item.product_id === product.id);
+      return exists
+        ? prev.map((item) => (item.product_id === product.id ? updatedItem : item))
+        : [...prev, updatedItem];
+    });
+    return true;
+  };
+
+  const handleProductCardTap = (product: Product) => {
+    if (Boolean(product.allow_fractional)) {
+      const existing = cartItems.find((i) => i.product_id === product.id);
+      setBulkProduct(product);
+      setBulkInitialQty(existing?.quantity);
+      return;
+    }
+    addToCart(product, 1);
+  };
+
   const changeQuantity = (productId: string, delta: number) => {
     setError('');
     const existing = cartItems.find((item) => item.product_id === productId);
     if (!existing) return;
-    const nextQuantity = existing.quantity + delta;
+    const product = products.find((candidate) => candidate.id === productId);
+    const isFrac = Boolean(product?.allow_fractional || existing.allow_fractional);
+    const stepDelta = isFrac ? delta * getBulkStep(product?.unit || existing.unit) : delta;
+    const nextQuantity = roundQuantity(existing.quantity + stepDelta, isFrac);
     if (nextQuantity <= 0) {
       setCartItems(cartItems.filter((item) => item.product_id !== productId));
       return;
     }
-    const product = products.find((candidate) => candidate.id === productId);
     if (product && nextQuantity > product.stock) {
       setError(`Stock insuficiente para ${product.name}. Disponible: ${product.stock}`);
       return;
@@ -632,6 +682,10 @@ const CreateSale = () => {
       submitting={submitting}
       onChangeQuantity={changeQuantity}
       onRemove={removeFromCart}
+      onOpenBulkEdit={(prod, currentQty) => {
+        setBulkProduct(prod);
+        setBulkInitialQty(currentQty);
+      }}
       onPaymentChange={(method) => {
         setPaymentMethod(method);
         if (method !== 'cash') {
@@ -913,21 +967,30 @@ const CreateSale = () => {
                         <div className="min-w-0 flex-1">
                           <p className="truncate font-medium text-sf-text">{product.name}</p>
                           <p className="text-xs text-gray-500">
-                            {formatPrice(product.price_cents)} · {product.stock} disp.
+                            {formatPrice(product.price_cents)}
+                            {Boolean(product.allow_fractional) ? `/${getUnitShortLabel(product.unit)}` : ''} ·{' '}
+                            {formatQuantityNumber(product.stock)} disp.
                           </p>
-                          {primaryWholesale && (
-                            <span className="mt-0.5 inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-900">
-                              🏷️ {primaryWholesale.min_quantity}+ a {formatPrice(primaryWholesale.unit_price_cents)}
-                            </span>
-                          )}
+                          <div className="mt-0.5 flex flex-wrap gap-1">
+                            {Boolean(product.allow_fractional) && (
+                              <span className="inline-flex items-center rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-900">
+                                ⚖️ Granel
+                              </span>
+                            )}
+                            {primaryWholesale && (
+                              <span className="inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-900">
+                                🏷️ {primaryWholesale.min_quantity}+ a {formatPrice(primaryWholesale.unit_price_cents)}
+                              </span>
+                            )}
+                          </div>
                         </div>
                         <button
                           type="button"
-                          onClick={() => addToCart(product, 1)}
+                          onClick={() => handleProductCardTap(product)}
                           aria-label={`Agregar ${product.name}`}
                           className="icon-btn bg-sf-primary text-white hover:bg-sf-dark"
                         >
-                          <Icon name="plus" />
+                          {Boolean(product.allow_fractional) ? <span aria-hidden="true">⚖️</span> : <Icon name="plus" />}
                         </button>
                       </li>
                     );
@@ -941,7 +1004,7 @@ const CreateSale = () => {
                       <li key={product.id}>
                         <button
                           type="button"
-                          onClick={() => addToCart(product, 1)}
+                          onClick={() => handleProductCardTap(product)}
                           aria-label={`Agregar ${product.name}`}
                           className="card flex min-h-[96px] w-full flex-col justify-between p-3 text-left transition hover:border-sf-primary hover:shadow-md active:scale-[0.99]"
                         >
@@ -959,16 +1022,26 @@ const CreateSale = () => {
                             />
                             <div className="min-w-0 flex-1">
                               <span className="line-clamp-2 font-medium text-sf-text text-xs sm:text-sm">{product.name}</span>
-                              {primaryWholesale && (
-                                <span className="mt-1 inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-900 tabular-nums">
-                                  🏷️ {primaryWholesale.min_quantity}+ a {formatPrice(primaryWholesale.unit_price_cents)}
-                                </span>
-                              )}
+                              <div className="mt-1 flex flex-wrap gap-1">
+                                {Boolean(product.allow_fractional) && (
+                                  <span className="inline-flex items-center rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-900">
+                                    ⚖️ Granel
+                                  </span>
+                                )}
+                                {primaryWholesale && (
+                                  <span className="inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-900 tabular-nums">
+                                    🏷️ {primaryWholesale.min_quantity}+ a {formatPrice(primaryWholesale.unit_price_cents)}
+                                  </span>
+                                )}
+                              </div>
                             </div>
                           </div>
                           <span className="mt-2 flex items-center justify-between text-sm pt-2 border-t border-slate-100">
-                            <span className="font-semibold text-sf-primary tabular-nums">{formatPrice(product.price_cents)}</span>
-                            <span className="text-xs text-gray-500">{product.stock} disp.</span>
+                            <span className="font-semibold text-sf-primary tabular-nums">
+                              {formatPrice(product.price_cents)}
+                              {Boolean(product.allow_fractional) ? `/${getUnitShortLabel(product.unit)}` : ''}
+                            </span>
+                            <span className="text-xs text-gray-500">{formatQuantityNumber(product.stock)} disp.</span>
                           </span>
                         </button>
                       </li>
@@ -1033,6 +1106,18 @@ const CreateSale = () => {
           onClose={() => setPettyCashModalOpen(false)}
         />
       )}
+
+      <BulkWeightCalculatorModal
+        open={bulkProduct !== null}
+        onClose={() => setBulkProduct(null)}
+        product={bulkProduct}
+        initialQuantity={bulkInitialQty}
+        onConfirm={(qty) => {
+          if (bulkProduct) {
+            setCartItemQuantity(bulkProduct, qty);
+          }
+        }}
+      />
     </section>
   );
 };
@@ -1050,6 +1135,7 @@ interface CartPanelProps {
   compact: boolean;
   onChangeQuantity: (productId: string, delta: number) => void;
   onRemove: (productId: string) => void;
+  onOpenBulkEdit?: (product: Product, currentQty: number) => void;
   onPaymentChange: (method: PaymentMethod) => void;
   mixedPreset: MixedPreset;
   mixedAmountsCents: MixedAmountsCents;
@@ -1098,6 +1184,7 @@ function CartPanel({
   compact,
   onChangeQuantity,
   onRemove,
+  onOpenBulkEdit,
   onPaymentChange,
   mixedPreset,
   mixedAmountsCents,
@@ -1176,26 +1263,41 @@ function CartPanel({
                     </span>
                   ) : null}
                 </div>
-                <div className="flex items-center rounded-lg border border-gray-300" role="group" aria-label={`Cantidad de ${item.product_name}`}>
-                  <button
-                    type="button"
-                    onClick={() => onChangeQuantity(item.product_id, -1)}
-                    aria-label={`Quitar uno de ${item.product_name}`}
-                    className="icon-btn h-10 w-10 text-sf-text hover:bg-gray-100"
-                  >
-                    <Icon name="minus" size={18} />
-                  </button>
-                  <span className="min-w-[2rem] text-center text-sm font-semibold" aria-live="polite">
-                    {item.quantity}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => onChangeQuantity(item.product_id, 1)}
-                    aria-label={`Agregar uno de ${item.product_name}`}
-                    className="icon-btn h-10 w-10 text-sf-text hover:bg-gray-100"
-                  >
-                    <Icon name="plus" size={18} />
-                  </button>
+                <div className="flex items-center gap-1">
+                  {matchedProduct && Boolean(matchedProduct.allow_fractional) && onOpenBulkEdit && (
+                    <button
+                      type="button"
+                      onClick={() => onOpenBulkEdit(matchedProduct, item.quantity)}
+                      aria-label={`Pesar ${item.product_name}`}
+                      title="Recalcular peso o valor COP"
+                      className="icon-btn h-10 w-10 border border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100"
+                    >
+                      ⚖️
+                    </button>
+                  )}
+                  <div className="flex items-center rounded-lg border border-gray-300" role="group" aria-label={`Cantidad de ${item.product_name}`}>
+                    <button
+                      type="button"
+                      onClick={() => onChangeQuantity(item.product_id, -1)}
+                      aria-label={`Quitar uno de ${item.product_name}`}
+                      className="icon-btn h-10 w-10 text-sf-text hover:bg-gray-100"
+                    >
+                      <Icon name="minus" size={18} />
+                    </button>
+                    <span className="min-w-[2.5rem] px-1 text-center text-sm font-semibold tabular-nums" aria-live="polite">
+                      {Boolean(matchedProduct?.allow_fractional || item.allow_fractional) || !Number.isInteger(item.quantity)
+                        ? formatQuantityWithUnit(item.quantity, matchedProduct?.unit || item.unit, true)
+                        : item.quantity}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => onChangeQuantity(item.product_id, 1)}
+                      aria-label={`Agregar uno de ${item.product_name}`}
+                      className="icon-btn h-10 w-10 text-sf-text hover:bg-gray-100"
+                    >
+                      <Icon name="plus" size={18} />
+                    </button>
+                  </div>
                 </div>
                 <button
                   type="button"

@@ -201,7 +201,8 @@ export type DataEntity =
   | 'cash-closings'
   | 'cash-expenses'
   | 'shrinkage'
-  | 'loyalty';
+  | 'loyalty'
+  | 'kardex';
 
 const eventBus = new EventTarget();
 

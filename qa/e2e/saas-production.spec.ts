@@ -772,4 +772,110 @@ test.describe('Suite E2E de Certificación de Producción — SurtiFácil SaaS',
     await expect(pnlMargins).toBeVisible();
     await expect(pnlMargins).toContainText('UTILIDAD NETA REAL');
   });
+
+  test('13. Venta a Granel por Peso / Valor COP en POS, Kiosco iPad y Tienda Vecinal + Kardex Trazable en #/inventory', async ({
+    page,
+  }) => {
+    await setupProductionE2EHarness(page);
+    await loginAsStaffAdmin(page);
+
+    // 1. POS (#/create-sale): Venta por Valor COP ($3.000 de Papa Criolla -> 0.75 lb)
+    await page.goto('/#/create-sale');
+    const posList = page.getByRole('list', { name: 'Productos disponibles' });
+    const bulkPosCard = posList.getByRole('button', { name: /Agregar Papa Criolla a Granel/i }).first();
+    await expect(bulkPosCard).toBeVisible();
+    await bulkPosCard.click();
+
+    const calcDialog = page.getByRole('dialog');
+    await expect(calcDialog).toBeVisible();
+    await calcDialog.getByRole('tab', { name: /Por Valor \(COP\)/i }).click();
+    await calcDialog.getByRole('button', { name: '$ 3.000' }).click();
+    await calcDialog.getByRole('button', { name: /Agregar 0\.75 lb/i }).click();
+    await expect(calcDialog).not.toBeVisible();
+
+    await expect(page.getByText('0.75 lb').first()).toBeVisible();
+    await page.getByRole('button', { name: /Pago exacto de/i }).click();
+    await page.getByRole('button', { name: /Confirmar venta/i }).click();
+    await expect(page.getByRole('status').filter({ hasText: 'Venta registrada exitosamente' })).toBeVisible();
+
+    // 2. Inventario (#/inventory): Visor de Kardex trazable y Ajuste Manual Auditable
+    await page.goto('/#/inventory');
+    await expect(page.getByText('Papa Criolla a Granel').first()).toBeVisible();
+
+    const kardexBtn = page
+      .getByRole('button', { name: 'Ver Kardex de Papa Criolla a Granel' })
+      .filter({ visible: true })
+      .first();
+    await expect(kardexBtn).toBeVisible();
+    await kardexBtn.click();
+
+    const kardexDialog = page.getByRole('dialog', { name: /Kardex de Inventario/i });
+    await expect(kardexDialog).toBeVisible();
+    await expect(kardexDialog.getByText('Inventario inicial bulto 30 lb')).toBeVisible();
+    await expect(kardexDialog.getByText('Venta en mostrador POS')).toBeVisible();
+
+    await kardexDialog.getByRole('button', { name: /Ajuste Manual de Stock/i }).click();
+    await kardexDialog.getByLabel(/Cantidad/i).fill('1.25');
+    await kardexDialog.getByRole('button', { name: 'Conteo físico de bodega' }).click();
+    await kardexDialog.getByRole('button', { name: /Guardar Ajuste en Kardex/i }).click();
+
+    await expect(kardexDialog.getByText(/stock actualizado a 30\.5 lb/i)).toBeVisible();
+    await kardexDialog.getByRole('button', { name: 'Cerrar', exact: true }).first().click();
+    await expect(kardexDialog).not.toBeVisible();
+
+    // 3. Kiosco iPad (#/kiosco/surtifacil): Compra a granel 1/2 lb (0.5 lb)
+    await page.goto('/#/kiosco/surtifacil');
+    await expect(page.getByRole('heading', { level: 1 })).toContainText('SurtiFácil Abastos Central');
+
+    const kioskWeightBtn = page
+      .getByRole('button', { name: /Pesar y agregar Papa Criolla a Granel al pedido/i })
+      .first();
+    await expect(kioskWeightBtn).toBeVisible();
+    await kioskWeightBtn.click();
+
+    const kioskCalcDialog = page.getByRole('dialog');
+    await expect(kioskCalcDialog).toBeVisible();
+    await kioskCalcDialog.getByRole('button', { name: /½ lb/i }).click();
+    await kioskCalcDialog.getByRole('button', { name: /Agregar 0\.5 lb/i }).click();
+    await expect(kioskCalcDialog).not.toBeVisible();
+
+    const kioskContinue = page.getByRole('button', { name: /CONTINUAR PEDIDO/i }).first();
+    if (!(await kioskContinue.isVisible())) {
+      await page.getByRole('button', { name: /Ver canasta con 1 productos/i }).click();
+    }
+    await kioskContinue.click();
+    await page.getByLabel(/Tu Nombre o Apellido/i).fill('Don Germán Granel');
+    await page.getByRole('button', { name: /Siguiente: Forma de Pago/i }).click();
+    await page.getByRole('button', { name: /Confirmar y Sacar Turno/i }).click();
+    await expect(page.getByText(/¡Pedido Registrado con Éxito!/i)).toBeVisible();
+
+    // 4. Tienda Vecinal (#/tienda/surtifacil): Compra por Valor ($2.000 de Papa Criolla = 0.5 lb)
+    await page.goto('/#/tienda/surtifacil');
+    await expect(page.getByRole('heading', { level: 1 })).toContainText('SurtiFácil Abastos Central');
+
+    const storeWeightBtn = page
+      .getByRole('button', { name: /Elegir peso de Papa Criolla a Granel/i })
+      .first();
+    await expect(storeWeightBtn).toBeVisible();
+    await storeWeightBtn.click();
+
+    const storeCalcDialog = page.getByRole('dialog');
+    await expect(storeCalcDialog).toBeVisible();
+    await storeCalcDialog.getByRole('tab', { name: /Por Valor \(COP\)/i }).click();
+    await storeCalcDialog.getByRole('button', { name: '$ 2.000' }).click();
+    await storeCalcDialog.getByRole('button', { name: /Agregar 0\.5 lb/i }).click();
+    await expect(storeCalcDialog).not.toBeVisible();
+
+    await page.getByRole('button', { name: /Abrir canasta y confirmar pedido/i }).click();
+    await page.getByLabel(/Tu Nombre y Apellido \*/i).fill('Doña Rosa Granel');
+    const addrInput = page.getByLabel(/Dirección de Entrega \*/i);
+    if (await addrInput.isVisible()) {
+      await addrInput.fill('Calle 48 # 32-10');
+    }
+    await page.getByRole('button', { name: /Confirmar Pedido Vecinal/i }).click();
+
+    await expect(page).toHaveURL(/#\/pedido\//);
+    await expect(page.getByRole('heading', { name: /Rastreo de Pedido en Vivo/i })).toBeVisible();
+    await expect(page.getByText(/Doña Rosa Granel/i)).toBeVisible();
+  });
 });

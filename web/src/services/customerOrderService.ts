@@ -149,6 +149,7 @@ export async function getPublicStore(slug: string): Promise<PublicStoreData> {
           ),
           products: (response.products || []).map((p: any) => ({
             ...p,
+            allow_fractional: Boolean(p.allow_fractional),
             wholesale_tiers: parseWholesaleTiers(p.wholesale_tiers ?? p.wholesale_tiers_json),
           })),
           combos: response.combos || [],
@@ -196,6 +197,7 @@ export async function getPublicStore(slug: string): Promise<PublicStoreData> {
         visible_tienda: 1,
         en_oferta: p.en_oferta ? 1 : 0,
         precio_oferta_cents: p.precio_oferta_cents,
+        allow_fractional: Boolean(p.allow_fractional),
         wholesale_tiers: tiers,
         wholesale_tiers_json: JSON.stringify(tiers),
       };
@@ -263,6 +265,7 @@ export async function createCustomerOrder(
       applied_wholesale_tier: pricing?.applied_tier ?? null,
       wholesale_savings_cents: pricing?.wholesale_savings_cents ?? 0,
       unit: i.unit || matchedProd?.unit || 'unidad',
+      allow_fractional: Boolean(matchedProd?.allow_fractional),
       image_url: i.image_url,
     };
   });

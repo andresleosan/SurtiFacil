@@ -9,6 +9,8 @@ import {
   isOfflineModeActive,
 } from './offlineSyncService';
 import { resolveProductUnitPricing } from '../utils/wholesalePricing';
+import { computeLineSubtotalCents, roundQuantity } from '../utils/bulkWeight';
+import { recordMockKardexEntry } from './kardexService';
 import {
   extractSalePaymentBuckets,
   isSaleVoided,
@@ -78,7 +80,9 @@ function mapSale(row: any): Sale {
       product_name: it.product_name,
       quantity: it.quantity,
       price_cents: it.price_cents,
-      subtotal: it.subtotal_cents ?? it.subtotal ?? (it.price_cents * it.quantity),
+      subtotal: it.subtotal_cents ?? it.subtotal ?? computeLineSubtotalCents(it.price_cents, it.quantity),
+      unit: it.unit || undefined,
+      allow_fractional: it.allow_fractional !== undefined ? Boolean(it.allow_fractional) : undefined,
       regular_price_cents: it.regular_price_cents ?? undefined,
       applied_wholesale_tier: it.applied_wholesale_tier ?? undefined,
       wholesale_savings_cents: it.wholesale_savings_cents ?? undefined,
@@ -262,11 +266,13 @@ function createMockSale(
       quantity: item.quantity,
       price_cents: pricing.unit_price_cents,
       subtotal: pricing.subtotal_cents,
+      unit: product.unit || 'unidad',
+      allow_fractional: Boolean(product.allow_fractional),
       regular_price_cents: pricing.regular_unit_price_cents,
       applied_wholesale_tier: pricing.applied_tier,
       wholesale_savings_cents: pricing.wholesale_savings_cents,
       unit_cost_cents: unitCost,
-      cost_subtotal_cents: unitCost * item.quantity,
+      cost_subtotal_cents: computeLineSubtotalCents(unitCost, item.quantity),
       cost_source: costSource,
       cost_is_estimated: costSource === 'fallback_price',
       category: product.category?.trim() || 'Sin categoría',
@@ -369,11 +375,27 @@ function createMockSale(
     });
   }
 
-  // Actualizar stock en datos mock
-  mockProducts.forEach((product) => {
-    const soldItem = cartItems.find((item) => item.product_id === product.id);
-    if (soldItem) {
-      product.stock -= soldItem.quantity;
+  // Actualizar stock en datos mock y registrar Kardex
+  snapshotItems.forEach((soldItem) => {
+    const product = mockProducts.find((p) => p.id === soldItem.product_id);
+    if (product) {
+      const before = roundQuantity(product.stock, true);
+      const after = roundQuantity(before - soldItem.quantity, true);
+      product.stock = after;
+      recordMockKardexEntry({
+        product_id: product.id,
+        product_name: product.name,
+        unit: product.unit || 'unidad',
+        movement_type: 'sale',
+        quantity_delta: -soldItem.quantity,
+        stock_before: before,
+        stock_after: after,
+        unit_cost_cents: soldItem.unit_cost_cents || 0,
+        unit_price_cents: soldItem.price_cents,
+        total_value_cents: soldItem.subtotal,
+        reference_id: saleId,
+        notes: 'Venta en mostrador',
+      });
     }
   });
 
@@ -538,10 +560,26 @@ export async function voidSale(saleId: string, reason: string): Promise<VoidSale
     let restockedUnits = 0;
     for (const item of sale.items || []) {
       const prod = mockProducts.find((candidate) => candidate.id === item.product_id);
-      const qty = Math.max(0, Number(item.quantity) || 0);
-      restockedUnits += qty;
+      const qty = roundQuantity(Math.max(0, Number(item.quantity) || 0), true);
+      restockedUnits = roundQuantity(restockedUnits + qty, true);
       if (prod && qty > 0) {
-        prod.stock += qty;
+        const before = roundQuantity(prod.stock, true);
+        const after = roundQuantity(before + qty, true);
+        prod.stock = after;
+        recordMockKardexEntry({
+          product_id: prod.id,
+          product_name: prod.name,
+          unit: prod.unit || 'unidad',
+          movement_type: 'sale_void',
+          quantity_delta: qty,
+          stock_before: before,
+          stock_after: after,
+          unit_cost_cents: item.unit_cost_cents || 0,
+          unit_price_cents: item.price_cents,
+          total_value_cents: item.subtotal,
+          reference_id: sale.id,
+          notes: `Anulación venta #${sale.id.slice(0, 8)}: ${trimmedReason}`,
+        });
       }
     }
 
@@ -622,6 +660,7 @@ export async function voidSale(saleId: string, reason: string): Promise<VoidSale
   const mappedSale = mapSale(res.sale);
   emitDataChange('sales');
   emitDataChange('products');
+  emitDataChange('kardex');
   emitDataChange('credits');
   emitDataChange('loyalty');
 

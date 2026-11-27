@@ -20,6 +20,7 @@ export interface CustomerOrderItem {
   wholesale_savings_cents?: number;
   image_url?: string;
   unit?: string;
+  allow_fractional?: boolean | number;
 }
 
 export interface CustomerOrder {
@@ -111,6 +112,7 @@ export interface PublicStoreData {
     precio_oferta_cents?: number | null;
     wholesale_tiers?: WholesaleTier[];
     wholesale_tiers_json?: string | null;
+    allow_fractional?: boolean | number;
   }>;
   combos: Array<{
     id: string;

@@ -23,6 +23,7 @@ class MockD1Database implements D1Database {
     cash_closings: any[];
     cash_expenses: any[];
     inventory_shrinkage: any[];
+    inventory_kardex: any[];
     loyalty_accounts: any[];
     loyalty_movements: any[];
     discount_coupons: any[];
@@ -139,6 +140,7 @@ class MockD1Database implements D1Database {
       cash_closings: [],
       cash_expenses: [],
       inventory_shrinkage: [],
+      inventory_kardex: [],
       loyalty_accounts: [
         {
           id: 'loy-carlos',
@@ -648,6 +650,30 @@ class MockD1Database implements D1Database {
           return { results: list as T[], success: true };
         }
 
+        if (q.includes('FROM inventory_kardex WHERE negocio_id = ? AND product_id = ?')) {
+          const negId = boundValues[0];
+          const prodId = boundValues[1];
+          let list = db.tables.inventory_kardex.filter(
+            (k) => k.negocio_id === negId && k.product_id === prodId
+          );
+          if (q.includes('AND movement_type = ?')) {
+            const mvType = boundValues[2];
+            list = list.filter((k) => k.movement_type === mvType);
+          }
+          list = [...list].sort((a, b) => {
+            const cmp = String(b.created_at || '').localeCompare(String(a.created_at || ''));
+            return cmp !== 0 ? cmp : String(b.id || '').localeCompare(String(a.id || ''));
+          });
+          if (q.includes('LIMIT 1')) {
+            return { results: list.slice(0, 1) as T[], success: true };
+          }
+          if (q.includes('LIMIT ?')) {
+            const limitVal = Number(boundValues[boundValues.length - 1] || 100);
+            return { results: list.slice(0, limitVal) as T[], success: true };
+          }
+          return { results: list as T[], success: true };
+        }
+
         return { results: [], success: true };
       },
       async run() {
@@ -657,7 +683,7 @@ class MockD1Database implements D1Database {
           const [
             id, negocio_id, name, price_cents, stock, min_stock, unit, category, image_url,
             supplier_id, barcode, visible_kiosco, visible_tienda, en_oferta, precio_oferta_cents,
-            wholesale_tiers_json, last_cost_cents, _lastCostSource, expiration_date,
+            wholesale_tiers_json, allow_fractional, last_cost_cents, _lastCostSource, expiration_date,
           ] = boundValues;
           db.tables.products.push({
             id,
@@ -676,6 +702,7 @@ class MockD1Database implements D1Database {
             en_oferta,
             precio_oferta_cents,
             wholesale_tiers_json: wholesale_tiers_json ?? '[]',
+            allow_fractional: allow_fractional ?? 0,
             last_cost_cents,
             expiration_date: expiration_date ?? null,
           });
@@ -685,7 +712,7 @@ class MockD1Database implements D1Database {
           const [
             name, price_cents, stock, min_stock, unit, category, image_url,
             supplier_id, barcode, visible_kiosco, visible_tienda, en_oferta,
-            precio_oferta_cents, wholesale_tiers_json, expiration_date, prodId, negId,
+            precio_oferta_cents, wholesale_tiers_json, allow_fractional, expiration_date, prodId, negId,
           ] = boundValues;
           const prod = db.tables.products.find((p) => p.id === prodId && p.negocio_id === negId);
           if (prod) {
@@ -703,14 +730,34 @@ class MockD1Database implements D1Database {
             if (en_oferta !== null) prod.en_oferta = en_oferta;
             if (precio_oferta_cents !== null) prod.precio_oferta_cents = precio_oferta_cents;
             if (wholesale_tiers_json !== null) prod.wholesale_tiers_json = wholesale_tiers_json;
+            if (allow_fractional !== undefined && allow_fractional !== null) {
+              prod.allow_fractional = allow_fractional;
+            }
             prod.expiration_date = expiration_date;
           }
         }
 
-        if (q.includes('UPDATE products') && q.includes('stock = stock - ?')) {
+        if (
+          q.includes('UPDATE products') &&
+          q.includes('SET stock = ?') &&
+          q.includes('WHERE id = ? AND negocio_id = ?')
+        ) {
+          const [nextStock, prodId, negId] = boundValues;
+          const prod = db.tables.products.find((p) => p.id === prodId && p.negocio_id === negId);
+          if (prod) {
+            prod.stock = Math.round(Number(nextStock) * 1000) / 1000;
+          }
+        }
+
+        if (q.includes('UPDATE products') && q.includes('stock - ?')) {
           const [qty, prodId, negId] = boundValues;
           const prod = db.tables.products.find((p) => p.id === prodId && p.negocio_id === negId);
-          if (prod) prod.stock -= qty;
+          if (prod) {
+            const rawNext = Number(prod.stock) - Number(qty);
+            prod.stock = q.includes('MAX(0, stock - ?)')
+              ? Math.max(0, Math.round(rawNext * 1000) / 1000)
+              : Math.round(rawNext * 1000) / 1000;
+          }
         }
 
         if (q.includes('UPDATE products') && q.includes('stock = stock + ?')) {
@@ -718,16 +765,43 @@ class MockD1Database implements D1Database {
             const [qty, lastCost, prodId, negId] = boundValues;
             const prod = db.tables.products.find((p) => p.id === prodId && p.negocio_id === negId);
             if (prod) {
-              prod.stock += qty;
+              prod.stock = Math.round((Number(prod.stock) + Number(qty)) * 1000) / 1000;
               prod.last_cost_cents = lastCost;
             }
           } else {
             const [qty, prodId, negId] = boundValues;
             const prod = db.tables.products.find((p) => p.id === prodId && p.negocio_id === negId);
             if (prod) {
-              prod.stock += qty;
+              prod.stock = Math.round((Number(prod.stock) + Number(qty)) * 1000) / 1000;
             }
           }
+        }
+
+        if (q.startsWith('INSERT INTO inventory_kardex')) {
+          const [
+            id, negocio_id, product_id, product_name, unit, movement_type,
+            quantity_delta, stock_before, stock_after, unit_cost_cents, unit_price_cents,
+            total_value_cents, reference_id, notes, created_by_uid, created_by_name,
+          ] = boundValues;
+          db.tables.inventory_kardex.push({
+            id,
+            negocio_id,
+            product_id,
+            product_name,
+            unit,
+            movement_type,
+            quantity_delta,
+            stock_before,
+            stock_after,
+            unit_cost_cents,
+            unit_price_cents,
+            total_value_cents,
+            reference_id,
+            notes,
+            created_by_uid,
+            created_by_name,
+            created_at: new Date().toISOString(),
+          });
         }
 
         if (q.startsWith('INSERT INTO inventory_shrinkage')) {
@@ -3257,6 +3331,258 @@ describe('Cloudflare Pages Functions API (/api/*)', () => {
       expect(pnl.operating_expenses_cents).toBe(100000);
       expect(pnl.total_deductions_cents).toBe(450000);
       expect(pnl.net_profit_cents).toBe(-250000);
+    });
+  });
+
+  describe('Tarea 31 — Venta a Granel y Kardex Trazable en D1', () => {
+    it('crea producto fraccionable con Kardex inicial y vende peso fraccionado con redondeo a peso COP entero', async () => {
+      const db = new MockD1Database();
+      const adminAuth = { Authorization: 'Bearer mock:admin-1:admin@surtifacil.com:admin' };
+
+      const createRes = await onRequest(
+        createMockContext(
+          'POST',
+          'http://localhost/api/products',
+          adminAuth,
+          {
+            name: 'Papa Criolla Fresca',
+            price_cents: 400000, // $4.000 / lb
+            last_cost_cents: 260000, // $2.600 / lb
+            stock: 20,
+            min_stock: 4,
+            unit: 'libra',
+            category: 'Frutas y Verduras',
+            allow_fractional: true,
+          },
+          db
+        ) as any
+      );
+      expect(createRes.status).toBe(201);
+      const created = await createRes.json();
+      expect(created.allow_fractional).toBe(true);
+
+      // Rechaza venta fraccionada en producto NO fraccionable (p-1 tiene allow_fractional falsy y unit libra, ojo: p-1 tiene unit: 'libra' -> auto-detecta? Probemos con producto unit 'unidad')
+      const unitProdRes = await onRequest(
+        createMockContext(
+          'POST',
+          'http://localhost/api/products',
+          adminAuth,
+          {
+            name: 'Aceite 1L Sellado',
+            price_cents: 950000,
+            stock: 10,
+            unit: 'unidad',
+            category: 'Despensa',
+            allow_fractional: false,
+          },
+          db
+        ) as any
+      );
+      expect(unitProdRes.status).toBe(201);
+      const unitProd = await unitProdRes.json();
+
+      const badFracRes = await onRequest(
+        createMockContext(
+          'POST',
+          'http://localhost/api/sales',
+          adminAuth,
+          {
+            items: [{ product_id: unitProd.id, quantity: 0.5 }],
+            payment_method: 'cash',
+          },
+          db
+        ) as any
+      );
+      expect(badFracRes.status).toBe(400);
+
+      // Venta válida a granel: 0.75 lb de Papa Criolla ($4.000/lb = $3.000 COP)
+      const bulkSaleRes = await onRequest(
+        createMockContext(
+          'POST',
+          'http://localhost/api/sales',
+          adminAuth,
+          {
+            items: [{ product_id: created.id, quantity: 0.75 }],
+            payment_method: 'cash',
+          },
+          db
+        ) as any
+      );
+      expect(bulkSaleRes.status).toBe(201);
+      const bulkSale = await bulkSaleRes.json();
+      expect(bulkSale.total_cents).toBe(300000);
+      expect(bulkSale.items[0].quantity).toBe(0.75);
+      expect(bulkSale.items[0].subtotal_cents).toBe(300000);
+
+      const storedProd = db.tables.products.find((p) => p.id === created.id);
+      expect(storedProd.stock).toBe(19.25);
+
+      // Anulación de la venta fraccionada reintegra exactamente 0.75 lb y registra 'sale_void'
+      const voidRes = await onRequest(
+        createMockContext(
+          'POST',
+          `http://localhost/api/sales/${bulkSale.id}/void`,
+          adminAuth,
+          { reason: 'Cliente cambió por yuca' },
+          db
+        ) as any
+      );
+      expect(voidRes.status).toBe(200);
+      expect(storedProd.stock).toBe(20);
+
+      // Merma fraccionada de 0.5 lb y reversión
+      const shkRes = await onRequest(
+        createMockContext(
+          'POST',
+          'http://localhost/api/shrinkage',
+          adminAuth,
+          {
+            product_id: created.id,
+            quantity: 0.5,
+            reason: 'damaged',
+            notes: 'Papa machacada en bulto',
+          },
+          db
+        ) as any
+      );
+      expect(shkRes.status).toBe(201);
+      const shkBody = await shkRes.json();
+      expect(shkBody.quantity).toBe(0.5);
+      expect(shkBody.total_cost_loss_cents).toBe(130000);
+      expect(storedProd.stock).toBe(19.5);
+
+      const revRes = await onRequest(
+        createMockContext(
+          'DELETE',
+          `http://localhost/api/shrinkage/${shkBody.id}`,
+          adminAuth,
+          undefined,
+          db
+        ) as any
+      );
+      expect(revRes.status).toBe(200);
+      expect(storedProd.stock).toBe(20);
+
+      // Consulta de Kardex completo
+      const kdxRes = await onRequest(
+        createMockContext(
+          'GET',
+          `http://localhost/api/products/${created.id}/kardex`,
+          adminAuth,
+          undefined,
+          db
+        ) as any
+      );
+      expect(kdxRes.status).toBe(200);
+      const kdxData = await kdxRes.json();
+      const types = kdxData.entries.map((e: any) => e.movement_type);
+      expect(types).toContain('initial');
+      expect(types).toContain('sale');
+      expect(types).toContain('sale_void');
+      expect(types).toContain('shrinkage');
+      expect(types).toContain('shrinkage_revert');
+    });
+
+    it('protege ajuste manual de Kardex con RBAC, aislamiento multi-tenant y acepta pedido público fraccionado', async () => {
+      const db = new MockD1Database();
+      db.tables.products[0].allow_fractional = 1;
+      const adminAuth = { Authorization: 'Bearer mock:admin-1:admin@surtifacil.com:admin' };
+      const cashierAuth = { Authorization: 'Bearer mock:cashier-1:cajero@surtifacil.com:cashier' };
+
+      // Producto de otra tienda no es accesible (404)
+      const crossTenantRes = await onRequest(
+        createMockContext(
+          'GET',
+          'http://localhost/api/products/p-other-store/kardex',
+          adminAuth,
+          undefined,
+          db
+        ) as any
+      );
+      expect(crossTenantRes.status).toBe(404);
+
+      // Cajero no puede ajustar Kardex manualmente (403)
+      const forbiddenRes = await onRequest(
+        createMockContext(
+          'POST',
+          'http://localhost/api/products/p-1/kardex/adjust',
+          cashierAuth,
+          { mode: 'add', quantity: 2.5, reason: 'Intento sin permiso' },
+          db
+        ) as any
+      );
+      expect(forbiddenRes.status).toBe(403);
+
+      // Admin realiza ajuste de conteo físico (+2.5 lb)
+      const adjRes = await onRequest(
+        createMockContext(
+          'POST',
+          'http://localhost/api/products/p-1/kardex/adjust',
+          adminAuth,
+          { mode: 'add', quantity: 2.5, reason: 'Conteo físico báscula' },
+          db
+        ) as any
+      );
+      expect(adjRes.status).toBe(200);
+      const adjData = await adjRes.json();
+      expect(adjData.product.stock).toBe(22.5);
+      expect(adjData.entry.movement_type).toBe('adjustment');
+      expect(adjData.entry.quantity_delta).toBe(2.5);
+
+      // Recepción de orden de compra genera Kardex 'purchase'
+      const orderCreate = await onRequest(
+        createMockContext(
+          'POST',
+          'http://localhost/api/orders',
+          adminAuth,
+          {
+            supplier_id: 'supp-1',
+            supplier_name: 'Distribuidora Paisa',
+            items: [{ product_id: 'p-1', product_name: 'Arroz Diana 1kg', quantity: 5, unit_cost_cents: 360000 }],
+          },
+          db
+        ) as any
+      );
+      expect(orderCreate.status).toBe(201);
+      const createdOrder = await orderCreate.json();
+
+      const receiveRes = await onRequest(
+        createMockContext(
+          'PUT',
+          `http://localhost/api/orders/${createdOrder.id}`,
+          adminAuth,
+          { status: 'received' },
+          db
+        ) as any
+      );
+      expect(receiveRes.status).toBe(200);
+      const purchaseKdx = db.tables.inventory_kardex.find(
+        (k) => k.product_id === 'p-1' && k.movement_type === 'purchase'
+      );
+      expect(purchaseKdx).toBeDefined();
+      expect(purchaseKdx.quantity_delta).toBe(5);
+
+      // Pedido de Kiosco/Tienda vecinal acepta 0.5 lb en producto pesable
+      const publicOrderRes = await onRequest(
+        createMockContext(
+          'POST',
+          'http://localhost/api/customer-orders',
+          {},
+          {
+            slug: 'surtifacil',
+            source: 'kiosk',
+            customer_name: 'Vecina Rosa',
+            delivery_type: 'pickup_counter',
+            payment_method: 'cash',
+            items: [{ product_id: 'p-1', quantity: 0.5 }],
+          },
+          db
+        ) as any
+      );
+      expect(publicOrderRes.status).toBe(201);
+      const publicOrderData = await publicOrderRes.json();
+      expect(publicOrderData.order.items[0].quantity).toBe(0.5);
+      expect(publicOrderData.order.subtotal_cents).toBe(225000);
     });
   });
 });

@@ -19,6 +19,12 @@ import {
   WholesaleTier,
 } from '../_lib/wholesalePricing';
 import {
+  computeLineSubtotalCents,
+  roundQuantity,
+  validateItemQuantity,
+  type KardexMovementType,
+} from '../_lib/bulkWeight';
+import {
   calculateNetProfitStatement,
   extractSalePaymentBuckets,
   parsePaymentBreakdown,
@@ -89,8 +95,61 @@ function enrichProductRow<T extends Record<string, any> | null | undefined>(row:
   if (!row) return row;
   return {
     ...row,
+    stock: roundQuantity(Number(row.stock ?? 0), true),
+    allow_fractional: Boolean(row.allow_fractional),
     wholesale_tiers: parseWholesaleTiers(row.wholesale_tiers ?? row.wholesale_tiers_json),
   };
+}
+
+interface KardexStatementInput {
+  negocioId: string;
+  productId: string;
+  productName: string;
+  unit?: string | null;
+  movementType: KardexMovementType;
+  quantityDelta: number;
+  stockBefore: number;
+  stockAfter: number;
+  unitCostCents?: number;
+  unitPriceCents?: number;
+  totalValueCents?: number;
+  referenceId?: string | null;
+  notes?: string | null;
+  actorUid: string;
+  actorName?: string | null;
+}
+
+function buildKardexStatement(db: D1Database, entry: KardexStatementInput) {
+  const id = `kdx-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+  const cleanDelta = roundQuantity(entry.quantityDelta, true);
+  const cleanBefore = roundQuantity(entry.stockBefore, true);
+  const cleanAfter = roundQuantity(entry.stockAfter, true);
+  return db
+    .prepare(
+      `INSERT INTO inventory_kardex (
+        id, negocio_id, product_id, product_name, unit, movement_type,
+        quantity_delta, stock_before, stock_after, unit_cost_cents, unit_price_cents,
+        total_value_cents, reference_id, notes, created_by_uid, created_by_name, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`
+    )
+    .bind(
+      id,
+      entry.negocioId,
+      entry.productId,
+      entry.productName,
+      entry.unit || 'unidad',
+      entry.movementType,
+      cleanDelta,
+      cleanBefore,
+      cleanAfter,
+      Math.max(0, Math.round(Number(entry.unitCostCents) || 0)),
+      Math.max(0, Math.round(Number(entry.unitPriceCents) || 0)),
+      Math.max(0, Math.round(Number(entry.totalValueCents) || 0)),
+      entry.referenceId || null,
+      entry.notes ? entry.notes.slice(0, 250) : null,
+      entry.actorUid,
+      entry.actorName || null
+    );
 }
 
 function enrichSaleRow<T extends Record<string, any>>(row: T, items: any[] = []) {
@@ -330,6 +389,8 @@ interface ProductInput {
   precio_oferta_cents?: number | null;
   wholesale_tiers?: WholesaleTier[] | string | null;
   wholesale_tiers_json?: string | null;
+  allow_fractional?: boolean | number;
+  adjustment_reason?: string;
   last_cost_cents?: number;
   expiration_date?: string | null;
 }
@@ -721,7 +782,7 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       }
 
       const productsResult = await env.DB.prepare(
-        `SELECT id, name, price_cents, stock, min_stock, unit, category, image_url, barcode, visible_kiosco, visible_tienda, en_oferta, precio_oferta_cents, wholesale_tiers_json
+        `SELECT id, name, price_cents, stock, min_stock, unit, category, image_url, barcode, visible_kiosco, visible_tienda, en_oferta, precio_oferta_cents, wholesale_tiers_json, allow_fractional
          FROM products
          WHERE negocio_id = ? AND stock > 0 AND (visible_kiosco = 1 OR visible_tienda = 1)
          ORDER BY category ASC, name ASC`
@@ -1510,6 +1571,169 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       const auth = await authenticateRequest(request, env);
       const productId = path.replace(/^\/products\/?/, '');
 
+      // GET /api/products/:id/kardex
+      if (method === 'GET' && /^[^/]+\/kardex$/.test(productId)) {
+        const targetId = decodeURIComponent(productId.replace(/\/kardex$/, ''));
+        const product = await env.DB.prepare('SELECT * FROM products WHERE id = ? AND negocio_id = ?')
+          .bind(targetId, auth.negocioId)
+          .first<Record<string, any>>();
+
+        if (!product) {
+          return errorResponse('Producto no encontrado en este local.', 404);
+        }
+
+        const movementTypeFilter = url.searchParams.get('movement_type') || '';
+        const limitParam = Math.min(Math.max(parseInt(url.searchParams.get('limit') || '100', 10) || 100, 1), 200);
+
+        let query = 'SELECT * FROM inventory_kardex WHERE negocio_id = ? AND product_id = ?';
+        const params: unknown[] = [auth.negocioId, targetId];
+        if (movementTypeFilter) {
+          query += ' AND movement_type = ?';
+          params.push(movementTypeFilter);
+        }
+        query += ' ORDER BY created_at DESC, id DESC LIMIT ?';
+        params.push(limitParam);
+
+        const rows = await env.DB.prepare(query).bind(...params).all<any>();
+        const entries = (rows.results || []).map((row: any) => ({
+          ...row,
+          quantity_delta: roundQuantity(Number(row.quantity_delta) || 0, true),
+          stock_before: roundQuantity(Number(row.stock_before) || 0, true),
+          stock_after: roundQuantity(Number(row.stock_after) || 0, true),
+        }));
+
+        let totalIn = 0;
+        let totalOut = 0;
+        for (const e of entries) {
+          if (e.quantity_delta > 0) totalIn += e.quantity_delta;
+          else if (e.quantity_delta < 0) totalOut += Math.abs(e.quantity_delta);
+        }
+
+        return jsonResponse({
+          product: enrichProductRow(product),
+          summary: {
+            total_in: roundQuantity(totalIn, true),
+            total_out: roundQuantity(totalOut, true),
+            net_change: roundQuantity(totalIn - totalOut, true),
+            movements_count: entries.length,
+          },
+          entries,
+        });
+      }
+
+      // POST /api/products/:id/kardex/adjust
+      if (method === 'POST' && /^[^/]+\/kardex\/adjust$/.test(productId)) {
+        if (auth.user.role !== 'admin' && auth.user.role !== 'manager' && !auth.user.isSuperAdmin) {
+          return errorResponse('Solo administradores y gerentes pueden ajustar inventario.', 403);
+        }
+
+        const targetId = decodeURIComponent(productId.replace(/\/kardex\/adjust$/, ''));
+        const body = (await request.json().catch(() => ({}))) as {
+          mode?: 'add' | 'subtract' | 'set';
+          quantity?: number;
+          reason?: string;
+        };
+
+        const mode = body.mode;
+        if (mode !== 'add' && mode !== 'subtract' && mode !== 'set') {
+          return errorResponse('Modo de ajuste inválido (usa add, subtract o set).', 400);
+        }
+
+        const reason = typeof body.reason === 'string' ? body.reason.trim() : '';
+        if (reason.length < 3 || reason.length > 250) {
+          return errorResponse('Ingresa un motivo válido de al menos 3 caracteres para el Kardex.', 400);
+        }
+
+        const product = await env.DB.prepare('SELECT * FROM products WHERE id = ? AND negocio_id = ?')
+          .bind(targetId, auth.negocioId)
+          .first<Record<string, any>>();
+
+        if (!product) {
+          return errorResponse('Producto no encontrado en este local.', 404);
+        }
+
+        const allowFractional = Boolean(product.allow_fractional);
+        const rawQty = Number(body.quantity);
+        let cleanQty = 0;
+
+        if (mode === 'set') {
+          if (!Number.isFinite(rawQty) || rawQty < 0 || rawQty > 99999) {
+            return errorResponse('La cantidad final debe ser un número válido mayor o igual a 0.', 400);
+          }
+          if (!allowFractional && Math.abs(rawQty - Math.round(rawQty)) >= 1e-6) {
+            return errorResponse('Este producto se controla por unidades enteras.', 400);
+          }
+          cleanQty = roundQuantity(rawQty, allowFractional);
+        } else {
+          const check = validateItemQuantity(rawQty, allowFractional);
+          if (!check.ok) {
+            return errorResponse(check.error, 400);
+          }
+          cleanQty = check.quantity;
+        }
+
+        const prevStock = roundQuantity(Number(product.stock) || 0, true);
+        const nextStock =
+          mode === 'add'
+            ? roundQuantity(prevStock + cleanQty, true)
+            : mode === 'subtract'
+            ? roundQuantity(prevStock - cleanQty, true)
+            : cleanQty;
+
+        if (nextStock < 0) {
+          return errorResponse(
+            `El ajuste dejaría el stock en negativo (disponible: ${prevStock}).`,
+            400
+          );
+        }
+
+        const delta = roundQuantity(nextStock - prevStock, true);
+        if (Math.abs(delta) < 1e-6) {
+          return errorResponse('El stock resultante es igual al actual. No hay cambio por registrar.', 400);
+        }
+
+        const unitCost = product.last_cost_cents ?? Math.round((Number(product.price_cents) || 0) * 0.7);
+        const totalValueCents = computeLineSubtotalCents(unitCost, Math.abs(delta));
+        const actorName = auth.user.displayName || auth.user.email;
+
+        await env.DB.batch([
+          env.DB.prepare(
+            "UPDATE products SET stock = ?, updated_at = datetime('now') WHERE id = ? AND negocio_id = ?"
+          ).bind(nextStock, targetId, auth.negocioId),
+          buildKardexStatement(env.DB, {
+            negocioId: auth.negocioId,
+            productId: targetId,
+            productName: product.name,
+            unit: product.unit || 'unidad',
+            movementType: 'adjustment',
+            quantityDelta: delta,
+            stockBefore: prevStock,
+            stockAfter: nextStock,
+            unitCostCents: unitCost,
+            unitPriceCents: Number(product.price_cents) || 0,
+            totalValueCents,
+            notes: reason,
+            actorUid: auth.user.id,
+            actorName,
+          }),
+        ]);
+
+        const updated = await env.DB.prepare('SELECT * FROM products WHERE id = ? AND negocio_id = ?')
+          .bind(targetId, auth.negocioId)
+          .first<Record<string, any>>();
+        const latestKardex = await env.DB.prepare(
+          'SELECT * FROM inventory_kardex WHERE negocio_id = ? AND product_id = ? ORDER BY created_at DESC, id DESC LIMIT 1'
+        )
+          .bind(auth.negocioId, targetId)
+          .first<Record<string, any>>();
+
+        return jsonResponse({
+          success: true,
+          product: enrichProductRow(updated),
+          entry: latestKardex,
+        });
+      }
+
       // GET /api/products
       if (method === 'GET' && !productId) {
         const category = url.searchParams.get('category');
@@ -1551,20 +1775,29 @@ export const onRequest: PagesFunction<Env> = async (context) => {
           return errorResponse(tiersCheck.error, 400);
         }
 
+        const allowFractional = Boolean(body.allow_fractional);
+        const rawStock = Number(body.stock ?? 0);
+        if (!Number.isFinite(rawStock) || rawStock < 0) {
+          return errorResponse('El stock inicial debe ser mayor o igual a 0.', 400);
+        }
+        const initialStock = roundQuantity(rawStock, allowFractional);
+
         const id = `prod-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
-        await env.DB.prepare(
-          `INSERT INTO products (
-            id, negocio_id, name, price_cents, stock, min_stock, unit, category, image_url,
-            supplier_id, barcode, visible_kiosco, visible_tienda, en_oferta, precio_oferta_cents,
-            wholesale_tiers_json, last_cost_cents, last_cost_source, expiration_date, last_cost_updated_at, created_at, updated_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'), datetime('now'))`
-        )
-          .bind(
+        const actorName = auth.user.displayName || auth.user.email;
+        const unitCost = body.last_cost_cents ?? Math.round(Math.round(body.price_cents) * 0.7);
+        const createBatch: any[] = [
+          env.DB.prepare(
+            `INSERT INTO products (
+              id, negocio_id, name, price_cents, stock, min_stock, unit, category, image_url,
+              supplier_id, barcode, visible_kiosco, visible_tienda, en_oferta, precio_oferta_cents,
+              wholesale_tiers_json, allow_fractional, last_cost_cents, last_cost_source, expiration_date, last_cost_updated_at, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'), datetime('now'))`
+          ).bind(
             id,
             auth.negocioId,
             body.name.trim(),
             Math.round(body.price_cents),
-            body.stock ?? 0,
+            initialStock,
             body.min_stock ?? 5,
             body.unit || 'unidad',
             body.category || 'General',
@@ -1576,11 +1809,35 @@ export const onRequest: PagesFunction<Env> = async (context) => {
             body.en_oferta ? 1 : 0,
             body.precio_oferta_cents ?? null,
             tiersCheck.json,
+            allowFractional ? 1 : 0,
             body.last_cost_cents ?? null,
             body.last_cost_cents ? 'fallback_price' : null,
             normalizedExp
-          )
-          .run();
+          ),
+        ];
+
+        if (initialStock > 0) {
+          createBatch.push(
+            buildKardexStatement(env.DB, {
+              negocioId: auth.negocioId,
+              productId: id,
+              productName: body.name.trim(),
+              unit: body.unit || 'unidad',
+              movementType: 'initial',
+              quantityDelta: initialStock,
+              stockBefore: 0,
+              stockAfter: initialStock,
+              unitCostCents: unitCost,
+              unitPriceCents: Math.round(body.price_cents),
+              totalValueCents: computeLineSubtotalCents(unitCost, initialStock),
+              notes: 'Alta inicial de producto en catálogo',
+              actorUid: auth.user.id,
+              actorName,
+            })
+          );
+        }
+
+        await env.DB.batch(createBatch);
 
         const created = await env.DB.prepare('SELECT * FROM products WHERE id = ? AND negocio_id = ?')
           .bind(id, auth.negocioId)
@@ -1593,10 +1850,20 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       if (method === 'PUT' && productId) {
         const body = (await request.json()) as Partial<ProductInput>;
         const existing = await env.DB.prepare(
-          'SELECT id, price_cents, expiration_date, wholesale_tiers_json FROM products WHERE id = ? AND negocio_id = ?'
+          'SELECT id, name, unit, price_cents, stock, last_cost_cents, allow_fractional, expiration_date, wholesale_tiers_json FROM products WHERE id = ? AND negocio_id = ?'
         )
           .bind(productId, auth.negocioId)
-          .first<{ id: string; price_cents: number; expiration_date?: string | null; wholesale_tiers_json?: string | null }>();
+          .first<{
+            id: string;
+            name: string;
+            unit?: string;
+            price_cents: number;
+            stock: number;
+            last_cost_cents?: number | null;
+            allow_fractional?: number | boolean;
+            expiration_date?: string | null;
+            wholesale_tiers_json?: string | null;
+          }>();
 
         if (!existing) {
           return errorResponse('Producto no encontrado.', 404);
@@ -1625,30 +1892,46 @@ export const onRequest: PagesFunction<Env> = async (context) => {
           nextWholesaleTiersJson = tiersCheck.json;
         }
 
-        await env.DB.prepare(
-          `UPDATE products SET
-            name = COALESCE(?, name),
-            price_cents = COALESCE(?, price_cents),
-            stock = COALESCE(?, stock),
-            min_stock = COALESCE(?, min_stock),
-            unit = COALESCE(?, unit),
-            category = COALESCE(?, category),
-            image_url = COALESCE(?, image_url),
-            supplier_id = COALESCE(?, supplier_id),
-            barcode = COALESCE(?, barcode),
-            visible_kiosco = COALESCE(?, visible_kiosco),
-            visible_tienda = COALESCE(?, visible_tienda),
-            en_oferta = COALESCE(?, en_oferta),
-            precio_oferta_cents = COALESCE(?, precio_oferta_cents),
-            wholesale_tiers_json = ?,
-            expiration_date = ?,
-            updated_at = datetime('now')
-          WHERE id = ? AND negocio_id = ?`
-        )
-          .bind(
+        const nextAllowFractional =
+          body.allow_fractional !== undefined
+            ? Boolean(body.allow_fractional)
+            : Boolean(existing.allow_fractional);
+
+        const prevStock = roundQuantity(Number(existing.stock) || 0, true);
+        let nextStockParam: number | null = null;
+        if (body.stock !== undefined && body.stock !== null) {
+          const parsedStock = Number(body.stock);
+          if (!Number.isFinite(parsedStock) || parsedStock < 0) {
+            return errorResponse('El stock debe ser mayor o igual a 0.', 400);
+          }
+          nextStockParam = roundQuantity(parsedStock, nextAllowFractional);
+        }
+
+        const updateBatch: any[] = [
+          env.DB.prepare(
+            `UPDATE products SET
+              name = COALESCE(?, name),
+              price_cents = COALESCE(?, price_cents),
+              stock = COALESCE(?, stock),
+              min_stock = COALESCE(?, min_stock),
+              unit = COALESCE(?, unit),
+              category = COALESCE(?, category),
+              image_url = COALESCE(?, image_url),
+              supplier_id = COALESCE(?, supplier_id),
+              barcode = COALESCE(?, barcode),
+              visible_kiosco = COALESCE(?, visible_kiosco),
+              visible_tienda = COALESCE(?, visible_tienda),
+              en_oferta = COALESCE(?, en_oferta),
+              precio_oferta_cents = COALESCE(?, precio_oferta_cents),
+              wholesale_tiers_json = ?,
+              allow_fractional = ?,
+              expiration_date = ?,
+              updated_at = datetime('now')
+            WHERE id = ? AND negocio_id = ?`
+          ).bind(
             body.name?.trim() ?? null,
             body.price_cents !== undefined ? Math.round(body.price_cents) : null,
-            body.stock !== undefined ? body.stock : null,
+            nextStockParam,
             body.min_stock !== undefined ? body.min_stock : null,
             body.unit ?? null,
             body.category ?? null,
@@ -1660,11 +1943,39 @@ export const onRequest: PagesFunction<Env> = async (context) => {
             body.en_oferta !== undefined ? (body.en_oferta ? 1 : 0) : null,
             body.precio_oferta_cents !== undefined ? body.precio_oferta_cents : null,
             nextWholesaleTiersJson,
+            nextAllowFractional ? 1 : 0,
             nextExpirationDate,
             productId,
             auth.negocioId
-          )
-          .run();
+          ),
+        ];
+
+        if (nextStockParam !== null) {
+          const delta = roundQuantity(nextStockParam - prevStock, true);
+          if (Math.abs(delta) >= 1e-6) {
+            const unitCost = existing.last_cost_cents ?? Math.round(effectivePriceCents * 0.7);
+            updateBatch.push(
+              buildKardexStatement(env.DB, {
+                negocioId: auth.negocioId,
+                productId,
+                productName: body.name?.trim() || existing.name,
+                unit: body.unit || existing.unit || 'unidad',
+                movementType: 'adjustment',
+                quantityDelta: delta,
+                stockBefore: prevStock,
+                stockAfter: nextStockParam,
+                unitCostCents: unitCost,
+                unitPriceCents: effectivePriceCents,
+                totalValueCents: computeLineSubtotalCents(unitCost, Math.abs(delta)),
+                notes: body.adjustment_reason?.trim() || 'Ajuste manual en catálogo',
+                actorUid: auth.user.id,
+                actorName: auth.user.displayName || auth.user.email,
+              })
+            );
+          }
+        }
+
+        await env.DB.batch(updateBatch);
 
         const updated = await env.DB.prepare('SELECT * FROM products WHERE id = ? AND negocio_id = ?')
           .bind(productId, auth.negocioId)
@@ -1801,14 +2112,57 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         ];
 
         let restockedUnits = 0;
+        const voidProductIds = Array.from(
+          new Set(saleItems.map((it: any) => it.product_id).filter(Boolean))
+        );
+        const voidStockMap = new Map<string, { stock: number; unit: string; name: string }>();
+        if (voidProductIds.length > 0) {
+          const ph = voidProductIds.map(() => '?').join(',');
+          const prodsRes = await env.DB.prepare(
+            `SELECT id, name, unit, stock FROM products WHERE negocio_id = ? AND id IN (${ph})`
+          )
+            .bind(auth.negocioId, ...voidProductIds)
+            .all<{ id: string; name: string; unit?: string; stock: number }>();
+          for (const p of prodsRes.results || []) {
+            voidStockMap.set(p.id, {
+              stock: roundQuantity(Number(p.stock) || 0, true),
+              unit: p.unit || 'unidad',
+              name: p.name,
+            });
+          }
+        }
+
         for (const item of saleItems) {
-          const qty = Math.max(0, Number(item.quantity) || 0);
+          const qty = roundQuantity(Math.max(0, Number(item.quantity) || 0), true);
           if (qty > 0 && item.product_id) {
-            restockedUnits += qty;
+            restockedUnits = roundQuantity(restockedUnits + qty, true);
             voidBatch.push(
               env.DB.prepare(
                 "UPDATE products SET stock = stock + ?, updated_at = datetime('now') WHERE id = ? AND negocio_id = ?"
               ).bind(qty, item.product_id, auth.negocioId)
+            );
+            const pInfo = voidStockMap.get(item.product_id);
+            const beforeStock = pInfo ? pInfo.stock : 0;
+            const afterStock = roundQuantity(beforeStock + qty, true);
+            if (pInfo) pInfo.stock = afterStock;
+            voidBatch.push(
+              buildKardexStatement(env.DB, {
+                negocioId: auth.negocioId,
+                productId: item.product_id,
+                productName: item.product_name || pInfo?.name || 'Producto',
+                unit: pInfo?.unit || 'unidad',
+                movementType: 'sale_void',
+                quantityDelta: qty,
+                stockBefore: beforeStock,
+                stockAfter: afterStock,
+                unitCostCents: Number(item.unit_cost_cents) || 0,
+                unitPriceCents: Number(item.price_cents) || 0,
+                totalValueCents: Number(item.subtotal_cents) || 0,
+                referenceId: saleId,
+                notes: `Anulación venta #${saleId.slice(0, 8)}: ${reason}`,
+                actorUid: auth.user.id,
+                actorName,
+              })
             );
           }
         }
@@ -1955,7 +2309,7 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         const productIds = body.items.map((i) => i.product_id);
         const placeholders = productIds.map(() => '?').join(',');
         const dbProductsResult = await env.DB.prepare(
-          `SELECT id, name, price_cents, stock, category, last_cost_cents, en_oferta, precio_oferta_cents, wholesale_tiers_json
+          `SELECT id, name, price_cents, stock, unit, category, last_cost_cents, en_oferta, precio_oferta_cents, wholesale_tiers_json, allow_fractional
            FROM products WHERE negocio_id = ? AND id IN (${placeholders})`
         )
           .bind(auth.negocioId, ...productIds)
@@ -1964,14 +2318,19 @@ export const onRequest: PagesFunction<Env> = async (context) => {
             name: string;
             price_cents: number;
             stock: number;
+            unit?: string;
             category: string;
             last_cost_cents: number | null;
             en_oferta?: number;
             precio_oferta_cents?: number | null;
             wholesale_tiers_json?: string | null;
+            allow_fractional?: number | boolean;
           }>();
 
         const productMap = new Map((dbProductsResult.results || []).map((p) => [p.id, p]));
+        const runningStockMap = new Map(
+          (dbProductsResult.results || []).map((p) => [p.id, roundQuantity(Number(p.stock) || 0, true)])
+        );
 
         let computedTotalCents = 0;
         let computedTotalCostCents = 0;
@@ -1987,6 +2346,7 @@ export const onRequest: PagesFunction<Env> = async (context) => {
           wholesale_savings_cents: number;
           unit_cost_cents: number;
           cost_subtotal_cents: number;
+          unit: string;
           category: string;
         }> = [];
 
@@ -1995,15 +2355,17 @@ export const onRequest: PagesFunction<Env> = async (context) => {
           if (!dbProd) {
             return errorResponse(`Producto ${item.product_id} no encontrado en este local.`, 404);
           }
-          if (item.quantity <= 0) {
-            return errorResponse('La cantidad vendida debe ser mayor a 0.', 400);
+          const qtyValidation = validateItemQuantity(item.quantity, Boolean(dbProd.allow_fractional));
+          if (!qtyValidation.ok) {
+            return errorResponse(qtyValidation.error, 400);
           }
+          const validQty = qtyValidation.quantity;
 
-          const pricing = resolveProductUnitPricing(dbProd, item.quantity);
+          const pricing = resolveProductUnitPricing(dbProd, validQty);
           const unitPrice = pricing.unit_price_cents;
           const subtotal = pricing.subtotal_cents;
           const unitCost = dbProd.last_cost_cents ?? Math.round(unitPrice * 0.7);
-          const costSubtotal = unitCost * item.quantity;
+          const costSubtotal = computeLineSubtotalCents(unitCost, validQty);
 
           computedTotalCents += subtotal;
           computedTotalCostCents += costSubtotal;
@@ -2012,7 +2374,7 @@ export const onRequest: PagesFunction<Env> = async (context) => {
             id: `sitem-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
             product_id: dbProd.id,
             product_name: dbProd.name,
-            quantity: item.quantity,
+            quantity: validQty,
             price_cents: unitPrice,
             subtotal_cents: subtotal,
             regular_price_cents: pricing.regular_unit_price_cents,
@@ -2020,6 +2382,7 @@ export const onRequest: PagesFunction<Env> = async (context) => {
             wholesale_savings_cents: pricing.wholesale_savings_cents,
             unit_cost_cents: unitCost,
             cost_subtotal_cents: costSubtotal,
+            unit: dbProd.unit || 'unidad',
             category: dbProd.category || 'General',
           });
         }
@@ -2139,7 +2502,8 @@ export const onRequest: PagesFunction<Env> = async (context) => {
           )
         );
 
-        // 2. Insertar cada ítem y descontar stock
+        // 2. Insertar cada ítem, descontar stock y registrar en Kardex
+        const saleActorName = auth.user.displayName || auth.user.email;
         for (const it of preparedItems) {
           batchStatements.push(
             env.DB.prepare(
@@ -2165,6 +2529,30 @@ export const onRequest: PagesFunction<Env> = async (context) => {
             env.DB.prepare(
               'UPDATE products SET stock = stock - ?, updated_at = datetime(\'now\') WHERE id = ? AND negocio_id = ?'
             ).bind(it.quantity, it.product_id, auth.negocioId)
+          );
+
+          const stockBefore = runningStockMap.get(it.product_id) ?? 0;
+          const stockAfter = roundQuantity(stockBefore - it.quantity, true);
+          runningStockMap.set(it.product_id, stockAfter);
+
+          batchStatements.push(
+            buildKardexStatement(env.DB, {
+              negocioId: auth.negocioId,
+              productId: it.product_id,
+              productName: it.product_name,
+              unit: it.unit,
+              movementType: 'sale',
+              quantityDelta: -it.quantity,
+              stockBefore,
+              stockAfter,
+              unitCostCents: it.unit_cost_cents,
+              unitPriceCents: it.price_cents,
+              totalValueCents: it.subtotal_cents,
+              referenceId: saleId,
+              notes: 'Venta en mostrador',
+              actorUid: auth.user.id,
+              actorName: saleActorName,
+            })
           );
         }
 
@@ -2850,18 +3238,13 @@ export const onRequest: PagesFunction<Env> = async (context) => {
           return errorResponse('Debes seleccionar un producto válido para registrar la merma.', 400);
         }
 
-        const rawQty = Number(body.quantity);
-        if (!Number.isFinite(rawQty) || !Number.isInteger(rawQty) || rawQty <= 0) {
-          return errorResponse('La cantidad a dar de baja debe ser un número entero mayor a 0.', 400);
-        }
-
         const reason = typeof body.reason === 'string' ? body.reason.trim() : '';
         if (!VALID_REASONS.has(reason)) {
           return errorResponse('Motivo de merma inválido.', 400);
         }
 
         const product = await env.DB.prepare(
-          'SELECT id, name, category, unit, stock, price_cents, last_cost_cents FROM products WHERE id = ? AND negocio_id = ?'
+          'SELECT id, name, category, unit, stock, price_cents, last_cost_cents, allow_fractional FROM products WHERE id = ? AND negocio_id = ?'
         )
           .bind(productId, auth.negocioId)
           .first<{
@@ -2872,13 +3255,25 @@ export const onRequest: PagesFunction<Env> = async (context) => {
             stock: number;
             price_cents: number;
             last_cost_cents?: number | null;
+            allow_fractional?: number | boolean;
           }>();
 
         if (!product) {
           return errorResponse('Producto no encontrado en tu negocio.', 404);
         }
 
-        const currentStock = Number(product.stock || 0);
+        const qtyCheck = validateItemQuantity(body.quantity, Boolean(product.allow_fractional));
+        if (!qtyCheck.ok) {
+          return errorResponse(
+            Boolean(product.allow_fractional)
+              ? qtyCheck.error
+              : 'La cantidad a dar de baja debe ser un número entero mayor a 0.',
+            400
+          );
+        }
+        const rawQty = qtyCheck.quantity;
+
+        const currentStock = roundQuantity(Number(product.stock || 0), true);
         if (rawQty > currentStock) {
           return errorResponse(
             `Stock insuficiente para "${product.name}": disponible ${currentStock}, solicitado ${rawQty}.`,
@@ -2892,8 +3287,9 @@ export const onRequest: PagesFunction<Env> = async (context) => {
           ? Math.round(product.last_cost_cents as number)
           : Math.round(priceCents * 0.7);
         const costSource = hasPurchaseCost ? 'purchase' : 'estimated_fallback';
-        const totalCostLossCents = unitCostCents * rawQty;
-        const retailValueCents = priceCents * rawQty;
+        const totalCostLossCents = computeLineSubtotalCents(unitCostCents, rawQty);
+        const retailValueCents = computeLineSubtotalCents(priceCents, rawQty);
+        const nextStock = roundQuantity(Math.max(0, currentStock - rawQty), true);
         const notes =
           typeof body.notes === 'string' && body.notes.trim()
             ? body.notes.trim().slice(0, 250)
@@ -2930,6 +3326,23 @@ export const onRequest: PagesFunction<Env> = async (context) => {
           env.DB.prepare(
             "UPDATE products SET stock = stock - ?, updated_at = datetime('now') WHERE id = ? AND negocio_id = ?"
           ).bind(rawQty, product.id, auth.negocioId),
+          buildKardexStatement(env.DB, {
+            negocioId: auth.negocioId,
+            productId: product.id,
+            productName: product.name,
+            unit: product.unit || 'unidad',
+            movementType: 'shrinkage',
+            quantityDelta: -rawQty,
+            stockBefore: currentStock,
+            stockAfter: nextStock,
+            unitCostCents,
+            unitPriceCents: priceCents,
+            totalValueCents: totalCostLossCents,
+            referenceId: shrinkageId,
+            notes: notes ? `Merma (${reason}): ${notes}` : `Merma registrada (${reason})`,
+            actorUid: auth.user.id,
+            actorName: createdByName,
+          }),
         ]);
 
         const created = await env.DB.prepare(
@@ -2958,7 +3371,7 @@ export const onRequest: PagesFunction<Env> = async (context) => {
               created_by_name: createdByName,
               created_at: createdAt,
             }),
-            updated_stock: Math.max(0, currentStock - rawQty),
+            updated_stock: nextStock,
           },
           201
         );
@@ -2978,11 +3391,29 @@ export const onRequest: PagesFunction<Env> = async (context) => {
           'SELECT * FROM inventory_shrinkage WHERE id = ? AND negocio_id = ?'
         )
           .bind(shrinkageId, auth.negocioId)
-          .first<{ id: string; product_id: string; quantity: number }>();
+          .first<{
+            id: string;
+            product_id: string;
+            product_name: string;
+            unit?: string;
+            quantity: number;
+            unit_cost_cents?: number;
+            total_cost_loss_cents?: number;
+          }>();
 
         if (!existing) {
           return errorResponse('Registro de merma no encontrado.', 404);
         }
+
+        const currentProd = await env.DB.prepare(
+          'SELECT stock, price_cents, unit, name FROM products WHERE id = ? AND negocio_id = ?'
+        )
+          .bind(existing.product_id, auth.negocioId)
+          .first<{ stock: number; price_cents?: number; unit?: string; name?: string }>();
+
+        const stockBefore = roundQuantity(Number(currentProd?.stock) || 0, true);
+        const restoredQty = roundQuantity(Number(existing.quantity) || 0, true);
+        const stockAfter = roundQuantity(stockBefore + restoredQty, true);
 
         await env.DB.batch([
           env.DB.prepare('DELETE FROM inventory_shrinkage WHERE id = ? AND negocio_id = ?').bind(
@@ -2991,7 +3422,24 @@ export const onRequest: PagesFunction<Env> = async (context) => {
           ),
           env.DB.prepare(
             "UPDATE products SET stock = stock + ?, updated_at = datetime('now') WHERE id = ? AND negocio_id = ?"
-          ).bind(existing.quantity, existing.product_id, auth.negocioId),
+          ).bind(restoredQty, existing.product_id, auth.negocioId),
+          buildKardexStatement(env.DB, {
+            negocioId: auth.negocioId,
+            productId: existing.product_id,
+            productName: existing.product_name || currentProd?.name || 'Producto',
+            unit: existing.unit || currentProd?.unit || 'unidad',
+            movementType: 'shrinkage_revert',
+            quantityDelta: restoredQty,
+            stockBefore,
+            stockAfter,
+            unitCostCents: existing.unit_cost_cents || 0,
+            unitPriceCents: currentProd?.price_cents || 0,
+            totalValueCents: existing.total_cost_loss_cents || 0,
+            referenceId: shrinkageId,
+            notes: 'Reversión de baja / merma',
+            actorUid: auth.user.id,
+            actorName: auth.user.displayName || auth.user.email,
+          }),
         ]);
 
         return jsonResponse({
@@ -3390,6 +3838,13 @@ export const onRequest: PagesFunction<Env> = async (context) => {
               );
 
               if (it.product_id) {
+                const prodRow = await env.DB.prepare(
+                  'SELECT stock, unit, price_cents, name FROM products WHERE id = ? AND negocio_id = ?'
+                )
+                  .bind(it.product_id, auth.negocioId)
+                  .first<{ stock: number; unit?: string; price_cents?: number; name?: string }>();
+                const stockBefore = roundQuantity(Number(prodRow?.stock) || 0, true);
+                const stockAfter = roundQuantity(stockBefore + r.received_quantity, true);
                 batch.push(
                   env.DB.prepare(
                     `UPDATE products SET
@@ -3400,6 +3855,25 @@ export const onRequest: PagesFunction<Env> = async (context) => {
                       updated_at = datetime('now')
                     WHERE id = ? AND negocio_id = ?`
                   ).bind(r.received_quantity, finalCost, it.product_id, auth.negocioId)
+                );
+                batch.push(
+                  buildKardexStatement(env.DB, {
+                    negocioId: auth.negocioId,
+                    productId: it.product_id,
+                    productName: it.name || prodRow?.name || 'Producto',
+                    unit: prodRow?.unit || 'unidad',
+                    movementType: 'purchase',
+                    quantityDelta: r.received_quantity,
+                    stockBefore,
+                    stockAfter,
+                    unitCostCents: finalCost,
+                    unitPriceCents: prodRow?.price_cents || 0,
+                    totalValueCents: computeLineSubtotalCents(finalCost, r.received_quantity),
+                    referenceId: orderId,
+                    notes: 'Recepción orden de compra',
+                    actorUid: auth.user.id,
+                    actorName: auth.user.displayName || auth.user.email,
+                  })
                 );
               }
             }
@@ -3429,10 +3903,17 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         if (body.status === 'received' && order.status !== 'received') {
           const items = await env.DB.prepare('SELECT * FROM purchase_order_items WHERE order_id = ?')
             .bind(orderId)
-            .all<{ product_id: string | null; quantity: number; unit_cost_cents: number }>();
+            .all<{ product_id: string | null; name?: string | null; quantity: number; unit_cost_cents: number }>();
 
           for (const it of items.results || []) {
             if (it.product_id) {
+              const prodRow = await env.DB.prepare(
+                'SELECT stock, unit, price_cents, name FROM products WHERE id = ? AND negocio_id = ?'
+              )
+                .bind(it.product_id, auth.negocioId)
+                .first<{ stock: number; unit?: string; price_cents?: number; name?: string }>();
+              const stockBefore = roundQuantity(Number(prodRow?.stock) || 0, true);
+              const stockAfter = roundQuantity(stockBefore + it.quantity, true);
               batch.push(
                 env.DB.prepare(
                   `UPDATE products SET
@@ -3443,6 +3924,25 @@ export const onRequest: PagesFunction<Env> = async (context) => {
                     updated_at = datetime('now')
                   WHERE id = ? AND negocio_id = ?`
                 ).bind(it.quantity, it.unit_cost_cents, it.product_id, auth.negocioId)
+              );
+              batch.push(
+                buildKardexStatement(env.DB, {
+                  negocioId: auth.negocioId,
+                  productId: it.product_id,
+                  productName: it.name || prodRow?.name || 'Producto',
+                  unit: prodRow?.unit || 'unidad',
+                  movementType: 'purchase',
+                  quantityDelta: it.quantity,
+                  stockBefore,
+                  stockAfter,
+                  unitCostCents: it.unit_cost_cents,
+                  unitPriceCents: prodRow?.price_cents || 0,
+                  totalValueCents: computeLineSubtotalCents(it.unit_cost_cents, it.quantity),
+                  referenceId: orderId,
+                  notes: 'Recepción completa orden de compra',
+                  actorUid: auth.user.id,
+                  actorName: auth.user.displayName || auth.user.email,
+                })
               );
             }
           }
@@ -3654,17 +4154,21 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         const verifiedItems = [];
 
         for (const item of rawItems) {
-          const qty = Math.max(1, Math.round(Number(item.quantity) || 1));
           const prodId = String(item.product_id || '');
 
           // Consultar producto
           const dbProd = await env.DB.prepare(
-            'SELECT id, name, price_cents, en_oferta, precio_oferta_cents, wholesale_tiers_json, unit, image_url, stock FROM products WHERE id = ? AND negocio_id = ?'
+            'SELECT id, name, price_cents, en_oferta, precio_oferta_cents, wholesale_tiers_json, allow_fractional, unit, image_url, stock FROM products WHERE id = ? AND negocio_id = ?'
           )
             .bind(prodId, negocio.id)
             .first<any>();
 
           if (dbProd) {
+            const qtyCheck = validateItemQuantity(item.quantity, Boolean(dbProd.allow_fractional));
+            if (!qtyCheck.ok) {
+              return errorResponse(qtyCheck.error, 400);
+            }
+            const qty = qtyCheck.quantity;
             const pricing = resolveProductUnitPricing(dbProd, qty);
             totalCents += pricing.subtotal_cents;
             verifiedItems.push({
@@ -3677,9 +4181,11 @@ export const onRequest: PagesFunction<Env> = async (context) => {
               applied_wholesale_tier: pricing.applied_tier,
               wholesale_savings_cents: pricing.wholesale_savings_cents,
               unit: dbProd.unit,
+              allow_fractional: Boolean(dbProd.allow_fractional),
               image_url: dbProd.image_url,
             });
           } else {
+            const qty = Math.max(1, Math.round(Number(item.quantity) || 1));
             // Verificar si es combo
             const dbCombo = await env.DB.prepare(
               'SELECT id, name, price_cents, image_url FROM combos WHERE id = ? AND negocio_id = ?'
@@ -4089,10 +4595,29 @@ export const onRequest: PagesFunction<Env> = async (context) => {
           )
         );
 
-        // 2. Insertar items y descontar stock
+        // 2. Insertar items, descontar stock y registrar en Kardex
+        const convProdIds = Array.from(new Set(items.map((it: any) => it.product_id).filter(Boolean)));
+        const convStockMap = new Map<string, { stock: number; unit: string; cost: number; price: number }>();
+        if (convProdIds.length > 0) {
+          const ph = convProdIds.map(() => '?').join(',');
+          const convProds = await env.DB.prepare(
+            `SELECT id, stock, unit, last_cost_cents, price_cents FROM products WHERE negocio_id = ? AND id IN (${ph})`
+          )
+            .bind(auth.negocioId, ...convProdIds)
+            .all<{ id: string; stock: number; unit?: string; last_cost_cents?: number | null; price_cents?: number }>();
+          for (const p of convProds.results || []) {
+            convStockMap.set(p.id, {
+              stock: roundQuantity(Number(p.stock) || 0, true),
+              unit: p.unit || 'unidad',
+              cost: p.last_cost_cents ?? Math.round((Number(p.price_cents) || 0) * 0.7),
+              price: Number(p.price_cents) || 0,
+            });
+          }
+        }
+
         for (const item of items) {
           const itemId = `si-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
-          const subtotal = item.subtotal_cents || (item.quantity * item.unit_price_cents);
+          const subtotal = item.subtotal_cents || computeLineSubtotalCents(item.unit_price_cents, item.quantity);
           batchStatements.push(
             env.DB.prepare(
               `INSERT INTO sale_items (
@@ -4116,6 +4641,32 @@ export const onRequest: PagesFunction<Env> = async (context) => {
                WHERE id = ? AND negocio_id = ?`
             ).bind(item.quantity, item.product_id, auth.negocioId)
           );
+
+          const pInfo = convStockMap.get(item.product_id);
+          if (pInfo) {
+            const stockBefore = pInfo.stock;
+            const stockAfter = roundQuantity(Math.max(0, stockBefore - Number(item.quantity)), true);
+            pInfo.stock = stockAfter;
+            batchStatements.push(
+              buildKardexStatement(env.DB, {
+                negocioId: auth.negocioId,
+                productId: item.product_id,
+                productName: item.product_name,
+                unit: item.unit || pInfo.unit,
+                movementType: 'sale',
+                quantityDelta: -Number(item.quantity),
+                stockBefore,
+                stockAfter,
+                unitCostCents: pInfo.cost,
+                unitPriceCents: item.unit_price_cents,
+                totalValueCents: subtotal,
+                referenceId: saleId,
+                notes: `Facturación pedido ${order.order_code}`,
+                actorUid: auth.user.id,
+                actorName: auth.user.displayName || auth.user.email,
+              })
+            );
+          }
         }
 
         // 3. Si fue fiado, crear cargo en credit_entries si se especificó el cliente

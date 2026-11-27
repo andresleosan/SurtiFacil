@@ -7,6 +7,7 @@ import { Icon } from './ui/Icon';
 import { Modal } from './ui/Modal';
 import { PageHeader } from './ui/PageHeader';
 import { formatCentsCOP } from '../utils/currency';
+import { formatQuantityNumber, formatQuantityWithUnit } from '../utils/bulkWeight';
 import { exportSalesToCSV } from '../utils/csvExporter';
 import { extractSalePaymentBuckets, isSaleVoided, parsePaymentBreakdown } from '../utils/saleAccounting';
 import ThermalReceiptModal from './ThermalReceiptModal';
@@ -479,7 +480,7 @@ const Sales = () => {
                 <li>
                   Reintegrará{' '}
                   <strong>
-                    {(saleToVoid.items || []).reduce((sum, it) => sum + (Number(it.quantity) || 0), 0)} unidades
+                    {formatQuantityNumber((saleToVoid.items || []).reduce((sum, it) => sum + (Number(it.quantity) || 0), 0))} unidades
                   </strong>{' '}
                   al inventario del negocio.
                 </li>
@@ -659,7 +660,10 @@ function SaleDetails({
               <div className="min-w-0">
                 <p className="truncate text-sf-text">{item.product_name}</p>
                 <p className="text-xs text-gray-500">
-                  {item.quantity} × {formatPrice(item.price_cents)}
+                  {!Number.isInteger(item.quantity) || item.allow_fractional
+                    ? formatQuantityWithUnit(item.quantity, item.unit, true)
+                    : item.quantity}{' '}
+                  × {formatPrice(item.price_cents)}
                 </p>
               </div>
               <span className="font-medium text-sf-primary">{formatPrice(item.subtotal)}</span>

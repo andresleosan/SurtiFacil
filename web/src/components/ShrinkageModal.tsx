@@ -19,6 +19,13 @@ import {
   ShrinkageReason,
 } from '../types/shrinkage';
 import { formatCentsCOP } from '../utils/currency';
+import {
+  computeLineSubtotalCents,
+  formatQuantityNumber,
+  formatQuantityWithUnit,
+  MIN_FRACTIONAL_QTY,
+  roundQuantity,
+} from '../utils/bulkWeight';
 import { Modal } from './ui/Modal';
 
 export interface ShrinkageModalProps {
@@ -159,10 +166,14 @@ export const ShrinkageModal: React.FC<ShrinkageModalProps> = ({
   };
 
   const parsedQuantity = useMemo(() => {
-    const n = Number(quantityInput);
-    if (!Number.isFinite(n) || !Number.isInteger(n) || n <= 0) return 0;
-    return n;
-  }, [quantityInput]);
+    const n = Number(String(quantityInput).replace(',', '.'));
+    if (!Number.isFinite(n) || n <= 0) return 0;
+    const allowFrac = Boolean(selectedProduct?.allow_fractional);
+    if (!allowFrac && !Number.isInteger(n)) return 0;
+    const rounded = roundQuantity(n, allowFrac);
+    if (allowFrac && rounded < MIN_FRACTIONAL_QTY) return 0;
+    return rounded;
+  }, [quantityInput, selectedProduct?.allow_fractional]);
 
   const costEstimate = useMemo(() => {
     if (!selectedProduct || parsedQuantity <= 0) {
@@ -176,8 +187,11 @@ export const ShrinkageModal: React.FC<ShrinkageModalProps> = ({
     const { unitCostCents, costSource } = computeShrinkageUnitCostCents(selectedProduct);
     return {
       unitCostCents,
-      totalCostLossCents: unitCostCents * parsedQuantity,
-      retailValueCents: Math.max(0, Math.round(selectedProduct.price_cents || 0)) * parsedQuantity,
+      totalCostLossCents: computeLineSubtotalCents(unitCostCents, parsedQuantity),
+      retailValueCents: computeLineSubtotalCents(
+        Math.max(0, Math.round(selectedProduct.price_cents || 0)),
+        parsedQuantity
+      ),
       costSource,
     };
   }, [selectedProduct, parsedQuantity]);
@@ -202,10 +216,16 @@ export const ShrinkageModal: React.FC<ShrinkageModalProps> = ({
   const activeReasonMeta = getShrinkageReasonMeta(reason);
 
   const adjustQuantity = (delta: number) => {
-    const maxStock = selectedProduct?.stock ?? 9999;
+    const allowFrac = Boolean(selectedProduct?.allow_fractional);
+    const maxStock = roundQuantity(selectedProduct?.stock ?? 9999, true);
     const current = parsedQuantity || 0;
-    const next = Math.max(1, Math.min(maxStock > 0 ? maxStock : 1, current + delta));
-    setQuantityInput(String(next));
+    const minVal = allowFrac ? 0.25 : 1;
+    const stepDelta = allowFrac ? delta * 0.25 : delta;
+    const next = roundQuantity(
+      Math.max(minVal, Math.min(maxStock > 0 ? maxStock : minVal, current + stepDelta)),
+      allowFrac
+    );
+    setQuantityInput(formatQuantityNumber(next));
     setFormError(null);
   };
 
@@ -224,15 +244,25 @@ export const ShrinkageModal: React.FC<ShrinkageModalProps> = ({
       return;
     }
 
-    const rawNum = Number(quantityInput);
-    if (!Number.isFinite(rawNum) || !Number.isInteger(rawNum) || rawNum <= 0) {
-      setFormError('Ingresa una cantidad entera válida mayor a 0.');
+    const allowFrac = Boolean(selectedProduct.allow_fractional);
+    const rawNum = Number(String(quantityInput).replace(',', '.'));
+    if (!Number.isFinite(rawNum) || rawNum <= 0 || (!allowFrac && !Number.isInteger(rawNum))) {
+      setFormError(
+        allowFrac
+          ? 'Ingresa una cantidad válida mayor a 0.'
+          : 'Ingresa una cantidad entera válida mayor a 0.'
+      );
+      return;
+    }
+    const cleanQty = roundQuantity(rawNum, allowFrac);
+    if (allowFrac && cleanQty < MIN_FRACTIONAL_QTY) {
+      setFormError(`La cantidad mínima a granel es ${MIN_FRACTIONAL_QTY}.`);
       return;
     }
 
-    if (rawNum > selectedProduct.stock) {
+    if (cleanQty > selectedProduct.stock) {
       setFormError(
-        `No puedes dar de baja ${rawNum} unidades porque solo quedan ${selectedProduct.stock} disponibles.`
+        `No puedes dar de baja ${formatQuantityWithUnit(cleanQty, selectedProduct.unit, true)} porque solo quedan ${formatQuantityWithUnit(selectedProduct.stock, selectedProduct.unit, true)} disponibles.`
       );
       return;
     }
@@ -242,7 +272,7 @@ export const ShrinkageModal: React.FC<ShrinkageModalProps> = ({
       const created = await recordShrinkage(
         {
           product_id: selectedProduct.id,
-          quantity: rawNum,
+          quantity: cleanQty,
           reason,
           notes,
         },
@@ -503,10 +533,10 @@ export const ShrinkageModal: React.FC<ShrinkageModalProps> = ({
                 <input
                   id="shrinkage-quantity"
                   type="number"
-                  min={1}
+                  min={selectedProduct?.allow_fractional ? MIN_FRACTIONAL_QTY : 1}
                   max={selectedProduct?.stock || undefined}
-                  step={1}
-                  inputMode="numeric"
+                  step={selectedProduct?.allow_fractional ? 0.25 : 1}
+                  inputMode={selectedProduct?.allow_fractional ? 'decimal' : 'numeric'}
                   value={quantityInput}
                   onChange={(e) => {
                     setQuantityInput(e.target.value);
@@ -527,7 +557,7 @@ export const ShrinkageModal: React.FC<ShrinkageModalProps> = ({
               </div>
               {selectedProduct && selectedProduct.stock > 0 && (
                 <div className="mt-2 flex flex-wrap gap-1.5">
-                  {[1, 2, 5].map((preset) => (
+                  {(selectedProduct.allow_fractional ? [0.5, 1, 2] : [1, 2, 5]).map((preset) => (
                     <button
                       key={preset}
                       type="button"

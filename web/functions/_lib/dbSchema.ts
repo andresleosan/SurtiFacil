@@ -120,6 +120,7 @@ export async function ensureDatabaseSchema(db: D1Database, force = false): Promi
       en_oferta INTEGER NOT NULL DEFAULT 0,
       precio_oferta_cents INTEGER,
       wholesale_tiers_json TEXT NOT NULL DEFAULT '[]',
+      allow_fractional INTEGER NOT NULL DEFAULT 0,
       last_cost_cents INTEGER,
       last_cost_source TEXT,
       last_cost_updated_at TEXT,
@@ -444,6 +445,38 @@ export async function ensureDatabaseSchema(db: D1Database, force = false): Promi
     'CREATE INDEX IF NOT EXISTS idx_discount_coupons_negocio_code ON discount_coupons(negocio_id, code)'
   );
 
+  await safeRun(
+    db,
+    `CREATE TABLE IF NOT EXISTS inventory_kardex (
+      id TEXT PRIMARY KEY,
+      negocio_id TEXT NOT NULL DEFAULT 'surtifacil',
+      product_id TEXT NOT NULL,
+      product_name TEXT NOT NULL,
+      unit TEXT NOT NULL DEFAULT 'unidad',
+      movement_type TEXT NOT NULL DEFAULT 'adjustment',
+      quantity_delta REAL NOT NULL,
+      stock_before REAL NOT NULL,
+      stock_after REAL NOT NULL,
+      unit_cost_cents INTEGER NOT NULL DEFAULT 0,
+      unit_price_cents INTEGER NOT NULL DEFAULT 0,
+      total_value_cents INTEGER NOT NULL DEFAULT 0,
+      reference_id TEXT,
+      notes TEXT,
+      created_by_uid TEXT NOT NULL DEFAULT 'system',
+      created_by_name TEXT,
+      created_at TEXT DEFAULT (datetime('now'))
+    )`
+  );
+
+  await safeRun(
+    db,
+    'CREATE INDEX IF NOT EXISTS idx_inventory_kardex_product ON inventory_kardex(negocio_id, product_id, created_at DESC)'
+  );
+  await safeRun(
+    db,
+    'CREATE INDEX IF NOT EXISTS idx_inventory_kardex_negocio_date ON inventory_kardex(negocio_id, created_at DESC)'
+  );
+
   // 2. Migrar columnas faltantes en tablas preexistentes de Fase 1
   const alterColumns = [
     // users
@@ -465,6 +498,7 @@ export async function ensureDatabaseSchema(db: D1Database, force = false): Promi
     'ALTER TABLE products ADD COLUMN en_oferta INTEGER NOT NULL DEFAULT 0',
     'ALTER TABLE products ADD COLUMN precio_oferta_cents INTEGER',
     "ALTER TABLE products ADD COLUMN wholesale_tiers_json TEXT NOT NULL DEFAULT '[]'",
+    'ALTER TABLE products ADD COLUMN allow_fractional INTEGER NOT NULL DEFAULT 0',
     'ALTER TABLE products ADD COLUMN last_cost_cents INTEGER',
     'ALTER TABLE products ADD COLUMN last_cost_source TEXT',
     'ALTER TABLE products ADD COLUMN last_cost_updated_at TEXT',
@@ -687,6 +721,7 @@ export async function ensureDatabaseSchema(db: D1Database, force = false): Promi
     en_oferta: number;
     precio_oferta_cents: number | null;
     wholesale_tiers_json?: string;
+    allow_fractional?: number;
     last_cost_cents: number;
     expiration_date?: string | null;
   }> = [
@@ -828,6 +863,7 @@ export async function ensureDatabaseSchema(db: D1Database, force = false): Promi
       image_url: '/images/products/frijol-cargamanto-1lb.svg',
       en_oferta: 0,
       precio_oferta_cents: null,
+      allow_fractional: 1,
       last_cost_cents: 390000,
     },
     {
@@ -920,14 +956,31 @@ export async function ensureDatabaseSchema(db: D1Database, force = false): Promi
       price_cents: 350000,
       stock: 30,
       min_stock: 8,
-      unit: 'unidad',
+      unit: 'libra',
       category: 'Frutas y Verduras',
       barcode: '7702010005555',
       image_url: '/images/products/aguacate-hass.svg',
       en_oferta: 0,
       precio_oferta_cents: null,
+      allow_fractional: 1,
       last_cost_cents: 220000,
       expiration_date: futureIsoDate(2),
+    },
+    {
+      id: 'prod-papa-criolla-lb',
+      name: 'Papa Criolla Lavada (a Granel)',
+      price_cents: 400000,
+      stock: 30,
+      min_stock: 6,
+      unit: 'libra',
+      category: 'Frutas y Verduras',
+      barcode: '7702010006668',
+      image_url: '/images/products/default-product.svg',
+      en_oferta: 0,
+      precio_oferta_cents: null,
+      allow_fractional: 1,
+      last_cost_cents: 260000,
+      expiration_date: futureIsoDate(5),
     },
   ];
 
@@ -936,13 +989,17 @@ export async function ensureDatabaseSchema(db: D1Database, force = false): Promi
       db,
       `INSERT INTO products (
         id, negocio_id, name, price_cents, stock, min_stock, unit, category, image_url, barcode,
-        visible_kiosco, visible_tienda, en_oferta, precio_oferta_cents, wholesale_tiers_json, last_cost_cents, last_cost_source, expiration_date, created_at, updated_at
-      ) VALUES (?, 'surtifacil', ?, ?, ?, ?, ?, ?, ?, ?, 1, 1, ?, ?, ?, ?, 'purchase', ?, datetime('now'), datetime('now'))
+        visible_kiosco, visible_tienda, en_oferta, precio_oferta_cents, wholesale_tiers_json, allow_fractional, last_cost_cents, last_cost_source, expiration_date, created_at, updated_at
+      ) VALUES (?, 'surtifacil', ?, ?, ?, ?, ?, ?, ?, ?, 1, 1, ?, ?, ?, ?, ?, 'purchase', ?, datetime('now'), datetime('now'))
       ON CONFLICT(id) DO UPDATE SET
         image_url = excluded.image_url,
         price_cents = excluded.price_cents,
         category = excluded.category,
         barcode = excluded.barcode,
+        allow_fractional = CASE
+          WHEN excluded.allow_fractional = 1 THEN 1
+          ELSE products.allow_fractional
+        END,
         wholesale_tiers_json = CASE
           WHEN products.wholesale_tiers_json IS NULL OR products.wholesale_tiers_json = '[]'
           THEN excluded.wholesale_tiers_json
@@ -963,6 +1020,7 @@ export async function ensureDatabaseSchema(db: D1Database, force = false): Promi
         p.en_oferta,
         p.precio_oferta_cents,
         p.wholesale_tiers_json ?? '[]',
+        p.allow_fractional ?? 0,
         p.last_cost_cents,
         p.expiration_date ?? null,
       ]
@@ -1146,6 +1204,31 @@ export async function ensureDatabaseSchema(db: D1Database, force = false): Promi
     ) VALUES (
       'coup-mercado2000', 'surtifacil', 'MERCADO2000', '$ 2.000 COP de regalo en tu mercado', 'fixed_cents', 200000,
       1200000, NULL, 50, 1, 1, 'system', datetime('now'), datetime('now')
+    )`
+  );
+
+  // 9. Semillas iniciales de Kardex de Inventario para trazabilidad inmediata
+  await safeRun(
+    db,
+    `INSERT OR IGNORE INTO inventory_kardex (
+      id, negocio_id, product_id, product_name, unit, movement_type, quantity_delta, stock_before, stock_after,
+      unit_cost_cents, unit_price_cents, total_value_cents, reference_id, notes, created_by_uid, created_by_name, created_at
+    ) VALUES (
+      'kdx-seed-papa-1', 'surtifacil', 'prod-papa-criolla-lb', 'Papa Criolla Lavada (a Granel)', 'libra', 'initial',
+      30, 0, 30, 260000, 400000, 7800000, 'seed-init', 'Inventario inicial de bodega (bulto x30 lb)',
+      'system', 'Sistema SurtiFácil', datetime('now')
+    )`
+  );
+
+  await safeRun(
+    db,
+    `INSERT OR IGNORE INTO inventory_kardex (
+      id, negocio_id, product_id, product_name, unit, movement_type, quantity_delta, stock_before, stock_after,
+      unit_cost_cents, unit_price_cents, total_value_cents, reference_id, notes, created_by_uid, created_by_name, created_at
+    ) VALUES (
+      'kdx-seed-leche-1', 'surtifacil', 'prod-leche-alqueria-1l', 'Leche Entera Alquería 1L', 'litro', 'initial',
+      48, 0, 48, 340000, 450000, 16320000, 'seed-init', 'Inventario inicial de bodega',
+      'system', 'Sistema SurtiFácil', datetime('now')
     )`
   );
 

@@ -10,6 +10,7 @@ import { ProductPhotoUploader } from './ui/ProductPhotoUploader';
 import { COLOMBIAN_PRODUCT_CATALOG, findColombianProductImage } from '../data/colombianCatalog';
 import { WholesaleTiersEditor } from './ui/WholesaleTiersEditor';
 import { validateWholesaleTiersInput, type WholesaleTier } from '../utils/wholesalePricing';
+import { isWeighableUnit, roundQuantity } from '../utils/bulkWeight';
 
 interface AddProductModalProps {
   isOpen: boolean;
@@ -23,6 +24,7 @@ interface AddProductModalProps {
     barcode?: string;
     image_url?: string;
     expiration_date?: string;
+    allow_fractional?: boolean;
     wholesale_tiers?: WholesaleTier[];
   }) => void | Promise<void>;
 }
@@ -56,6 +58,7 @@ const EMPTY_FORM = {
   barcode: '',
   image_url: '',
   expiration_date: '',
+  allow_fractional: false,
 };
 
 const AddProductModal = ({ isOpen, onClose, onAddProduct }: AddProductModalProps) => {
@@ -74,6 +77,9 @@ const AddProductModal = ({ isOpen, onClose, onAddProduct }: AddProductModalProps
         const autoImg = findColombianProductImage(value, prev.barcode);
         if (autoImg) next.image_url = autoImg;
       }
+      if (name === 'unit' && isWeighableUnit(value)) {
+        next.allow_fractional = true;
+      }
       return next;
     });
   };
@@ -90,6 +96,7 @@ const AddProductModal = ({ isOpen, onClose, onAddProduct }: AddProductModalProps
       barcode: item.barcode,
       image_url: item.image_url,
       expiration_date: '',
+      allow_fractional: isWeighableUnit(item.unit),
     });
   };
 
@@ -153,16 +160,21 @@ const AddProductModal = ({ isOpen, onClose, onAddProduct }: AddProductModalProps
     }
 
     const price = parseFloat(formData.price);
-    const stock = parseInt(formData.stock, 10);
+    const rawStock = parseFloat(formData.stock);
 
     if (isNaN(price) || price < 0) {
       setError('El precio debe ser un número válido');
       return;
     }
-    if (isNaN(stock) || stock < 0) {
-      setError('El stock debe ser un número entero válido');
+    if (isNaN(rawStock) || rawStock < 0) {
+      setError('El stock debe ser un número válido mayor o igual a 0');
       return;
     }
+    if (!formData.allow_fractional && Math.abs(rawStock - Math.round(rawStock)) >= 1e-6) {
+      setError('El stock debe ser un número entero (o activa Venta a Granel)');
+      return;
+    }
+    const stock = roundQuantity(rawStock, formData.allow_fractional);
 
     const priceCents = Math.round(price * 100);
     const tiersCheck = validateWholesaleTiersInput(wholesaleTiers, priceCents);
@@ -182,6 +194,7 @@ const AddProductModal = ({ isOpen, onClose, onAddProduct }: AddProductModalProps
         barcode: formData.barcode.trim() || undefined,
         image_url: formData.image_url.trim() || undefined,
         expiration_date: formData.expiration_date.trim() || undefined,
+        allow_fractional: formData.allow_fractional,
         ...(tiersCheck.tiers.length > 0 ? { wholesale_tiers: tiersCheck.tiers } : {}),
       });
       resetAndClose();
@@ -312,7 +325,8 @@ const AddProductModal = ({ isOpen, onClose, onAddProduct }: AddProductModalProps
                   <input
                     id="add-stock"
                     type="number"
-                    inputMode="numeric"
+                    inputMode={formData.allow_fractional ? 'decimal' : 'numeric'}
+                    step={formData.allow_fractional ? '0.05' : '1'}
                     min="0"
                     name="stock"
                     value={formData.stock}
@@ -360,6 +374,16 @@ const AddProductModal = ({ isOpen, onClose, onAddProduct }: AddProductModalProps
                   </select>
                 </div>
               </div>
+
+              <label className="flex items-center gap-2.5 rounded-xl border border-emerald-200 bg-emerald-50/60 px-3 py-2.5 text-xs font-semibold text-emerald-950 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={formData.allow_fractional}
+                  onChange={(e) => setFormData((prev) => ({ ...prev, allow_fractional: e.target.checked }))}
+                  className="h-4 w-4 rounded text-emerald-600 focus:ring-emerald-500"
+                />
+                <span>⚖️ Permitir venta a granel / por peso (fracciones y por valor COP)</span>
+              </label>
 
               {/* Carga Fotográfica desde Celular / Empaque */}
               <ProductPhotoUploader

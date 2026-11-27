@@ -15,11 +15,13 @@ import { Combo, ComboItem, NewComboInput } from '../types/combo';
 import AddProductModal from './AddProductModal';
 import BarcodeScanner from './BarcodeScanner';
 import { ShrinkageModal } from './ShrinkageModal';
+import { ProductKardexModal } from './ProductKardexModal';
 import { Icon } from './ui/Icon';
 import { Modal } from './ui/Modal';
 import { PageHeader } from './ui/PageHeader';
 import { useConfirm } from './ui/ConfirmDialog';
 import { formatCOP, formatCentsCOP } from '../utils/currency';
+import { formatQuantityNumber, roundQuantity } from '../utils/bulkWeight';
 import { ProductImage } from './ui/ProductImage';
 import { ProductPhotoUploader } from './ui/ProductPhotoUploader';
 import { WholesaleTiersEditor } from './ui/WholesaleTiersEditor';
@@ -88,6 +90,8 @@ interface EditDraft {
   visible_tienda: boolean;
   en_oferta: boolean;
   precio_oferta: string;
+  allow_fractional: boolean;
+  adjustment_reason: string;
   wholesale_tiers: WholesaleTier[];
 }
 
@@ -105,6 +109,8 @@ const EMPTY_DRAFT: EditDraft = {
   visible_tienda: true,
   en_oferta: false,
   precio_oferta: '',
+  allow_fractional: false,
+  adjustment_reason: '',
   wholesale_tiers: [],
 };
 
@@ -216,6 +222,18 @@ function parseNonNegativeInt(value: string): number | null {
   return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : null;
 }
 
+function parseNonNegativeStock(value: string, allowFractional: boolean): number | null {
+  const clean = value.replace(',', '.').trim();
+  if (!clean) return null;
+  const num = Number(clean);
+  if (!Number.isFinite(num) || num < 0) return null;
+  if (!allowFractional) {
+    if (Math.abs(num - Math.round(num)) >= 1e-6) return null;
+    return Math.round(num);
+  }
+  return roundQuantity(num, true);
+}
+
 function stockTone(stock: number): { text: string; chip: string; label: string | null } {
   if (stock === 0) return { text: 'text-red-600', chip: 'bg-red-100 text-red-700', label: 'Sin stock' };
   if (stock <= 5) return { text: 'text-orange-600', chip: 'bg-orange-100 text-orange-700', label: 'Crítico' };
@@ -242,6 +260,7 @@ const Inventory = () => {
   const [showAddModal, setShowAddModal] = useState(false);
   const [showShrinkageModal, setShowShrinkageModal] = useState(false);
   const [shrinkageProductId, setShrinkageProductId] = useState<string | undefined>(undefined);
+  const [kardexProduct, setKardexProduct] = useState<Product | null>(null);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [editDraft, setEditDraft] = useState<EditDraft>(EMPTY_DRAFT);
   const [editError, setEditError] = useState('');
@@ -281,7 +300,7 @@ const Inventory = () => {
     setEditDraft({
       name: product.name,
       price: String(product.price_cents),
-      stock: String(product.stock),
+      stock: formatQuantityNumber(product.stock),
       category: product.category || '',
       barcode: product.barcode ?? '',
       unit: product.unit || 'unidad',
@@ -292,6 +311,8 @@ const Inventory = () => {
       visible_tienda: product.visible_tienda !== undefined ? Boolean(product.visible_tienda) : true,
       en_oferta: product.en_oferta !== undefined ? Boolean(product.en_oferta) : false,
       precio_oferta: product.precio_oferta_cents ? String(product.precio_oferta_cents) : '',
+      allow_fractional: Boolean(product.allow_fractional),
+      adjustment_reason: '',
       wholesale_tiers: parseWholesaleTiers(product.wholesale_tiers ?? product.wholesale_tiers_json),
     });
     setEditError('');
@@ -377,7 +398,7 @@ const Inventory = () => {
     if (!editingProduct) return;
     const name = editDraft.name.trim();
     const price = parseNonNegativeInt(editDraft.price);
-    const stock = parseNonNegativeInt(editDraft.stock);
+    const stock = parseNonNegativeStock(editDraft.stock, editDraft.allow_fractional);
     const minStock = parseNonNegativeInt(editDraft.min_stock) ?? 5;
     const precioOferta = editDraft.precio_oferta.trim() ? parseNonNegativeInt(editDraft.precio_oferta) : null;
 
@@ -390,7 +411,11 @@ const Inventory = () => {
       return;
     }
     if (stock === null) {
-      setEditError('El stock debe ser un entero mayor o igual a 0');
+      setEditError(
+        editDraft.allow_fractional
+          ? 'El stock debe ser un número válido mayor o igual a 0'
+          : 'El stock debe ser un entero mayor o igual a 0 (o activa Venta a Granel)'
+      );
       return;
     }
     const tiersValidation = validateWholesaleTiersInput(editDraft.wholesale_tiers, price);
@@ -402,7 +427,7 @@ const Inventory = () => {
     setActionError('');
     setSaving(true);
     try {
-      await updateProduct({
+      const updatedPayload = {
         ...editingProduct,
         name,
         price_cents: price,
@@ -417,9 +442,16 @@ const Inventory = () => {
         visible_tienda: editDraft.visible_tienda,
         en_oferta: editDraft.en_oferta,
         precio_oferta_cents: precioOferta ?? undefined,
+        allow_fractional: editDraft.allow_fractional,
         wholesale_tiers: tiersValidation.tiers,
         wholesale_tiers_json: tiersValidation.json,
-      });
+      };
+      const cleanReason = editDraft.adjustment_reason.trim();
+      if (cleanReason) {
+        await updateProduct(updatedPayload, cleanReason);
+      } else {
+        await updateProduct(updatedPayload);
+      }
       closeEdit();
     } catch (err) {
       setEditError(err instanceof Error ? err.message : 'Error al editar producto');
@@ -806,6 +838,11 @@ const Inventory = () => {
                         <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-gray-500">
                           <span className="chip bg-sf-cyan/10 text-sf-cyan">{product.category || 'Sin categoría'}</span>
                           <span className="chip bg-slate-100 text-slate-700">{product.unit || 'unidad'}</span>
+                          {Boolean(product.allow_fractional) && (
+                            <span className="chip bg-emerald-100 text-emerald-800 border border-emerald-200">
+                              ⚖️ Granel
+                            </span>
+                          )}
                           {primaryWholesale && (
                             <span className="chip bg-amber-100 text-amber-800 border border-amber-200">
                               🏷️ {primaryWholesale.min_quantity}+ a {formatCentsCOP(primaryWholesale.unit_price_cents)}
@@ -818,15 +855,23 @@ const Inventory = () => {
                       <div className="text-right">
                         <p className="font-semibold text-sf-primary">{formatPrice(product.price_cents)}</p>
                         <p className={`text-sm font-medium ${tone.text}`}>
-                          {product.stock} <span className="text-xs font-normal text-gray-500">uds.</span>
+                          {formatQuantityNumber(product.stock)} <span className="text-xs font-normal text-gray-500">uds.</span>
                         </p>
                       </div>
                     </div>
-                    {(tone.label || canEdit) && (
-                      <div className="mt-2 flex items-center justify-between">
-                        <span>{tone.label && <span className={`chip ${tone.chip}`}>{tone.label}</span>}</span>
+                    <div className="mt-2 flex items-center justify-between gap-2">
+                      <span>{tone.label && <span className={`chip ${tone.chip}`}>{tone.label}</span>}</span>
+                      <div className="flex flex-wrap justify-end gap-1">
+                        <button
+                          type="button"
+                          onClick={() => setKardexProduct(product)}
+                          aria-label={`Ver Kardex de ${product.name}`}
+                          className="min-h-[44px] rounded-lg border border-slate-200 bg-slate-50 px-2.5 text-xs font-semibold text-slate-700 hover:bg-slate-100"
+                        >
+                          📋 Kardex
+                        </button>
                         {canEdit && (
-                          <div className="flex gap-1">
+                          <>
                             <button
                               type="button"
                               onClick={() => openShrinkage(product.id)}
@@ -854,10 +899,10 @@ const Inventory = () => {
                                 <Icon name="trash" size={20} />
                               </button>
                             )}
-                          </div>
+                          </>
                         )}
                       </div>
-                    )}
+                    </div>
                   </li>
                 );
               })}
@@ -916,8 +961,13 @@ const Inventory = () => {
                               <span className="block truncate max-w-[220px]" title={product.name}>
                                 {product.name}
                               </span>
-                              {(expBadge || primaryWholesale) && (
+                              {(expBadge || primaryWholesale || Boolean(product.allow_fractional)) && (
                                 <div className="mt-0.5 flex flex-wrap items-center gap-1">
+                                  {Boolean(product.allow_fractional) && (
+                                    <span className="inline-block rounded-full bg-emerald-100 border border-emerald-200 px-2 py-0.5 text-[11px] font-semibold text-emerald-800">
+                                      ⚖️ Granel
+                                    </span>
+                                  )}
                                   {primaryWholesale && (
                                     <span className="inline-block rounded-full bg-amber-100 border border-amber-200 px-2 py-0.5 text-[11px] font-semibold text-amber-800">
                                       🏷️ {primaryWholesale.min_quantity}+ a {formatCentsCOP(primaryWholesale.unit_price_cents)}
@@ -943,13 +993,22 @@ const Inventory = () => {
                         </td>
                         <td className="px-4 py-3 text-right text-sm">
                           <div className="flex items-center justify-end gap-2">
-                            <span className={`font-medium ${tone.text}`}>{product.stock}</span>
+                            <span className={`font-medium ${tone.text}`}>{formatQuantityNumber(product.stock)}</span>
                             {tone.label && <span className={`chip ${tone.chip}`}>{tone.label}</span>}
                           </div>
                         </td>
                         {canEdit && (
                           <td className="px-4 py-2 text-center">
                             <div className="flex justify-center gap-1">
+                              <button
+                                type="button"
+                                onClick={() => setKardexProduct(product)}
+                                aria-label={`Ver Kardex de ${product.name}`}
+                                title="Historial Kardex y Ajuste"
+                                className="icon-btn h-10 w-10 text-slate-700 hover:bg-slate-100"
+                              >
+                                <span aria-hidden="true">📋</span>
+                              </button>
                               <button
                                 type="button"
                                 onClick={() => openShrinkage(product.id)}
@@ -1179,6 +1238,11 @@ const Inventory = () => {
                               <span className="chip bg-slate-100 text-[10px] font-semibold text-slate-700 capitalize">
                                 {product.unit || 'unidad'}
                               </span>
+                              {Boolean(product.allow_fractional) && (
+                                <span className="chip bg-emerald-100 text-[10px] font-bold text-emerald-800 border border-emerald-200">
+                                  ⚖️ Granel
+                                </span>
+                              )}
                               {product.en_oferta ? (
                                 <span className="chip bg-red-100 text-[10px] font-bold text-red-700">OFERTA</span>
                               ) : null}
@@ -1213,15 +1277,25 @@ const Inventory = () => {
                                 <div className="flex items-center gap-1">
                                   <button
                                     type="button"
-                                    onClick={() => setInlineStock(Math.max(0, inlineStock - 1))}
+                                    onClick={() =>
+                                      setInlineStock(
+                                        roundQuantity(Math.max(0, inlineStock - (product.allow_fractional ? 0.5 : 1)), true)
+                                      )
+                                    }
                                     className="icon-btn h-7 w-7 bg-white text-slate-700 shadow-sm"
                                   >
                                     -
                                   </button>
-                                  <span className="w-8 text-center font-bold text-slate-800">{inlineStock}</span>
+                                  <span className="w-10 text-center font-bold text-slate-800 tabular-nums">
+                                    {formatQuantityNumber(inlineStock)}
+                                  </span>
                                   <button
                                     type="button"
-                                    onClick={() => setInlineStock(inlineStock + 1)}
+                                    onClick={() =>
+                                      setInlineStock(
+                                        roundQuantity(inlineStock + (product.allow_fractional ? 0.5 : 1), true)
+                                      )
+                                    }
                                     className="icon-btn h-7 w-7 bg-white text-slate-700 shadow-sm"
                                   >
                                     +
@@ -1262,7 +1336,7 @@ const Inventory = () => {
                                   {formatPrice(product.price_cents)}
                                 </p>
                                 <p className={`text-xs font-semibold ${tone.text}`}>
-                                  {product.stock} {product.unit || 'uds.'} disponibles
+                                  {formatQuantityNumber(product.stock)} {product.unit || 'uds.'} disponibles
                                 </p>
                               </div>
 
@@ -1303,6 +1377,14 @@ const Inventory = () => {
                               </button>
 
                               <div className="flex gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => setKardexProduct(product)}
+                                  aria-label={`Ver Kardex de ${product.name}`}
+                                  className="text-slate-700 hover:underline font-medium"
+                                >
+                                  Kardex
+                                </button>
                                 <button
                                   type="button"
                                   onClick={() => openShrinkage(product.id)}
@@ -1482,6 +1564,13 @@ const Inventory = () => {
         initialProductId={shrinkageProductId}
       />
 
+      {/* Modal Kardex Trazable de Inventario */}
+      <ProductKardexModal
+        isOpen={kardexProduct !== null}
+        onClose={() => setKardexProduct(null)}
+        product={kardexProduct}
+      />
+
       {/* Escáner de Códigos de Barras */}
       {isScannerOpen && <BarcodeScanner onScan={handleScan} onClose={closeScanner} />}
 
@@ -1549,14 +1638,39 @@ const Inventory = () => {
               <input
                 id="edit-stock"
                 type="text"
-                inputMode="numeric"
-                pattern="[0-9]*"
+                inputMode={editDraft.allow_fractional ? 'decimal' : 'numeric'}
                 value={editDraft.stock}
                 onChange={(event) => setEditDraft({ ...editDraft, stock: event.target.value })}
                 className="input"
               />
             </div>
           </div>
+
+          <label className="flex items-center gap-2.5 rounded-xl border border-emerald-200 bg-emerald-50/60 px-3 py-2.5 text-xs font-semibold text-emerald-950 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={editDraft.allow_fractional}
+              onChange={(e) => setEditDraft({ ...editDraft, allow_fractional: e.target.checked })}
+              className="h-4 w-4 rounded text-emerald-600 focus:ring-emerald-500"
+            />
+            <span>⚖️ Permitir venta a granel / por peso (fracciones y por valor COP)</span>
+          </label>
+
+          {editingProduct && Number(editDraft.stock.replace(',', '.')) !== editingProduct.stock && (
+            <div>
+              <label htmlFor="edit-adjustment-reason" className="mb-1 block text-xs font-semibold text-slate-700">
+                Motivo del ajuste de stock (se registra en Kardex)
+              </label>
+              <input
+                id="edit-adjustment-reason"
+                type="text"
+                value={editDraft.adjustment_reason}
+                onChange={(e) => setEditDraft({ ...editDraft, adjustment_reason: e.target.value })}
+                placeholder="Ej: Conteo físico de bodega"
+                className="input text-sm"
+              />
+            </div>
+          )}
 
           <div className="grid grid-cols-2 gap-3">
             <div>

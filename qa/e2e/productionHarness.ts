@@ -1,5 +1,10 @@
 import { expect, type Page } from '@playwright/test';
 import {
+  computeLineSubtotalCents,
+  isFractionalProduct,
+  roundQuantity,
+} from '../../web/functions/_lib/bulkWeight';
+import {
   parseWholesaleTiers,
   resolveProductUnitPricing,
 } from '../../web/functions/_lib/wholesalePricing';
@@ -164,6 +169,22 @@ export async function setupProductionE2EHarness(page: Page) {
       en_oferta: 0,
       expiration_date: futureDayIso(1),
     },
+    {
+      id: 'prod-papa-1',
+      negocio_id: 'surtifacil',
+      name: 'Papa Criolla a Granel',
+      price_cents: 400000,
+      last_cost_cents: 260000,
+      stock: 30,
+      min_stock: 5,
+      unit: 'libra',
+      category: 'Frutas y Verduras',
+      barcode: '7709990001199',
+      visible_kiosco: 1,
+      visible_tienda: 1,
+      en_oferta: 0,
+      allow_fractional: 1,
+    },
   ];
 
   const combos = [
@@ -295,6 +316,63 @@ export async function setupProductionE2EHarness(page: Page) {
       updated_at: new Date().toISOString(),
     },
   ];
+
+  const kardexEntries: Array<Record<string, any>> = [
+    {
+      id: 'kdx-seed-papa-e2e',
+      negocio_id: 'surtifacil',
+      product_id: 'prod-papa-1',
+      product_name: 'Papa Criolla a Granel',
+      unit: 'libra',
+      movement_type: 'initial',
+      quantity_delta: 30,
+      stock_before: 0,
+      stock_after: 30,
+      unit_cost_cents: 260000,
+      unit_price_cents: 400000,
+      total_value_cents: 7800000,
+      reference_id: null,
+      notes: 'Inventario inicial bulto 30 lb',
+      created_by_uid: 'admin-1',
+      created_by_name: 'Andrés Sánchez',
+      created_at: new Date(Date.now() - 86400000).toISOString(),
+    },
+  ];
+
+  const pushKardexEntry = (entry: {
+    product: Record<string, any>;
+    movement_type: string;
+    quantity_delta: number;
+    stock_before: number;
+    stock_after: number;
+    unit_cost_cents?: number;
+    unit_price_cents?: number;
+    total_value_cents?: number;
+    reference_id?: string | null;
+    notes?: string | null;
+    actor_uid: string;
+    actor_name: string;
+  }) => {
+    kardexEntries.unshift({
+      id: `kdx-e2e-${Date.now()}-${kardexEntries.length + 1}`,
+      negocio_id: 'surtifacil',
+      product_id: entry.product.id,
+      product_name: entry.product.name,
+      unit: entry.product.unit || 'unidad',
+      movement_type: entry.movement_type,
+      quantity_delta: roundQuantity(entry.quantity_delta, true),
+      stock_before: roundQuantity(entry.stock_before, true),
+      stock_after: roundQuantity(entry.stock_after, true),
+      unit_cost_cents: Math.round(entry.unit_cost_cents ?? entry.product.last_cost_cents ?? 0),
+      unit_price_cents: Math.round(entry.unit_price_cents ?? entry.product.price_cents ?? 0),
+      total_value_cents: Math.round(entry.total_value_cents ?? 0),
+      reference_id: entry.reference_id ?? null,
+      notes: entry.notes ?? null,
+      created_by_uid: entry.actor_uid,
+      created_by_name: entry.actor_name,
+      created_at: new Date().toISOString(),
+    });
+  };
 
   let storeSettings = {
     id: 'surtifacil',
@@ -613,36 +691,144 @@ export async function setupProductionE2EHarness(page: Page) {
       });
     }
 
-    // Productos CRUD
+    // Productos CRUD y Kardex
     if (pathname === '/products' && method === 'GET') {
       return jsonResponse(products);
     }
     if (pathname === '/products' && method === 'POST') {
       const tiers = parseWholesaleTiers(body.wholesale_tiers ?? body.wholesale_tiers_json);
+      const isFrac = isFractionalProduct({
+        allow_fractional: body.allow_fractional,
+        unit: body.unit,
+      });
+      const initialStock = roundQuantity(Number(body.stock || 0), isFrac);
       const created = {
         id: `prod-${Date.now()}`,
         negocio_id: 'surtifacil',
         ...body,
+        stock: initialStock,
+        allow_fractional: isFrac ? 1 : 0,
         wholesale_tiers: tiers,
         wholesale_tiers_json: JSON.stringify(tiers),
       };
       products.push(created);
+      if (initialStock > 0) {
+        pushKardexEntry({
+          product: created,
+          movement_type: 'initial',
+          quantity_delta: initialStock,
+          stock_before: 0,
+          stock_after: initialStock,
+          total_value_cents: computeLineSubtotalCents(created.last_cost_cents ?? created.price_cents ?? 0, initialStock),
+          notes: 'Creación inicial en catálogo',
+          actor_uid: actor.id,
+          actor_name: actor.displayName,
+        });
+      }
       return jsonResponse(created, 201);
+    }
+    if (pathname.startsWith('/products/') && pathname.endsWith('/kardex') && method === 'GET') {
+      const prodId = decodeURIComponent(pathname.split('/')[2]);
+      const prod = products.find((p) => p.id === prodId);
+      if (!prod) {
+        return jsonResponse({ error: 'Producto no encontrado.' }, 404);
+      }
+      const movementFilter = urlObj.searchParams.get('movement_type') || '';
+      const filtered = kardexEntries.filter(
+        (k) => k.product_id === prodId && (!movementFilter || k.movement_type === movementFilter)
+      );
+      let totalIn = 0;
+      let totalOut = 0;
+      for (const e of filtered) {
+        if (e.quantity_delta > 0) totalIn += e.quantity_delta;
+        else if (e.quantity_delta < 0) totalOut += Math.abs(e.quantity_delta);
+      }
+      return jsonResponse({
+        product: prod,
+        summary: {
+          total_in: roundQuantity(totalIn, true),
+          total_out: roundQuantity(totalOut, true),
+          net_change: roundQuantity(totalIn - totalOut, true),
+          movements_count: filtered.length,
+        },
+        entries: filtered,
+      });
+    }
+    if (pathname.startsWith('/products/') && pathname.endsWith('/kardex/adjust') && method === 'POST') {
+      if (actor.role !== 'admin' && actor.role !== 'manager') {
+        return jsonResponse({ error: 'Solo administradores y gerentes pueden ajustar inventario.' }, 403);
+      }
+      const prodId = decodeURIComponent(pathname.split('/')[2]);
+      const prod = products.find((p) => p.id === prodId);
+      if (!prod) {
+        return jsonResponse({ error: 'Producto no encontrado.' }, 404);
+      }
+      const isFrac = isFractionalProduct(prod);
+      const qty = roundQuantity(Number(body.quantity || 0), isFrac);
+      const before = roundQuantity(Number(prod.stock || 0), true);
+      let after = before;
+      if (body.mode === 'add') after = roundQuantity(before + qty, true);
+      else if (body.mode === 'subtract') after = roundQuantity(before - qty, true);
+      else after = roundQuantity(qty, isFrac);
+      if (after < 0) {
+        return jsonResponse({ error: 'El stock resultante no puede ser negativo.' }, 400);
+      }
+      const delta = roundQuantity(after - before, true);
+      prod.stock = after;
+      const reason = String(body.reason || '').trim() || 'Ajuste manual en Kardex';
+      pushKardexEntry({
+        product: prod,
+        movement_type: 'adjustment',
+        quantity_delta: delta,
+        stock_before: before,
+        stock_after: after,
+        total_value_cents: computeLineSubtotalCents(prod.last_cost_cents ?? prod.price_cents ?? 0, Math.abs(delta)),
+        notes: reason,
+        actor_uid: actor.id,
+        actor_name: actor.displayName,
+      });
+      return jsonResponse({ success: true, product: prod, kardex_entry: kardexEntries[0] });
     }
     if (pathname.startsWith('/products/') && method === 'PUT') {
       const id = decodeURIComponent(pathname.split('/')[2]);
       const idx = products.findIndex((p) => p.id === id);
       if (idx >= 0) {
+        const prev = products[idx];
         const nextWholesale =
           body.wholesale_tiers !== undefined || body.wholesale_tiers_json !== undefined
             ? parseWholesaleTiers(body.wholesale_tiers ?? body.wholesale_tiers_json)
-            : products[idx].wholesale_tiers;
+            : prev.wholesale_tiers;
+        const nextIsFrac = isFractionalProduct({
+          allow_fractional: body.allow_fractional ?? prev.allow_fractional,
+          unit: body.unit ?? prev.unit,
+        });
+        const nextStock =
+          body.stock !== undefined ? roundQuantity(Number(body.stock), nextIsFrac) : prev.stock;
         products[idx] = {
-          ...products[idx],
+          ...prev,
           ...body,
+          stock: nextStock,
+          allow_fractional: nextIsFrac ? 1 : 0,
           wholesale_tiers: nextWholesale,
           wholesale_tiers_json: JSON.stringify(nextWholesale || []),
         };
+        if (Math.abs(nextStock - prev.stock) > 1e-4) {
+          const delta = roundQuantity(nextStock - prev.stock, true);
+          pushKardexEntry({
+            product: products[idx],
+            movement_type: 'adjustment',
+            quantity_delta: delta,
+            stock_before: prev.stock,
+            stock_after: nextStock,
+            total_value_cents: computeLineSubtotalCents(
+              products[idx].last_cost_cents ?? products[idx].price_cents ?? 0,
+              Math.abs(delta)
+            ),
+            notes: body.adjustment_reason || 'Edición de catálogo',
+            actor_uid: actor.id,
+            actor_name: actor.displayName,
+          });
+        }
         return jsonResponse(products[idx]);
       }
       return jsonResponse({ ok: true });
@@ -679,11 +865,14 @@ export async function setupProductionE2EHarness(page: Page) {
       const trackingToken = `trk_${Date.now()}_${orderNum}`;
       const items = (body.items || []).map((it: any) => {
         const prod = products.find((p) => p.id === it.product_id) || products[0];
-        const qty = Math.max(1, Number(it.quantity || 1));
+        const isFrac = isFractionalProduct(prod);
+        const qty = roundQuantity(Math.max(isFrac ? 0.05 : 1, Number(it.quantity || 1)), isFrac);
         const pricing = resolveProductUnitPricing(prod, qty);
         return {
           product_id: prod.id,
           product_name: prod.name,
+          unit: prod.unit || 'unidad',
+          allow_fractional: Boolean(prod.allow_fractional),
           quantity: qty,
           unit_price_cents: pricing.unit_price_cents,
           subtotal_cents: pricing.subtotal_cents,
@@ -797,6 +986,28 @@ export async function setupProductionE2EHarness(page: Page) {
       if (found) {
         found.status = 'completed';
         found.sale_id = saleId;
+        for (const it of found.items || []) {
+          const prod = products.find((p) => p.id === it.product_id);
+          if (prod) {
+            const qty = roundQuantity(Number(it.quantity || 0), true);
+            const before = prod.stock;
+            const after = roundQuantity(Math.max(0, before - qty), true);
+            prod.stock = after;
+            pushKardexEntry({
+              product: prod,
+              movement_type: 'sale',
+              quantity_delta: -qty,
+              stock_before: before,
+              stock_after: after,
+              unit_price_cents: it.unit_price_cents ?? prod.price_cents,
+              total_value_cents: it.subtotal_cents ?? computeLineSubtotalCents(prod.price_cents, qty),
+              reference_id: saleId,
+              notes: `Pedido ${found.order_code} facturado`,
+              actor_uid: actor.id,
+              actor_name: actor.displayName,
+            });
+          }
+        }
         if (!found.loyalty_settled && found.customer_phone) {
           const acc = loyaltyAccounts.find((a) => a.phone === normalizeLoyaltyPhone(found.customer_phone));
           const earned = Number(found.loyalty_points_earned || 0);
@@ -850,10 +1061,27 @@ export async function setupProductionE2EHarness(page: Page) {
       const buckets = extractSalePaymentBuckets(found);
       let restockedUnits = 0;
       for (const item of found.items || []) {
-        const qty = Number(item.quantity || 0);
-        restockedUnits += qty;
+        const qty = roundQuantity(Number(item.quantity || 0), true);
+        restockedUnits = roundQuantity(restockedUnits + qty, true);
         const prod = products.find((p) => p.id === item.product_id);
-        if (prod) prod.stock += qty;
+        if (prod) {
+          const before = prod.stock;
+          const after = roundQuantity(before + qty, true);
+          prod.stock = after;
+          pushKardexEntry({
+            product: prod,
+            movement_type: 'sale_void',
+            quantity_delta: qty,
+            stock_before: before,
+            stock_after: after,
+            unit_price_cents: item.price_cents ?? prod.price_cents,
+            total_value_cents: item.subtotal_cents ?? computeLineSubtotalCents(prod.price_cents, qty),
+            reference_id: found.id,
+            notes: `Anulación de venta: ${reason}`,
+            actor_uid: actor.id,
+            actor_name: actor.displayName,
+          });
+        }
       }
 
       if (buckets.credit_cents > 0 && found.credit_customer_id) {
@@ -910,18 +1138,37 @@ export async function setupProductionE2EHarness(page: Page) {
       const saleId = `sale-${Date.now()}`;
       const mappedItems = (body.items || []).map((it: any) => {
         const prod = products.find((p) => p.id === it.product_id) || products[0];
-        const qty = Math.max(1, Number(it.quantity || 1));
-        prod.stock = Math.max(0, prod.stock - qty);
+        const isFrac = isFractionalProduct(prod);
+        const qty = roundQuantity(Math.max(isFrac ? 0.05 : 1, Number(it.quantity || 1)), isFrac);
+        const before = prod.stock;
+        const after = roundQuantity(Math.max(0, before - qty), true);
+        prod.stock = after;
         const pricing = resolveProductUnitPricing(prod, qty);
         const unitCost = prod.last_cost_cents ?? Math.round(pricing.unit_price_cents * 0.7);
+        pushKardexEntry({
+          product: prod,
+          movement_type: 'sale',
+          quantity_delta: -qty,
+          stock_before: before,
+          stock_after: after,
+          unit_cost_cents: unitCost,
+          unit_price_cents: pricing.unit_price_cents,
+          total_value_cents: pricing.subtotal_cents,
+          reference_id: saleId,
+          notes: 'Venta en mostrador POS',
+          actor_uid: actor.id,
+          actor_name: actor.displayName,
+        });
         return {
           product_id: prod.id,
           product_name: prod.name,
+          unit: prod.unit || 'unidad',
+          allow_fractional: Boolean(prod.allow_fractional),
           quantity: qty,
           price_cents: pricing.unit_price_cents,
           subtotal_cents: pricing.subtotal_cents,
           unit_cost_cents: unitCost,
-          cost_subtotal_cents: unitCost * qty,
+          cost_subtotal_cents: computeLineSubtotalCents(unitCost, qty),
           regular_price_cents: pricing.active_base_unit_price_cents,
           applied_wholesale_tier: pricing.applied_tier,
           wholesale_savings_cents: pricing.wholesale_savings_cents,
@@ -1298,12 +1545,18 @@ export async function setupProductionE2EHarness(page: Page) {
       if (!targetProd) {
         return jsonResponse({ error: 'Producto no encontrado.' }, 404);
       }
-      const qty = Math.floor(Number(body.quantity || 0));
+      const isFrac = isFractionalProduct(targetProd);
+      const rawQty = Number(body.quantity || 0);
+      const qty = isFrac ? roundQuantity(rawQty, true) : Math.floor(rawQty);
       if (qty <= 0 || qty > targetProd.stock) {
         return jsonResponse({ error: 'Stock insuficiente o cantidad inválida.' }, 400);
       }
       const unitCostCents = targetProd.last_cost_cents ?? Math.round(targetProd.price_cents * 0.7);
-      targetProd.stock -= qty;
+      const before = targetProd.stock;
+      const after = roundQuantity(Math.max(0, before - qty), true);
+      targetProd.stock = after;
+      const totalCostLossCents = computeLineSubtotalCents(unitCostCents, qty);
+      const retailValueCents = computeLineSubtotalCents(targetProd.price_cents, qty);
       const created = {
         id: `shk-e2e-${Date.now()}-${shrinkageEntries.length + 1}`,
         negocio_id: 'surtifacil',
@@ -1313,8 +1566,8 @@ export async function setupProductionE2EHarness(page: Page) {
         unit: targetProd.unit,
         quantity: qty,
         unit_cost_cents: unitCostCents,
-        total_cost_loss_cents: unitCostCents * qty,
-        retail_value_cents: targetProd.price_cents * qty,
+        total_cost_loss_cents: totalCostLossCents,
+        retail_value_cents: retailValueCents,
         cost_source: 'purchase',
         reason: body.reason || 'damaged',
         notes: body.notes || null,
@@ -1324,6 +1577,20 @@ export async function setupProductionE2EHarness(page: Page) {
         updated_stock: targetProd.stock,
       };
       shrinkageEntries.unshift(created);
+      pushKardexEntry({
+        product: targetProd,
+        movement_type: 'shrinkage',
+        quantity_delta: -qty,
+        stock_before: before,
+        stock_after: after,
+        unit_cost_cents: unitCostCents,
+        unit_price_cents: targetProd.price_cents,
+        total_value_cents: totalCostLossCents,
+        reference_id: created.id,
+        notes: body.notes || `Merma (${body.reason || 'damaged'})`,
+        actor_uid: actor.id,
+        actor_name: actor.displayName,
+      });
       return jsonResponse(created, 201);
     }
     if (pathname.startsWith('/shrinkage/') && method === 'DELETE') {
@@ -1337,7 +1604,26 @@ export async function setupProductionE2EHarness(page: Page) {
       const entry = shrinkageEntries.find((s) => s.id === shkId);
       if (entry) {
         const prod = products.find((p) => p.id === entry.product_id);
-        if (prod) prod.stock += Number(entry.quantity || 0);
+        if (prod) {
+          const qty = roundQuantity(Number(entry.quantity || 0), true);
+          const before = prod.stock;
+          const after = roundQuantity(before + qty, true);
+          prod.stock = after;
+          pushKardexEntry({
+            product: prod,
+            movement_type: 'shrinkage_revert',
+            quantity_delta: qty,
+            stock_before: before,
+            stock_after: after,
+            unit_cost_cents: entry.unit_cost_cents ?? prod.last_cost_cents,
+            unit_price_cents: prod.price_cents,
+            total_value_cents: entry.total_cost_loss_cents ?? 0,
+            reference_id: entry.id,
+            notes: 'Reversión de merma',
+            actor_uid: actor.id,
+            actor_name: actor.displayName,
+          });
+        }
         shrinkageEntries = shrinkageEntries.filter((s) => s.id !== shkId);
       }
       return jsonResponse({ success: true, deletedId: shkId });

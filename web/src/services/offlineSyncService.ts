@@ -10,6 +10,7 @@ import {
 import { apiClient, emitDataChange, getActiveNegocioId } from './apiClient';
 import { addLocalCreditEntry, addLocalSale, mockCreditCustomers, mockProducts } from './mockData';
 import { resolveProductUnitPricing } from '../utils/wholesalePricing';
+import { computeLineSubtotalCents, roundQuantity } from '../utils/bulkWeight';
 import { resolveSalePaymentBreakdown } from '../utils/saleAccounting';
 import type { CreateSaleLoyaltyOptions } from '../types/loyalty';
 
@@ -478,7 +479,7 @@ export async function enqueueOfflineSale(
       product_name: item.product_name,
       quantity: item.quantity,
       price_cents: item.price_cents,
-      subtotal: item.price_cents * item.quantity,
+      subtotal: computeLineSubtotalCents(item.price_cents, item.quantity),
     };
   });
 
@@ -496,7 +497,7 @@ export async function enqueueOfflineSale(
     if (cachedProd) {
       const updatedProd: Product = {
         ...cachedProd,
-        stock: Math.max(0, cachedProd.stock - item.quantity),
+        stock: roundQuantity(Math.max(0, cachedProd.stock - item.quantity), true),
       };
       prodMap.set(item.product_id, updatedProd);
       await idbPutRecord<CachedProductRecord>(STORE_PRODUCTS, {

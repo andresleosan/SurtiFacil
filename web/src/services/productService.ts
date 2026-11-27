@@ -7,6 +7,8 @@ import {
   isOfflineModeActive,
 } from './offlineSyncService';
 import { parseWholesaleTiers, type WholesaleTier } from '../utils/wholesalePricing';
+import { computeLineSubtotalCents, roundQuantity } from '../utils/bulkWeight';
+import { recordMockKardexEntry } from './kardexService';
 
 function isMockMode(): boolean {
   return import.meta.env.VITE_USE_MOCK_DATA === 'true';
@@ -27,6 +29,7 @@ export interface NewProductInput {
   precio_oferta_cents?: number;
   wholesale_tiers?: WholesaleTier[];
   wholesale_tiers_json?: string | null;
+  allow_fractional?: boolean | number;
   expiration_date?: string | null;
 }
 
@@ -45,7 +48,7 @@ export function mapProductRow(row: any): Product {
     id: row.id,
     name: row.name,
     price_cents: row.price_cents,
-    stock: row.stock ?? 0,
+    stock: roundQuantity(row.stock ?? 0, true),
     min_stock: row.min_stock ?? 5,
     unit: row.unit || 'unidad',
     category: row.category || undefined,
@@ -60,6 +63,7 @@ export function mapProductRow(row: any): Product {
       typeof row.wholesale_tiers_json === 'string'
         ? row.wholesale_tiers_json
         : JSON.stringify(wholesaleTiers),
+    allow_fractional: Boolean(row.allow_fractional),
     supplier_id: row.supplier_id || undefined,
     createdAt: row.created_at || row.createdAt,
     last_cost_cents: row.last_cost_cents ?? undefined,
@@ -149,10 +153,12 @@ export function refreshProducts(): void {
 
 export async function addProduct(input: NewProductInput): Promise<Product> {
   const wholesaleTiers = parseWholesaleTiers(input.wholesale_tiers ?? input.wholesale_tiers_json);
+  const allowFractional = Boolean(input.allow_fractional);
+  const cleanStock = roundQuantity(input.stock, allowFractional);
   const payload = {
     name: input.name,
     price_cents: input.price_cents,
-    stock: input.stock,
+    stock: cleanStock,
     min_stock: input.min_stock ?? 5,
     unit: input.unit || 'unidad',
     category: input.category,
@@ -163,6 +169,7 @@ export async function addProduct(input: NewProductInput): Promise<Product> {
     precio_oferta_cents: input.precio_oferta_cents ?? null,
     wholesale_tiers: wholesaleTiers,
     wholesale_tiers_json: JSON.stringify(wholesaleTiers),
+    allow_fractional: allowFractional ? 1 : 0,
     expiration_date: input.expiration_date?.trim() || null,
     ...(input.barcode ? { barcode: input.barcode } : {}),
   };
@@ -171,11 +178,28 @@ export async function addProduct(input: NewProductInput): Promise<Product> {
     const product: Product = {
       id: `prod-${Date.now()}`,
       ...payload,
+      allow_fractional: allowFractional,
       barcode: payload.barcode ?? undefined,
       image_url: payload.image_url ?? undefined,
       expiration_date: payload.expiration_date ?? undefined,
     };
     mockProducts.push(product);
+    if (cleanStock > 0) {
+      const unitCost = Math.round(input.price_cents * 0.7);
+      recordMockKardexEntry({
+        product_id: product.id,
+        product_name: product.name,
+        unit: product.unit,
+        movement_type: 'initial',
+        quantity_delta: cleanStock,
+        stock_before: 0,
+        stock_after: cleanStock,
+        unit_cost_cents: unitCost,
+        unit_price_cents: input.price_cents,
+        total_value_cents: computeLineSubtotalCents(unitCost, cleanStock),
+        notes: 'Alta inicial de producto en catálogo',
+      });
+    }
     emitMock();
     return product;
   }
@@ -183,6 +207,7 @@ export async function addProduct(input: NewProductInput): Promise<Product> {
   try {
     const created = await apiClient.post<any>('/products', payload);
     emitDataChange('products');
+    emitDataChange('kardex');
     return mapProductRow(created);
   } catch {
     console.error('Error adding product.');
@@ -190,16 +215,19 @@ export async function addProduct(input: NewProductInput): Promise<Product> {
   }
 }
 
-export async function updateProduct(product: Product): Promise<void> {
+export async function updateProduct(product: Product, adjustmentReason?: string): Promise<void> {
   const hasWholesaleUpdate =
     product.wholesale_tiers !== undefined || product.wholesale_tiers_json !== undefined;
   const parsedTiers = hasWholesaleUpdate
     ? parseWholesaleTiers(product.wholesale_tiers ?? product.wholesale_tiers_json)
     : undefined;
+  const allowFractional =
+    product.allow_fractional !== undefined ? Boolean(product.allow_fractional) : undefined;
+  const cleanStock = roundQuantity(product.stock, allowFractional ?? true);
   const changes = {
     name: product.name,
     price_cents: product.price_cents,
-    stock: product.stock,
+    stock: cleanStock,
     min_stock: product.min_stock ?? 5,
     unit: product.unit || 'unidad',
     category: product.category ?? '',
@@ -209,6 +237,8 @@ export async function updateProduct(product: Product): Promise<void> {
     visible_tienda: product.visible_tienda !== undefined ? (product.visible_tienda ? 1 : 0) : 1,
     en_oferta: product.en_oferta !== undefined ? (product.en_oferta ? 1 : 0) : 0,
     precio_oferta_cents: product.precio_oferta_cents ?? null,
+    ...(allowFractional !== undefined ? { allow_fractional: allowFractional ? 1 : 0 } : {}),
+    ...(adjustmentReason?.trim() ? { adjustment_reason: adjustmentReason.trim() } : {}),
     ...(hasWholesaleUpdate
       ? {
           wholesale_tiers: parsedTiers,
@@ -223,15 +253,34 @@ export async function updateProduct(product: Product): Promise<void> {
   if (isMockMode()) {
     const index = mockProducts.findIndex((candidate) => candidate.id === product.id);
     if (index >= 0) {
+      const prevStock = roundQuantity(mockProducts[index].stock, true);
       mockProducts[index] = {
         ...mockProducts[index],
         ...changes,
+        allow_fractional: allowFractional ?? mockProducts[index].allow_fractional,
         barcode: changes.barcode ?? undefined,
         image_url: changes.image_url ?? undefined,
         ...(product.expiration_date !== undefined
           ? { expiration_date: changes.expiration_date ?? undefined }
           : {}),
       };
+      const delta = roundQuantity(cleanStock - prevStock, true);
+      if (Math.abs(delta) >= 1e-6) {
+        const unitCost = mockProducts[index].last_cost_cents ?? Math.round(product.price_cents * 0.7);
+        recordMockKardexEntry({
+          product_id: product.id,
+          product_name: product.name,
+          unit: changes.unit,
+          movement_type: 'adjustment',
+          quantity_delta: delta,
+          stock_before: prevStock,
+          stock_after: cleanStock,
+          unit_cost_cents: unitCost,
+          unit_price_cents: product.price_cents,
+          total_value_cents: computeLineSubtotalCents(unitCost, Math.abs(delta)),
+          notes: adjustmentReason?.trim() || 'Ajuste manual en catálogo',
+        });
+      }
     }
     emitMock();
     return;
@@ -240,6 +289,7 @@ export async function updateProduct(product: Product): Promise<void> {
   try {
     await apiClient.put(`/products/${encodeURIComponent(product.id)}`, changes);
     emitDataChange('products');
+    emitDataChange('kardex');
   } catch {
     console.error('Error updating product.');
     throw new Error('Error al editar producto');

@@ -7,6 +7,7 @@ import {
 import { onDataChange } from '../services/apiClient';
 import type { CustomerOrder } from '../types/customerOrder';
 import { formatCentsCOP } from '../utils/currency';
+import { formatQuantityWithUnit } from '../utils/bulkWeight';
 import { playNewOrderChime } from '../utils/audioAlerts';
 import { notifyNewCustomerOrder } from '../services/notificationService';
 import { Icon } from './ui/Icon';
@@ -243,7 +244,9 @@ export function LiveOrdersTray({ onLoadOrderToCart, onSaleCreated }: LiveOrdersT
                     <div key={idx} className="py-1 flex justify-between items-center gap-2">
                       <span className="font-medium text-slate-700 flex items-center gap-1.5 flex-wrap">
                         <span>
-                          {item.quantity}× {item.product_name}
+                          {!Number.isInteger(item.quantity) || item.allow_fractional
+                            ? `${formatQuantityWithUnit(item.quantity, item.unit, true)} · ${item.product_name}`
+                            : `${item.quantity}× ${item.product_name}`}
                         </span>
                         {item.applied_wholesale_tier && (
                           <span className="inline-flex items-center rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-800 tabular-nums">

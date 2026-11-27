@@ -4,6 +4,14 @@ import type { PublicStoreData, CustomerOrderItem } from '../types/customerOrder'
 import { formatCentsCOP, formatCOP } from '../utils/currency';
 import { Icon } from './ui/Icon';
 import { ProductImage } from './ui/ProductImage';
+import { BulkWeightCalculatorModal, type BulkCalculableProduct } from './ui/BulkWeightCalculatorModal';
+import {
+  formatQuantityNumber,
+  formatQuantityWithUnit,
+  getBulkStep,
+  getUnitShortLabel,
+  roundQuantity,
+} from '../utils/bulkWeight';
 import {
   getPrimaryWholesaleTier,
   resolveProductUnitPricing,
@@ -36,6 +44,7 @@ const AISLES = [
 
 interface CartItem extends CustomerOrderItem {
   stock: number;
+  allow_fractional?: boolean;
 }
 
 interface KioskModeProps {
@@ -52,6 +61,8 @@ export default function KioskMode({ slug = 'surtifacil', onExit }: KioskModeProp
   const [search, setSearch] = useState('');
   const [cart, setCart] = useState<CartItem[]>([]);
   const [cartDrawerOpen, setCartDrawerOpen] = useState(false);
+  const [bulkProduct, setBulkProduct] = useState<BulkCalculableProduct | null>(null);
+  const [bulkInitialQty, setBulkInitialQty] = useState<number | undefined>(undefined);
 
   // Modal de checkout
   const [checkoutStep, setCheckoutStep] = useState<1 | 2 | null>(null);
@@ -232,12 +243,13 @@ export default function KioskMode({ slug = 'surtifacil', onExit }: KioskModeProp
     precio_oferta_cents?: number | null;
     wholesale_tiers?: WholesaleTier[];
     wholesale_tiers_json?: string | null;
+    allow_fractional?: boolean | number;
   }) => {
     const existingIndex = cart.findIndex((i) => i.product_id === product.id);
     if (existingIndex >= 0) {
       const existing = cart[existingIndex];
       if (existing.quantity >= product.stock) return;
-      const nextQty = existing.quantity + 1;
+      const nextQty = roundQuantity(existing.quantity + 1, Boolean(product.allow_fractional));
       const pricing = resolveCartLinePricing(product, nextQty);
       const updated = [...cart];
       updated[existingIndex] = {
@@ -265,6 +277,50 @@ export default function KioskMode({ slug = 'surtifacil', onExit }: KioskModeProp
           wholesale_savings_cents: pricing.wholesale_savings_cents,
           stock: product.stock,
           unit: product.unit || 'unidad',
+          allow_fractional: Boolean(product.allow_fractional),
+          image_url: product.image_url,
+        },
+      ]);
+    }
+  };
+
+  const setCartProductQuantity = (product: BulkCalculableProduct, nextQty: number) => {
+    const cleanQty = roundQuantity(nextQty, Boolean(product.allow_fractional));
+    if (cleanQty <= 0) {
+      setCart(cart.filter((i) => i.product_id !== product.id));
+      return;
+    }
+    const cappedQty = Math.min(cleanQty, product.stock);
+    const pricing = resolveCartLinePricing(product, cappedQty);
+    const existingIndex = cart.findIndex((i) => i.product_id === product.id);
+    if (existingIndex >= 0) {
+      const updated = [...cart];
+      updated[existingIndex] = {
+        ...updated[existingIndex],
+        quantity: cappedQty,
+        unit_price_cents: pricing.unit_price_cents,
+        subtotal_cents: pricing.subtotal_cents,
+        regular_unit_price_cents: pricing.regular_unit_price_cents,
+        applied_wholesale_tier: pricing.applied_tier,
+        wholesale_savings_cents: pricing.wholesale_savings_cents,
+        allow_fractional: Boolean(product.allow_fractional),
+      };
+      setCart(updated);
+    } else {
+      setCart([
+        ...cart,
+        {
+          product_id: product.id,
+          product_name: product.name,
+          quantity: cappedQty,
+          unit_price_cents: pricing.unit_price_cents,
+          subtotal_cents: pricing.subtotal_cents,
+          regular_unit_price_cents: pricing.regular_unit_price_cents,
+          applied_wholesale_tier: pricing.applied_tier,
+          wholesale_savings_cents: pricing.wholesale_savings_cents,
+          stock: product.stock,
+          unit: product.unit || 'unidad',
+          allow_fractional: Boolean(product.allow_fractional),
           image_url: product.image_url,
         },
       ]);
@@ -275,12 +331,14 @@ export default function KioskMode({ slug = 'surtifacil', onExit }: KioskModeProp
     const existingIndex = cart.findIndex((i) => i.product_id === productId);
     if (existingIndex < 0) return;
     const existing = cart[existingIndex];
-    const nextQty = existing.quantity + delta;
+    const storeProduct = storeData?.products.find((p) => p.id === productId);
+    const isFrac = Boolean(existing.allow_fractional || storeProduct?.allow_fractional);
+    const stepDelta = isFrac ? delta * getBulkStep(existing.unit) : delta;
+    const nextQty = roundQuantity(existing.quantity + stepDelta, isFrac);
 
     if (nextQty <= 0) {
       setCart(cart.filter((i) => i.product_id !== productId));
     } else if (nextQty <= existing.stock) {
-      const storeProduct = storeData?.products.find((p) => p.id === productId);
       const pricing = storeProduct ? resolveProductUnitPricing(storeProduct, nextQty) : null;
       const nextUnitPrice = pricing ? pricing.unit_price_cents : existing.unit_price_cents;
       const nextSubtotal = pricing ? pricing.subtotal_cents : nextQty * existing.unit_price_cents;
@@ -391,7 +449,12 @@ export default function KioskMode({ slug = 'surtifacil', onExit }: KioskModeProp
   const cartTotalCents = orderSettlement.final_total_cents;
 
   const cartUnitsCount = useMemo(() => {
-    return cart.reduce((sum, item) => sum + item.quantity, 0);
+    return cart.reduce((sum, item) => {
+      if (item.allow_fractional || !Number.isInteger(item.quantity)) {
+        return sum + 1;
+      }
+      return sum + item.quantity;
+    }, 0);
   }, [cart]);
 
   const handleLookupKioskPoints = async () => {
@@ -824,9 +887,16 @@ export default function KioskMode({ slug = 'surtifacil', onExit }: KioskModeProp
                           />
 
                           <div className="flex items-center justify-between gap-2 mb-1.5">
-                            <span className="rounded-lg bg-slate-100 px-2.5 py-0.5 text-xs font-semibold text-slate-600 capitalize">
-                              {prod.unit || 'unidad'}
-                            </span>
+                            <div className="flex items-center gap-1.5">
+                              <span className="rounded-lg bg-slate-100 px-2.5 py-0.5 text-xs font-semibold text-slate-600 capitalize">
+                                {prod.unit || 'unidad'}
+                              </span>
+                              {Boolean(prod.allow_fractional) && (
+                                <span className="rounded-lg bg-emerald-100 border border-emerald-200 px-2 py-0.5 text-[11px] font-bold text-emerald-800">
+                                  ⚖️ Venta a Granel
+                                </span>
+                              )}
+                            </div>
                             <span className="text-xs text-slate-400 capitalize">{prod.category || 'General'}</span>
                           </div>
 
@@ -866,6 +936,19 @@ export default function KioskMode({ slug = 'surtifacil', onExit }: KioskModeProp
 
                           {inCartItem ? (
                             <div className="flex items-center gap-1 rounded-2xl bg-slate-100 p-1 border border-slate-200">
+                              {Boolean(prod.allow_fractional) && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setBulkProduct(prod);
+                                    setBulkInitialQty(inCartItem.quantity);
+                                  }}
+                                  aria-label={`Recalcular peso de ${prod.name}`}
+                                  className="flex min-h-[48px] min-w-[44px] items-center justify-center rounded-xl bg-emerald-100 text-emerald-800 font-bold hover:bg-emerald-200"
+                                >
+                                  ⚖️
+                                </button>
+                              )}
                               <button
                                 type="button"
                                 onClick={() => updateCartQty(prod.id, -1)}
@@ -874,8 +957,10 @@ export default function KioskMode({ slug = 'surtifacil', onExit }: KioskModeProp
                               >
                                 <Icon name="minus" size={20} />
                               </button>
-                              <span className="w-8 text-center font-black text-lg text-slate-800 tabular-nums">
-                                {inCartItem.quantity}
+                              <span className="min-w-[2.5rem] px-1 text-center font-black text-base text-slate-800 tabular-nums">
+                                {Boolean(prod.allow_fractional)
+                                  ? `${formatQuantityNumber(inCartItem.quantity)}${getUnitShortLabel(prod.unit)}`
+                                  : inCartItem.quantity}
                               </span>
                               <button
                                 type="button"
@@ -886,6 +971,19 @@ export default function KioskMode({ slug = 'surtifacil', onExit }: KioskModeProp
                                 <Icon name="plus" size={20} />
                               </button>
                             </div>
+                          ) : Boolean(prod.allow_fractional) ? (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setBulkProduct(prod);
+                                setBulkInitialQty(undefined);
+                              }}
+                              aria-label={`Pesar y agregar ${prod.name} al pedido`}
+                              className="flex min-h-[56px] min-w-[56px] items-center justify-center rounded-2xl bg-emerald-600 text-white font-bold hover:bg-emerald-700 active:scale-95 transition shadow-sm px-4"
+                            >
+                              <span className="text-lg">⚖️</span>
+                              <span className="ml-1.5 text-base">Pesar</span>
+                            </button>
                           ) : (
                             <button
                               type="button"
@@ -901,6 +999,7 @@ export default function KioskMode({ slug = 'surtifacil', onExit }: KioskModeProp
                                   precio_oferta_cents: prod.precio_oferta_cents,
                                   wholesale_tiers: prod.wholesale_tiers,
                                   wholesale_tiers_json: prod.wholesale_tiers_json,
+                                  allow_fractional: prod.allow_fractional,
                                 })
                               }
                               aria-label={`Agregar ${prod.name} al pedido`}
@@ -981,8 +1080,10 @@ export default function KioskMode({ slug = 'surtifacil', onExit }: KioskModeProp
                         >
                           <Icon name="minus" size={16} />
                         </button>
-                        <span className="w-7 text-center text-sm font-bold text-slate-800 tabular-nums">
-                          {item.quantity}
+                        <span className="min-w-[2.5rem] px-1 text-center text-sm font-bold text-slate-800 tabular-nums">
+                          {Boolean(item.allow_fractional || storeProd?.allow_fractional) || !Number.isInteger(item.quantity)
+                            ? formatQuantityWithUnit(item.quantity, item.unit, true)
+                            : item.quantity}
                         </span>
                         <button
                           type="button"
@@ -1096,7 +1197,11 @@ export default function KioskMode({ slug = 'surtifacil', onExit }: KioskModeProp
                       >
                         <Icon name="minus" size={18} />
                       </button>
-                      <span className="w-8 text-center font-bold text-slate-800">{item.quantity}</span>
+                      <span className="min-w-[2.5rem] px-1 text-center font-bold text-slate-800 text-xs tabular-nums">
+                        {Boolean(item.allow_fractional) || !Number.isInteger(item.quantity)
+                          ? formatQuantityWithUnit(item.quantity, item.unit, true)
+                          : item.quantity}
+                      </span>
                       <button
                         type="button"
                         onClick={() => updateCartQty(item.product_id, 1)}
@@ -1519,6 +1624,17 @@ export default function KioskMode({ slug = 'surtifacil', onExit }: KioskModeProp
           </div>
         </div>
       )}
+
+      <BulkWeightCalculatorModal
+        open={bulkProduct !== null}
+        onClose={() => setBulkProduct(null)}
+        product={bulkProduct}
+        initialQuantity={bulkInitialQty}
+        kioskMode={true}
+        onConfirm={(qty) => {
+          if (bulkProduct) setCartProductQuantity(bulkProduct, qty);
+        }}
+      />
     </div>
   );
 }

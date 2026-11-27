@@ -3,6 +3,7 @@ import { StoreSettings } from '../types/storeSettings';
 import { CashClosing, COLOMBIAN_BILLS, COLOMBIAN_COINS } from '../types/cashClosing';
 import { formatCentsCOP } from './currency';
 import { isSaleVoided, parsePaymentBreakdown } from './saleAccounting';
+import { computeLineSubtotalCents, formatQuantityNumber, getUnitShortLabel } from './bulkWeight';
 
 export type ThermalWidth = '58mm' | '80mm';
 
@@ -123,13 +124,17 @@ export function generateSaleReceiptText(
   for (const item of sale.items || []) {
     totalItemsCount += item.quantity;
     totalWholesaleSavings += item.wholesale_savings_cents || 0;
-    const subtotalStr = formatCentsCOP(item.subtotal || item.price_cents * item.quantity);
+    const subtotalStr = formatCentsCOP(item.subtotal || computeLineSubtotalCents(item.price_cents, item.quantity));
+    const isFrac = Boolean(item.allow_fractional) || !Number.isInteger(item.quantity);
+    const qtyLabel = isFrac
+      ? `${formatQuantityNumber(item.quantity)}${getUnitShortLabel(item.unit)} `
+      : `${item.quantity}x `;
     if (options.width === '58mm') {
-      const leftCol = `${item.quantity}x ${item.product_name}`;
+      const leftCol = `${qtyLabel}${item.product_name}`;
       lines.push(formatTwoColumns(leftCol, subtotalStr, colWidth));
     } else {
       const unitStr = formatCentsCOP(item.price_cents);
-      const leftCol = `${item.quantity}x ${item.product_name} (${unitStr})`;
+      const leftCol = `${qtyLabel}${item.product_name} (${unitStr})`;
       lines.push(formatTwoColumns(leftCol, subtotalStr, colWidth));
     }
     if (item.applied_wholesale_tier) {
@@ -146,7 +151,7 @@ export function generateSaleReceiptText(
   lines.push(divider);
 
   // Totales
-  lines.push(formatTwoColumns(`Total Artículos (${totalItemsCount}):`, formatCentsCOP(sale.total), colWidth));
+  lines.push(formatTwoColumns(`Total Artículos (${formatQuantityNumber(totalItemsCount)}):`, formatCentsCOP(sale.total), colWidth));
   if (totalWholesaleSavings > 0) {
     lines.push(formatTwoColumns('Ahorro Mayorista:', formatCentsCOP(totalWholesaleSavings), colWidth));
   }
@@ -255,11 +260,15 @@ export function generateSaleWhatsAppText(sale: Sale, store: Partial<StoreSetting
   let totalWhatsAppSavings = 0;
   for (const item of sale.items || []) {
     totalWhatsAppSavings += item.wholesale_savings_cents || 0;
-    const subtotalStr = formatCentsCOP(item.subtotal || item.price_cents * item.quantity);
+    const subtotalStr = formatCentsCOP(item.subtotal || computeLineSubtotalCents(item.price_cents, item.quantity));
+    const isFrac = Boolean(item.allow_fractional) || !Number.isInteger(item.quantity);
+    const qtyLabel = isFrac
+      ? `${formatQuantityNumber(item.quantity)} ${getUnitShortLabel(item.unit)}`
+      : `${item.quantity}x`;
     const tierSuffix = item.applied_wholesale_tier
       ? ` _(Promo ${item.applied_wholesale_tier.min_quantity}+)_`
       : '';
-    text += `▪ ${item.quantity}x ${item.product_name}${tierSuffix} — ${subtotalStr}\n`;
+    text += `▪ ${qtyLabel} ${item.product_name}${tierSuffix} — ${subtotalStr}\n`;
   }
 
   if (totalWhatsAppSavings > 0) {

@@ -1,3 +1,5 @@
+import { computeLineSubtotalCents, MIN_FRACTIONAL_QTY, roundQuantity } from './bulkWeight';
+
 export interface WholesaleTier {
   min_quantity: number;
   unit_price_cents: number;
@@ -9,6 +11,7 @@ export interface ProductPricingInput {
   precio_oferta_cents?: number | null;
   wholesale_tiers?: WholesaleTier[] | null;
   wholesale_tiers_json?: string | null;
+  allow_fractional?: boolean | number;
 }
 
 export interface ResolvedProductPricing {
@@ -185,7 +188,14 @@ export function resolveProductUnitPricing(
   product: ProductPricingInput,
   quantity: number
 ): ResolvedProductPricing {
-  const safeQty = Math.max(1, Math.floor(Number(quantity) || 1));
+  const rawQty = Number(quantity);
+  const allowFrac =
+    product.allow_fractional === false
+      ? false
+      : Boolean(product.allow_fractional) || (Number.isFinite(rawQty) && rawQty > 0 && !Number.isInteger(rawQty));
+  const safeQty = allowFrac
+    ? roundQuantity(Math.max(MIN_FRACTIONAL_QTY, Number.isFinite(rawQty) ? rawQty : 1), true)
+    : Math.max(1, Math.floor(rawQty || 1));
   const regularPrice = Math.max(0, Math.round(Number(product.price_cents) || 0));
 
   const offerRaw =
@@ -214,12 +224,11 @@ export function resolveProductUnitPricing(
 
   const nextTier = applicableTiers.find((tier) => tier.min_quantity > safeQty) ?? null;
   const unitPrice = appliedTier ? appliedTier.unit_price_cents : activeBasePrice;
-  const subtotal = unitPrice * safeQty;
-  const regularSubtotal = regularPrice * safeQty;
-  const wholesaleSavings = appliedTier
-    ? Math.max(0, (activeBasePrice - unitPrice) * safeQty)
-    : 0;
-  const totalSavings = Math.max(0, (regularPrice - unitPrice) * safeQty);
+  const subtotal = computeLineSubtotalCents(unitPrice, safeQty);
+  const regularSubtotal = computeLineSubtotalCents(regularPrice, safeQty);
+  const baseSubtotal = computeLineSubtotalCents(activeBasePrice, safeQty);
+  const wholesaleSavings = appliedTier ? Math.max(0, baseSubtotal - subtotal) : 0;
+  const totalSavings = Math.max(0, regularSubtotal - subtotal);
 
   return {
     regular_unit_price_cents: regularPrice,
@@ -231,7 +240,9 @@ export function resolveProductUnitPricing(
     total_savings_cents: totalSavings,
     applied_tier: appliedTier,
     next_tier: nextTier,
-    units_to_next_tier: nextTier ? Math.max(1, nextTier.min_quantity - safeQty) : 0,
+    units_to_next_tier: nextTier
+      ? roundQuantity(Math.max(allowFrac ? MIN_FRACTIONAL_QTY : 1, nextTier.min_quantity - safeQty), allowFrac)
+      : 0,
     tiers: applicableTiers,
   };
 }

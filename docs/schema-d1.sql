@@ -87,6 +87,7 @@ CREATE TABLE IF NOT EXISTS products (
   en_oferta INTEGER NOT NULL DEFAULT 0,
   precio_oferta_cents INTEGER,
   wholesale_tiers_json TEXT NOT NULL DEFAULT '[]', -- Array de { min_quantity, unit_price_cents }
+  allow_fractional INTEGER NOT NULL DEFAULT 0, -- 1 = permite venta a granel / peso decimal
   last_cost_cents INTEGER,
   last_cost_source TEXT CHECK(last_cost_source IN ('purchase', 'fallback_price')),
   last_cost_updated_at TEXT,
@@ -399,6 +400,30 @@ CREATE TABLE IF NOT EXISTS discount_coupons (
 );
 
 CREATE INDEX IF NOT EXISTS idx_discount_coupons_negocio_code ON discount_coupons(negocio_id, code);
+
+-- 10.8 Kardex Trazable de Movimientos de Inventario por Producto
+CREATE TABLE IF NOT EXISTS inventory_kardex (
+  id TEXT PRIMARY KEY,
+  negocio_id TEXT NOT NULL DEFAULT 'surtifacil' REFERENCES negocios(id) ON DELETE CASCADE,
+  product_id TEXT NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+  product_name TEXT NOT NULL,
+  unit TEXT NOT NULL DEFAULT 'unidad',
+  movement_type TEXT NOT NULL CHECK(movement_type IN ('initial', 'sale', 'sale_void', 'purchase', 'shrinkage', 'shrinkage_revert', 'adjustment')),
+  quantity_delta REAL NOT NULL,
+  stock_before REAL NOT NULL,
+  stock_after REAL NOT NULL,
+  unit_cost_cents INTEGER NOT NULL DEFAULT 0,
+  unit_price_cents INTEGER NOT NULL DEFAULT 0,
+  total_value_cents INTEGER NOT NULL DEFAULT 0,
+  reference_id TEXT,
+  notes TEXT,
+  created_by_uid TEXT NOT NULL DEFAULT 'system',
+  created_by_name TEXT,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_inventory_kardex_product ON inventory_kardex(negocio_id, product_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_inventory_kardex_negocio_date ON inventory_kardex(negocio_id, created_at DESC);
 
 -- ==============================================================================
 -- 11. Semillas Iniciales (Negocio Insignia y SuperAdmin de la Plataforma)

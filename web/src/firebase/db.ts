@@ -32,6 +32,7 @@ export interface Product {
   precio_oferta_cents?: number | null;
   wholesale_tiers?: WholesaleTier[];
   wholesale_tiers_json?: string | null;
+  allow_fractional?: boolean | number;
   expiration_date?: string | null;
 }
 
@@ -64,6 +65,8 @@ export interface SaleItem {
   quantity: number;
   price_cents: number;
   subtotal: number; // quantity * price_cents
+  unit?: string;
+  allow_fractional?: boolean;
   regular_price_cents?: number;
   applied_wholesale_tier?: WholesaleTier | null;
   wholesale_savings_cents?: number;

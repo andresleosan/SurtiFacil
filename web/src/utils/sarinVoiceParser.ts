@@ -1,6 +1,11 @@
 import type { Product, PaymentMethod } from '../firebase/db';
 import { formatCentsCOP } from './currency';
 import { resolveProductUnitPricing, type WholesaleTier } from './wholesalePricing';
+import {
+  calculateWeightFromAmountCents,
+  formatQuantityWithUnit,
+  roundQuantity,
+} from './bulkWeight';
 
 export interface ParsedVoiceItem {
   product: Product;
@@ -259,7 +264,17 @@ export function parseSarinSaleCommand(transcript: string, catalog: Product[]): V
   // Separamos cláusulas por "y", ",", "mas", "agrega", "pon"
   const cleanForItems = commandText
     .replace(/(?:pagan|paga|recibo|recibe|con billete de|fiado a|fiar a|con tarjeta|con nequi).*/i, '')
-    .replace(/\b(agrega|agregame|pon|ponme|sumale|suma|lleva|llevan)\b/g, '')
+    .replace(/\b(agrega|agregame|pon|ponme|sumale|suma|lleva|llevan|deme|dame|regalame|vendeme)\b/g, '')
+    .replace(
+      /\b(\d+|un|uno|una|dos|tres|cuatro|cinco)\s+(libra|kilo|litro)s?\s+y\s+medi[oa]\b/gi,
+      (_, nWord: string, unitWord: string) => {
+        const base = /^\d+$/.test(nWord)
+          ? parseInt(nWord, 10)
+          : SPANISH_NUMBER_WORDS[nWord.toLowerCase()] ?? 1;
+        return `${base + 0.5} ${unitWord}`;
+      }
+    )
+    .replace(/\b(libra|kilo|litro)s?\s+y\s+medi[oa]\b/gi, (_, unitWord: string) => `1.5 ${unitWord}`)
     .trim();
 
   const clauses = cleanForItems
@@ -270,19 +285,48 @@ export function parseSarinSaleCommand(transcript: string, catalog: Product[]): V
   const matchedItems: ParsedVoiceItem[] = [];
 
   for (const clause of clauses) {
-    // Buscar cantidad inicial (ej: "dos leches", "1 libra de arroz", "tres empanadas", "una cerveza")
-    const words = clause.split(/\s+/);
     let qty = 1;
+    let fractionalRequested = false;
+    let requestedAmountCents: number | null = null;
     let productSearchText = clause;
 
-    if (words.length > 0) {
-      const firstWord = words[0];
-      if (/^\d+$/.test(firstWord)) {
-        qty = parseInt(firstWord, 10);
-        productSearchText = words.slice(1).join(' ');
-      } else if (SPANISH_NUMBER_WORDS[firstWord] !== undefined) {
-        qty = SPANISH_NUMBER_WORDS[firstWord];
-        productSearchText = words.slice(1).join(' ');
+    // Detectar pedido por valor COP: "3000 de papa", "3 mil de papa", "tres mil pesos de papa"
+    const amountByDeMatch = clause.match(/^(.+?)\s+(?:pesos\s+)?de\s+(.+)$/i);
+    if (amountByDeMatch) {
+      const parsedAmount = parseCashAmount(amountByDeMatch[1]);
+      if (parsedAmount && parsedAmount > 0) {
+        requestedAmountCents = parsedAmount;
+        productSearchText = amountByDeMatch[2].trim();
+      }
+    }
+
+    if (requestedAmountCents === null) {
+      if (/^tres\s+cuartos\b/i.test(clause)) {
+        qty = 0.75;
+        fractionalRequested = true;
+        productSearchText = clause.replace(/^tres\s+cuartos\s+(?:de\s+)?/i, '').trim();
+      } else if (/^(?:un\s+)?cuarto\b/i.test(clause)) {
+        qty = 0.25;
+        fractionalRequested = true;
+        productSearchText = clause.replace(/^(?:un\s+)?cuarto\s+(?:de\s+)?/i, '').trim();
+      } else {
+        const words = clause.split(/\s+/);
+        if (words.length > 0) {
+          const firstWord = words[0];
+          const normalizedNum = firstWord.replace(',', '.');
+          if (/^\d+(?:\.\d+)?$/.test(normalizedNum)) {
+            qty = parseFloat(normalizedNum);
+            fractionalRequested = !Number.isInteger(qty);
+            productSearchText = words.slice(1).join(' ');
+          } else if (firstWord === 'medio' || firstWord === 'media') {
+            qty = 0.5;
+            fractionalRequested = true;
+            productSearchText = words.slice(1).join(' ');
+          } else if (SPANISH_NUMBER_WORDS[firstWord] !== undefined) {
+            qty = SPANISH_NUMBER_WORDS[firstWord];
+            productSearchText = words.slice(1).join(' ');
+          }
+        }
       }
     }
 
@@ -291,14 +335,26 @@ export function parseSarinSaleCommand(transcript: string, catalog: Product[]): V
       .replace(/\b(libras?|kilos?|litros?|bolsas?|paquetes?|latas?|cubetas?|botellas?)\s+(de\s+)?/gi, '')
       .trim();
 
-    const matchedProduct = matchProductInCatalog(cleanedSearch || productSearchText, catalog) ||
+    const matchedProduct =
+      matchProductInCatalog(cleanedSearch || productSearchText, catalog) ||
       matchProductInCatalog(clause, catalog);
 
     if (matchedProduct) {
-      const pricing = resolveProductUnitPricing(matchedProduct, qty);
+      const allowFrac = Boolean(matchedProduct.allow_fractional);
+      let finalQty = qty;
+      if (requestedAmountCents !== null && allowFrac) {
+        const basePricing = resolveProductUnitPricing(matchedProduct, 1);
+        finalQty = Math.max(0.05, calculateWeightFromAmountCents(requestedAmountCents, basePricing.unit_price_cents));
+      } else if (!allowFrac && fractionalRequested) {
+        finalQty = Math.max(1, Math.round(qty));
+      } else if (allowFrac) {
+        finalQty = roundQuantity(Math.max(0.05, qty), true);
+      }
+
+      const pricing = resolveProductUnitPricing(matchedProduct, finalQty);
       matchedItems.push({
         product: matchedProduct,
-        quantity: qty,
+        quantity: finalQty,
         unitPriceCents: pricing.unit_price_cents,
         subtotalCents: pricing.subtotal_cents,
         appliedWholesaleTier: pricing.applied_tier,
@@ -342,8 +398,10 @@ export function parseSarinSaleCommand(transcript: string, catalog: Product[]): V
   if (matchedItems.length === 0) {
     spokenFeedback = 'No logré identificar productos del catálogo en lo que escuché. Intenta diciendo "Sarin, agrega dos leches".';
   } else {
-    const itemSummaries = matchedItems.map(
-      (i) => `${i.quantity} ${i.product.name}`
+    const itemSummaries = matchedItems.map((i) =>
+      !Number.isInteger(i.quantity) || i.product.allow_fractional
+        ? `${formatQuantityWithUnit(i.quantity, i.product.unit, true)} ${i.product.name}`
+        : `${i.quantity} ${i.product.name}`
     );
     spokenFeedback = `Agregado: ${itemSummaries.join(', ')}. Total: ${totalCOP}.`;
     if (totalWholesaleSavingsCents > 0) {

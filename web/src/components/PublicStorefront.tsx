@@ -1,6 +1,15 @@
 import { useState, useEffect, useMemo } from 'react';
 import { Icon } from './ui/Icon';
 import { ProductImage } from './ui/ProductImage';
+import { BulkWeightCalculatorModal, type BulkCalculableProduct } from './ui/BulkWeightCalculatorModal';
+import {
+  computeLineSubtotalCents,
+  formatQuantityNumber,
+  formatQuantityWithUnit,
+  getBulkStep,
+  getUnitShortLabel,
+  roundQuantity,
+} from '../utils/bulkWeight';
 import { getPublicStore, createCustomerOrder } from '../services/customerOrderService';
 import type {
   PublicStoreData,
@@ -43,6 +52,8 @@ interface CartItem {
   en_oferta?: number;
   precio_oferta_cents?: number | null;
   unit: string;
+  allow_fractional?: boolean;
+  stock?: number;
   image_url?: string;
 }
 
@@ -73,6 +84,8 @@ export default function PublicStorefront({ slug = 'surtifacil', onExit }: Public
   const [cart, setCart] = useState<CartItem[]>([]);
   const [cartOpen, setCartOpen] = useState(false);
   const [submittingOrder, setSubmittingOrder] = useState(false);
+  const [bulkProduct, setBulkProduct] = useState<BulkCalculableProduct | null>(null);
+  const [bulkInitialQty, setBulkInitialQty] = useState<number | undefined>(undefined);
 
   // Formulario de Checkout
   const [customerName, setCustomerName] = useState('');
@@ -131,18 +144,23 @@ export default function PublicStorefront({ slug = 'surtifacil', onExit }: Public
     precio_oferta_cents?: number | null;
     wholesale_tiers?: WholesaleTier[];
     wholesale_tiers_json?: string | null;
+    allow_fractional?: boolean | number;
+    stock?: number;
   }) => {
     const tiers = parseWholesaleTiers(product.wholesale_tiers ?? product.wholesale_tiers_json);
 
     setCart((prev) => {
       const existing = prev.find((item) => item.product_id === product.id);
-      const nextQty = existing ? existing.quantity + 1 : 1;
+      const nextQty = existing
+        ? roundQuantity(existing.quantity + 1, Boolean(product.allow_fractional))
+        : 1;
       const pricing = resolveProductUnitPricing(
         {
           price_cents: product.price_cents,
           en_oferta: product.en_oferta,
           precio_oferta_cents: product.precio_oferta_cents,
           wholesale_tiers: tiers,
+          allow_fractional: product.allow_fractional,
         },
         nextQty
       );
@@ -161,6 +179,8 @@ export default function PublicStorefront({ slug = 'surtifacil', onExit }: Public
                 base_price_cents: product.price_cents,
                 en_oferta: product.en_oferta,
                 precio_oferta_cents: product.precio_oferta_cents,
+                allow_fractional: Boolean(product.allow_fractional),
+                stock: product.stock ?? item.stock,
               }
             : item
         );
@@ -180,9 +200,54 @@ export default function PublicStorefront({ slug = 'surtifacil', onExit }: Public
           en_oferta: product.en_oferta,
           precio_oferta_cents: product.precio_oferta_cents,
           unit: product.unit || 'unidad',
+          allow_fractional: Boolean(product.allow_fractional),
+          stock: product.stock,
           image_url: product.image_url,
         },
       ];
+    });
+  };
+
+  const setCartProductQuantity = (product: BulkCalculableProduct, nextQty: number) => {
+    const cleanQty = roundQuantity(nextQty, Boolean(product.allow_fractional));
+    if (cleanQty <= 0) {
+      setCart((prev) => prev.filter((item) => item.product_id !== product.id));
+      return;
+    }
+    const tiers = parseWholesaleTiers(product.wholesale_tiers ?? product.wholesale_tiers_json);
+    const pricing = resolveProductUnitPricing(
+      {
+        price_cents: product.price_cents,
+        en_oferta: product.en_oferta,
+        precio_oferta_cents: product.precio_oferta_cents,
+        wholesale_tiers: tiers,
+        allow_fractional: product.allow_fractional,
+      },
+      cleanQty
+    );
+
+    setCart((prev) => {
+      const existing = prev.find((item) => item.product_id === product.id);
+      const nextItem: CartItem = {
+        product_id: product.id,
+        product_name: product.name,
+        quantity: cleanQty,
+        unit_price_cents: pricing.unit_price_cents,
+        regular_price_cents: pricing.active_base_unit_price_cents,
+        applied_wholesale_tier: pricing.applied_tier,
+        wholesale_savings_cents: pricing.wholesale_savings_cents,
+        wholesale_tiers: tiers,
+        base_price_cents: product.price_cents,
+        en_oferta: product.en_oferta ? 1 : 0,
+        precio_oferta_cents: product.precio_oferta_cents,
+        unit: product.unit || 'unidad',
+        allow_fractional: Boolean(product.allow_fractional),
+        stock: product.stock,
+        image_url: product.image_url,
+      };
+      return existing
+        ? prev.map((item) => (item.product_id === product.id ? nextItem : item))
+        : [...prev, nextItem];
     });
   };
 
@@ -191,15 +256,18 @@ export default function PublicStorefront({ slug = 'surtifacil', onExit }: Public
       return prev
         .map((item) => {
           if (item.product_id === productId) {
-            const nextQty = item.quantity + delta;
-            if (nextQty <= 0) return null;
             const catalogProduct = store?.products.find((p) => p.id === productId);
+            const isFrac = Boolean(item.allow_fractional || catalogProduct?.allow_fractional);
+            const stepDelta = isFrac ? delta * getBulkStep(item.unit) : delta;
+            const nextQty = roundQuantity(item.quantity + stepDelta, isFrac);
+            if (nextQty <= 0) return null;
             const pricing = resolveProductUnitPricing(
               catalogProduct ?? {
                 price_cents: item.base_price_cents,
                 en_oferta: item.en_oferta,
                 precio_oferta_cents: item.precio_oferta_cents,
                 wholesale_tiers: item.wholesale_tiers,
+                allow_fractional: isFrac,
               },
               nextQty
             );
@@ -220,7 +288,10 @@ export default function PublicStorefront({ slug = 'surtifacil', onExit }: Public
 
   // Cálculos financieros
   const subtotalCents = useMemo(() => {
-    return cart.reduce((sum, item) => sum + item.unit_price_cents * item.quantity, 0);
+    return cart.reduce(
+      (sum, item) => sum + computeLineSubtotalCents(item.unit_price_cents, item.quantity),
+      0
+    );
   }, [cart]);
 
   const totalWholesaleSavingsCents = useMemo(() => {
@@ -351,7 +422,7 @@ export default function PublicStorefront({ slug = 'surtifacil', onExit }: Public
   };
 
   const totalItemsCount = useMemo(() => {
-    return cart.reduce((sum, item) => sum + item.quantity, 0);
+    return cart.length;
   }, [cart]);
 
   // Productos filtrados visibles en tienda
@@ -770,6 +841,13 @@ export default function PublicStorefront({ slug = 'surtifacil', onExit }: Public
                           </span>
                         )}
                       </div>
+                      {Boolean(product.allow_fractional) && (
+                        <div className="mt-1">
+                          <span className="inline-flex items-center gap-1 rounded-md bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 text-[10px] font-bold text-emerald-800">
+                            ⚖️ Granel · por {getUnitShortLabel(product.unit)} o COP
+                          </span>
+                        </div>
+                      )}
                       {(() => {
                         const primaryTier = getPrimaryWholesaleTier({
                           price_cents: product.price_cents,
@@ -802,7 +880,9 @@ export default function PublicStorefront({ slug = 'surtifacil', onExit }: Public
                             <Icon name="minus" size={14} />
                           </button>
                           <span className="text-xs font-bold text-emerald-900 tabular-nums">
-                            {inCartItem.quantity}
+                            {Boolean(product.allow_fractional)
+                              ? formatQuantityWithUnit(inCartItem.quantity, product.unit, true)
+                              : inCartItem.quantity}
                           </span>
                           <button
                             type="button"
@@ -813,6 +893,18 @@ export default function PublicStorefront({ slug = 'surtifacil', onExit }: Public
                             <Icon name="plus" size={14} />
                           </button>
                         </div>
+                      ) : Boolean(product.allow_fractional) ? (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setBulkProduct(product);
+                            setBulkInitialQty(undefined);
+                          }}
+                          className="btn-primary w-full min-h-[44px] text-xs font-bold py-2 shadow-xs bg-emerald-600 hover:bg-emerald-700"
+                          aria-label={`Elegir peso de ${product.name}`}
+                        >
+                          <span>⚖️ ELEGIR PESO</span>
+                        </button>
                       ) : (
                         <button
                           type="button"
@@ -952,7 +1044,7 @@ export default function PublicStorefront({ slug = 'surtifacil', onExit }: Public
 
                       <div className="flex items-center gap-2 shrink-0">
                         <span className="text-xs font-bold text-sf-primary tabular-nums">
-                          {formatCentsCOP(item.unit_price_cents * item.quantity)}
+                          {formatCentsCOP(computeLineSubtotalCents(item.unit_price_cents, item.quantity))}
                         </span>
                         <div className="flex items-center gap-1 rounded-lg bg-slate-100 p-0.5">
                           <button
@@ -963,7 +1055,11 @@ export default function PublicStorefront({ slug = 'surtifacil', onExit }: Public
                           >
                             <Icon name="minus" size={12} />
                           </button>
-                          <span className="w-5 text-center text-xs font-bold">{item.quantity}</span>
+                          <span className="min-w-[1.75rem] px-1 text-center text-xs font-bold tabular-nums">
+                            {Boolean(item.allow_fractional) || !Number.isInteger(item.quantity)
+                              ? formatQuantityNumber(item.quantity)
+                              : item.quantity}
+                          </span>
                           <button
                             type="button"
                             onClick={() => updateCartQuantity(item.product_id, 1)}
@@ -1340,6 +1436,16 @@ export default function PublicStorefront({ slug = 'surtifacil', onExit }: Public
           </div>
         </div>
       )}
+
+      <BulkWeightCalculatorModal
+        open={bulkProduct !== null}
+        onClose={() => setBulkProduct(null)}
+        product={bulkProduct}
+        initialQuantity={bulkInitialQty}
+        onConfirm={(qty) => {
+          if (bulkProduct) setCartProductQuantity(bulkProduct, qty);
+        }}
+      />
     </div>
   );
 }

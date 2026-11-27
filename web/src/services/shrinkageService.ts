@@ -1,6 +1,8 @@
 import { apiClient, emitDataChange, getActiveNegocioId, hasAuthSession } from './apiClient';
 import { mockProducts } from './mockData';
 import { refreshProducts } from './productService';
+import { recordMockKardexEntry } from './kardexService';
+import { computeLineSubtotalCents, roundQuantity, validateItemQuantity } from '../utils/bulkWeight';
 import { Product } from '../firebase/db';
 import {
   InventoryShrinkage,
@@ -89,10 +91,24 @@ export async function recordShrinkage(
     throw new Error('Debes seleccionar un producto válido para dar de baja.');
   }
 
-  const qty = Number(input.quantity);
-  if (!Number.isFinite(qty) || !Number.isInteger(qty) || qty <= 0) {
-    throw new Error('La cantidad a dar de baja debe ser un número entero mayor a 0.');
+  const mockProduct = mockProducts.find((item) => item.id === productId);
+  const targetForValidation = mockProduct || productFallback;
+  const rawQty = Number(input.quantity);
+  const allowFrac = targetForValidation ? Boolean(targetForValidation.allow_fractional) : false;
+
+  if (targetForValidation || Number.isInteger(rawQty)) {
+    const qtyCheck = validateItemQuantity(rawQty, allowFrac);
+    if (!qtyCheck.ok) {
+      throw new Error(
+        allowFrac
+          ? qtyCheck.error
+          : 'La cantidad a dar de baja debe ser un número entero mayor a 0.'
+      );
+    }
+  } else if (!Number.isFinite(rawQty) || rawQty <= 0) {
+    throw new Error('La cantidad a dar de baja debe ser mayor a 0.');
   }
+  const qty = roundQuantity(rawQty, true);
 
   if (!SHRINKAGE_REASON_IDS.has(input.reason)) {
     throw new Error('Selecciona un motivo de merma válido.');
@@ -110,29 +126,33 @@ export async function recordShrinkage(
     const created = await apiClient.post<ShrinkageResponse>('/shrinkage', payload);
     emitDataChange('shrinkage');
     emitDataChange('products');
+    emitDataChange('kardex');
     return created;
   }
 
-  const mockProduct = mockProducts.find((item) => item.id === productId);
   const target = mockProduct || productFallback;
   if (!target) {
     throw new Error('Producto no encontrado en inventario.');
   }
 
-  const available = Number(target.stock || 0);
+  const available = roundQuantity(Number(target.stock || 0), true);
   if (qty > available) {
     throw new Error(`Stock insuficiente para "${target.name}": disponible ${available}, solicitado ${qty}.`);
   }
 
   const { unitCostCents, costSource } = computeShrinkageUnitCostCents(target);
   const priceCents = Math.max(0, Math.round(Number(target.price_cents || 0)));
+  const totalCostLossCents = computeLineSubtotalCents(unitCostCents, qty);
+  const retailValueCents = computeLineSubtotalCents(priceCents, qty);
+  const nextStock = roundQuantity(available - qty, true);
 
   if (mockProduct) {
-    mockProduct.stock = available - qty;
+    mockProduct.stock = nextStock;
   }
 
+  const shrinkageId = `shk-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
   const entry: ShrinkageResponse = {
-    id: `shk-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+    id: shrinkageId,
     negocio_id: currentTenantId(),
     product_id: target.id,
     product_name: target.name,
@@ -140,19 +160,35 @@ export async function recordShrinkage(
     unit: target.unit || 'unidad',
     quantity: qty,
     unit_cost_cents: unitCostCents,
-    total_cost_loss_cents: unitCostCents * qty,
-    retail_value_cents: priceCents * qty,
+    total_cost_loss_cents: totalCostLossCents,
+    retail_value_cents: retailValueCents,
     cost_source: costSource,
     reason: input.reason,
     notes,
     created_by_uid: 'mock-admin-uid',
     created_by_name: 'Administrador Local',
     created_at: new Date().toISOString(),
-    updated_stock: available - qty,
+    updated_stock: nextStock,
   };
+
+  recordMockKardexEntry({
+    product_id: target.id,
+    product_name: target.name,
+    unit: target.unit || 'unidad',
+    movement_type: 'shrinkage',
+    quantity_delta: -qty,
+    stock_before: available,
+    stock_after: nextStock,
+    unit_cost_cents: unitCostCents,
+    unit_price_cents: priceCents,
+    total_value_cents: totalCostLossCents,
+    reference_id: shrinkageId,
+    notes: notes || `Merma (${input.reason})`,
+  });
 
   mockShrinkageStorage.unshift(entry);
   emitDataChange('shrinkage');
+  emitDataChange('kardex');
   refreshProducts?.();
   return entry;
 }
@@ -169,6 +205,7 @@ export async function revertShrinkageEntry(shrinkageId: string): Promise<void> {
     await apiClient.delete(`/shrinkage/${encodeURIComponent(shrinkageId)}`);
     emitDataChange('shrinkage');
     emitDataChange('products');
+    emitDataChange('kardex');
     return;
   }
 
@@ -180,11 +217,28 @@ export async function revertShrinkageEntry(shrinkageId: string): Promise<void> {
   if (existing) {
     const mockProduct = mockProducts.find((item) => item.id === existing.product_id);
     if (mockProduct) {
-      mockProduct.stock += existing.quantity;
+      const before = roundQuantity(mockProduct.stock, true);
+      const after = roundQuantity(before + existing.quantity, true);
+      mockProduct.stock = after;
+      recordMockKardexEntry({
+        product_id: mockProduct.id,
+        product_name: mockProduct.name,
+        unit: mockProduct.unit || 'unidad',
+        movement_type: 'shrinkage_revert',
+        quantity_delta: existing.quantity,
+        stock_before: before,
+        stock_after: after,
+        unit_cost_cents: existing.unit_cost_cents,
+        unit_price_cents: mockProduct.price_cents,
+        total_value_cents: existing.total_cost_loss_cents,
+        reference_id: shrinkageId,
+        notes: 'Reversión de baja / merma',
+      });
     }
     mockShrinkageStorage = mockShrinkageStorage.filter((item) => item.id !== shrinkageId);
   }
 
   emitDataChange('shrinkage');
+  emitDataChange('kardex');
   refreshProducts?.();
 }
