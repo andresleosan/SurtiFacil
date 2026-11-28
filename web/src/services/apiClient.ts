@@ -200,6 +200,7 @@ export type DataEntity =
   | 'settings'
   | 'cash-closings'
   | 'cash-expenses'
+  | 'cash-shifts'
   | 'shrinkage'
   | 'loyalty'
   | 'kardex';

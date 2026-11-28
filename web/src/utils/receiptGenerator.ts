@@ -337,6 +337,9 @@ export function generateCashClosingReceiptText(
   const closedDate = new Date(closing.closed_at);
   lines.push(formatTwoColumns('Fecha Cierre:', closedDate.toLocaleDateString('es-CO'), colWidth));
   lines.push(formatTwoColumns('Hora Cierre:', closedDate.toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' }), colWidth));
+  if (closing.opened_by_name) {
+    lines.push(formatTwoColumns('Apertura:', closing.opened_by_name, colWidth));
+  }
   lines.push(formatTwoColumns('Responsable:', closing.closed_by_name || 'Cajero', colWidth));
   lines.push(divider);
 
@@ -348,6 +351,9 @@ export function generateCashClosingReceiptText(
   }
   if ((closing.expenses_cash_cents || 0) > 0) {
     lines.push(formatTwoColumns('Gastos Caja Menor (-):', `-${formatCentsCOP(closing.expenses_cash_cents || 0)}`, colWidth));
+  }
+  if ((closing.withdrawals_cash_cents || 0) > 0) {
+    lines.push(formatTwoColumns('Sangrías Caja (-):', `-${formatCentsCOP(closing.withdrawals_cash_cents || 0)}`, colWidth));
   }
   lines.push(divider);
   lines.push(formatTwoColumns('TOTAL ESPERADO:', formatCentsCOP(closing.expected_cash_cents), colWidth));
@@ -414,6 +420,9 @@ export function generateCashClosingWhatsAppText(closing: CashClosing, store: Par
 
   let text = `🔒 *ACTA DE CIERRE DE CAJA #${closing.closing_number} — ${storeName.toUpperCase()}*\n`;
   text += `📅 Fecha: ${dateStr} · ${timeStr}\n`;
+  if (closing.opened_by_name) {
+    text += `🔓 Apertura: ${closing.opened_by_name}\n`;
+  }
   text += `👤 Cajero: ${closing.closed_by_name || 'Caja'}\n`;
   text += `📊 Estado: ${statusEmoji} *${statusText}*\n\n`;
 
@@ -425,6 +434,9 @@ export function generateCashClosingWhatsAppText(closing: CashClosing, store: Par
   }
   if ((closing.expenses_cash_cents || 0) > 0) {
     text += `▪ Gastos Caja Menor (-): -${formatCentsCOP(closing.expenses_cash_cents || 0)}\n`;
+  }
+  if ((closing.withdrawals_cash_cents || 0) > 0) {
+    text += `▪ Sangrías Seguridad (-): -${formatCentsCOP(closing.withdrawals_cash_cents || 0)}\n`;
   }
   text += `───────────────────────\n`;
   text += `💰 *Efectivo Esperado:* *${formatCentsCOP(closing.expected_cash_cents)}*\n`;

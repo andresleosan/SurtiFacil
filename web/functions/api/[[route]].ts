@@ -32,6 +32,12 @@ import {
   type PaymentBreakdownEntry,
 } from '../_lib/saleAccounting';
 import {
+  calculateClosingStatus,
+  calculateExpectedDrawerCashCents,
+  validateCashWithdrawalInput,
+  validateOpenShiftInput,
+} from '../_lib/cashShiftAccounting';
+import {
   DEFAULT_LOYALTY_CONFIG,
   isValidCouponCode,
   isValidLoyaltyPhone,
@@ -237,6 +243,52 @@ async function aggregateShiftSalesAndCredits(
       total_cents: data.total_cents,
     })),
   };
+}
+
+async function findActiveCashShift(db: D1Database, negocioId: string): Promise<any | null> {
+  try {
+    return await db
+      .prepare("SELECT * FROM cash_shifts WHERE negocio_id = ? AND status = 'open' ORDER BY opened_at DESC LIMIT 1")
+      .bind(negocioId)
+      .first<any>();
+  } catch {
+    return null;
+  }
+}
+
+async function aggregateShiftCashWithdrawals(
+  db: D1Database,
+  negocioId: string,
+  openedAt: string,
+  activeShiftId?: string | null
+): Promise<{ count: number; total_cents: number }> {
+  try {
+    if (activeShiftId) {
+      const row = await db
+        .prepare(
+          'SELECT COUNT(*) as count, COALESCE(SUM(amount_cents), 0) as total_withdrawals_cents FROM cash_withdrawals WHERE negocio_id = ? AND (shift_id = ? OR (shift_id IS NULL AND created_at >= ?))'
+        )
+        .bind(negocioId, activeShiftId, openedAt)
+        .first<{ count: number; total_withdrawals_cents: number }>();
+      return {
+        count: row?.count || 0,
+        total_cents: row?.total_withdrawals_cents || 0,
+      };
+    }
+
+    const row = await db
+      .prepare(
+        'SELECT COUNT(*) as count, COALESCE(SUM(amount_cents), 0) as total_withdrawals_cents FROM cash_withdrawals WHERE negocio_id = ? AND created_at >= ?'
+      )
+      .bind(negocioId, openedAt)
+      .first<{ count: number; total_withdrawals_cents: number }>();
+    return {
+      count: row?.count || 0,
+      total_cents: row?.total_withdrawals_cents || 0,
+    };
+  } catch {
+    return { count: 0, total_cents: 0 };
+  }
 }
 
 async function loadNegocioLoyaltyConfig(
@@ -2767,16 +2819,23 @@ export const onRequest: PagesFunction<Env> = async (context) => {
 
       // GET /api/cash-closings/summary (Resumen de turno actual)
       if (method === 'GET' && path === '/cash-closings/summary') {
-        const lastClosing = await env.DB.prepare(
-          'SELECT closed_at FROM cash_closings WHERE negocio_id = ? ORDER BY closed_at DESC LIMIT 1'
-        ).bind(auth.negocioId).first<{ closed_at: string }>();
+        const activeShift = await findActiveCashShift(env.DB, auth.negocioId);
+        const lastClosing = activeShift
+          ? null
+          : await env.DB.prepare(
+              'SELECT closed_at FROM cash_closings WHERE negocio_id = ? ORDER BY closed_at DESC LIMIT 1'
+            ).bind(auth.negocioId).first<{ closed_at: string }>();
 
         const now = new Date();
         const startOfTodayIso = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
-        const openedAt = lastClosing?.closed_at || startOfTodayIso;
+        const openedAt = activeShift?.opened_at || lastClosing?.closed_at || startOfTodayIso;
 
         const initialBaseParam = url.searchParams.get('initial_base_cents');
-        const initialCashCents = initialBaseParam !== null ? Math.max(0, parseInt(initialBaseParam, 10) || 0) : 10000000;
+        const initialCashCents = activeShift
+          ? Math.max(0, Number(activeShift.initial_cash_cents) || 0)
+          : initialBaseParam !== null
+            ? Math.max(0, parseInt(initialBaseParam, 10) || 0)
+            : 10000000;
 
         const {
           salesCashCents,
@@ -2786,7 +2845,7 @@ export const onRequest: PagesFunction<Env> = async (context) => {
           otherSales,
         } = await aggregateShiftSalesAndCredits(env.DB, auth.negocioId, openedAt);
 
-        // 3. Salidas de caja menor en efectivo desde el último cierre
+        // 3. Salidas de caja menor en efectivo desde la apertura del turno
         const expensesCashRow = await env.DB.prepare(
           "SELECT COUNT(*) as count, COALESCE(SUM(amount_cents), 0) as total_expenses_cash_cents FROM cash_expenses WHERE negocio_id = ? AND payment_method = 'cash' AND created_at >= ?"
         ).bind(auth.negocioId, openedAt).first<{ count: number; total_expenses_cash_cents: number }>();
@@ -2794,7 +2853,21 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         const expensesCashCents = expensesCashRow?.total_expenses_cash_cents || 0;
         const expensesCashCount = expensesCashRow?.count || 0;
 
-        const expectedCashCents = initialCashCents + salesCashCents + creditPaymentsCashCents - expensesCashCents;
+        // 4. Retiros parciales de seguridad (sangrías) del turno
+        const withdrawals = await aggregateShiftCashWithdrawals(
+          env.DB,
+          auth.negocioId,
+          openedAt,
+          activeShift?.id || null
+        );
+
+        const expectedCashCents = calculateExpectedDrawerCashCents({
+          initial_cash_cents: initialCashCents,
+          sales_cash_cents: salesCashCents,
+          credit_payments_cash_cents: creditPaymentsCashCents,
+          expenses_cash_cents: expensesCashCents,
+          withdrawals_cash_cents: withdrawals.total_cents,
+        });
 
         return jsonResponse({
           opened_at: openedAt,
@@ -2805,8 +2878,11 @@ export const onRequest: PagesFunction<Env> = async (context) => {
           credit_payments_cash_count: creditPaymentsCashCount,
           expenses_cash_cents: expensesCashCents,
           expenses_cash_count: expensesCashCount,
+          withdrawals_cash_cents: withdrawals.total_cents,
+          withdrawals_cash_count: withdrawals.count,
           expected_cash_cents: expectedCashCents,
           other_sales: otherSales,
+          active_shift: activeShift || null,
         });
       }
 
@@ -2821,7 +2897,10 @@ export const onRequest: PagesFunction<Env> = async (context) => {
           notes?: string;
         };
 
-        const initialCashCents = Math.max(0, Math.floor(Number(body.initial_cash_cents) || 0));
+        const activeShift = await findActiveCashShift(env.DB, auth.negocioId);
+        const initialCashCents = activeShift
+          ? Math.max(0, Math.floor(Number(activeShift.initial_cash_cents) || 0))
+          : Math.max(0, Math.floor(Number(body.initial_cash_cents) || 0));
 
         const BILL_VALUES_CENTS: Record<string, number> = {
           '100000': 10000000,
@@ -2862,13 +2941,15 @@ export const onRequest: PagesFunction<Env> = async (context) => {
           }
         }
 
-        const lastClosing = await env.DB.prepare(
-          'SELECT closed_at FROM cash_closings WHERE negocio_id = ? ORDER BY closed_at DESC LIMIT 1'
-        ).bind(auth.negocioId).first<{ closed_at: string }>();
+        const lastClosing = activeShift
+          ? null
+          : await env.DB.prepare(
+              'SELECT closed_at FROM cash_closings WHERE negocio_id = ? ORDER BY closed_at DESC LIMIT 1'
+            ).bind(auth.negocioId).first<{ closed_at: string }>();
 
         const now = new Date();
         const startOfTodayIso = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
-        const openedAt = lastClosing?.closed_at || startOfTodayIso;
+        const openedAt = activeShift?.opened_at || lastClosing?.closed_at || startOfTodayIso;
 
         const {
           salesCashCents,
@@ -2882,12 +2963,25 @@ export const onRequest: PagesFunction<Env> = async (context) => {
 
         const expensesCashCents = expensesCashRow?.total_expenses_cash_cents || 0;
 
-        const expectedCashCents = initialCashCents + salesCashCents + creditPaymentsCashCents - expensesCashCents;
-        const differenceCents = countedCashCents - expectedCashCents;
+        const withdrawals = await aggregateShiftCashWithdrawals(
+          env.DB,
+          auth.negocioId,
+          openedAt,
+          activeShift?.id || null
+        );
+        const withdrawalsCashCents = withdrawals.total_cents;
 
-        let status: 'balanced' | 'surplus' | 'shortage' = 'balanced';
-        if (differenceCents > 0) status = 'surplus';
-        else if (differenceCents < 0) status = 'shortage';
+        const expectedCashCents = calculateExpectedDrawerCashCents({
+          initial_cash_cents: initialCashCents,
+          sales_cash_cents: salesCashCents,
+          credit_payments_cash_cents: creditPaymentsCashCents,
+          expenses_cash_cents: expensesCashCents,
+          withdrawals_cash_cents: withdrawalsCashCents,
+        });
+        const { difference_cents: differenceCents, status } = calculateClosingStatus(
+          expectedCashCents,
+          countedCashCents
+        );
 
         const maxNumberRow = await env.DB.prepare(
           'SELECT COALESCE(MAX(closing_number), 0) + 1 as next_number FROM cash_closings WHERE negocio_id = ?'
@@ -2896,33 +2990,73 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         const closingNumber = maxNumberRow?.next_number || 1;
         const closingId = `cclose-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
         const closedAt = new Date().toISOString();
+        const closedByName = auth.user.displayName || auth.user.email;
 
-        await env.DB.prepare(
-          `INSERT INTO cash_closings (
-            id, negocio_id, closing_number, opened_at, closed_at, closed_by_uid, closed_by_name,
-            initial_cash_cents, sales_cash_cents, credit_payments_cash_cents, expected_cash_cents,
-            counted_cash_cents, difference_cents, status, breakdown_json, notes, total_sales_count, expenses_cash_cents, created_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`
-        ).bind(
-          closingId,
-          auth.negocioId,
-          closingNumber,
-          openedAt,
-          closedAt,
-          auth.user.id,
-          auth.user.displayName || auth.user.email,
-          initialCashCents,
-          salesCashCents,
-          creditPaymentsCashCents,
-          expectedCashCents,
-          countedCashCents,
-          differenceCents,
-          status,
-          JSON.stringify({ bills: billsBreakdown, coins: coinsBreakdown }),
-          body.notes?.trim() || null,
-          totalSalesCount,
-          expensesCashCents
-        ).run();
+        const batchStatements = [
+          env.DB.prepare(
+            `INSERT INTO cash_closings (
+              id, negocio_id, closing_number, opened_at, closed_at, closed_by_uid, closed_by_name,
+              initial_cash_cents, sales_cash_cents, credit_payments_cash_cents, expected_cash_cents,
+              counted_cash_cents, difference_cents, status, breakdown_json, notes, total_sales_count,
+              expenses_cash_cents, shift_id, shift_label, opened_by_uid, opened_by_name, withdrawals_cash_cents, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`
+          ).bind(
+            closingId,
+            auth.negocioId,
+            closingNumber,
+            openedAt,
+            closedAt,
+            auth.user.id,
+            closedByName,
+            initialCashCents,
+            salesCashCents,
+            creditPaymentsCashCents,
+            expectedCashCents,
+            countedCashCents,
+            differenceCents,
+            status,
+            JSON.stringify({ bills: billsBreakdown, coins: coinsBreakdown }),
+            body.notes?.trim() || null,
+            totalSalesCount,
+            expensesCashCents,
+            activeShift?.id || null,
+            activeShift?.shift_label || null,
+            activeShift?.opened_by_uid || null,
+            activeShift?.opened_by_name || null,
+            withdrawalsCashCents
+          ),
+        ];
+
+        if (activeShift) {
+          batchStatements.push(
+            env.DB.prepare(
+              `UPDATE cash_shifts
+               SET status = 'closed',
+                   closed_at = ?,
+                   closed_by_uid = ?,
+                   closed_by_name = ?,
+                   closing_id = ?,
+                   expected_cash_cents = ?,
+                   counted_cash_cents = ?,
+                   difference_cents = ?,
+                   closing_status = ?
+               WHERE id = ? AND negocio_id = ?`
+            ).bind(
+              closedAt,
+              auth.user.id,
+              closedByName,
+              closingId,
+              expectedCashCents,
+              countedCashCents,
+              differenceCents,
+              status,
+              activeShift.id,
+              auth.negocioId
+            )
+          );
+        }
+
+        await env.DB.batch(batchStatements);
 
         const createdRecord = await env.DB.prepare(
           'SELECT * FROM cash_closings WHERE id = ? AND negocio_id = ?'
@@ -2930,6 +3064,7 @@ export const onRequest: PagesFunction<Env> = async (context) => {
 
         return jsonResponse({
           ...createdRecord,
+          shift_number: activeShift?.shift_number ?? null,
           breakdown: { bills: billsBreakdown, coins: coinsBreakdown },
         }, 201);
       }
@@ -3002,14 +3137,19 @@ export const onRequest: PagesFunction<Env> = async (context) => {
 
         let sinceFilter = sinceParam || '';
         if (!sinceFilter && shiftOnly) {
-          const lastClosing = await env.DB.prepare(
-            'SELECT closed_at FROM cash_closings WHERE negocio_id = ? ORDER BY closed_at DESC LIMIT 1'
-          )
-            .bind(auth.negocioId)
-            .first<{ closed_at: string }>();
-          const now = new Date();
-          const startOfTodayIso = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
-          sinceFilter = lastClosing?.closed_at || startOfTodayIso;
+          const activeShift = await findActiveCashShift(env.DB, auth.negocioId);
+          if (activeShift?.opened_at) {
+            sinceFilter = activeShift.opened_at;
+          } else {
+            const lastClosing = await env.DB.prepare(
+              'SELECT closed_at FROM cash_closings WHERE negocio_id = ? ORDER BY closed_at DESC LIMIT 1'
+            )
+              .bind(auth.negocioId)
+              .first<{ closed_at: string }>();
+            const now = new Date();
+            const startOfTodayIso = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
+            sinceFilter = lastClosing?.closed_at || startOfTodayIso;
+          }
         }
 
         let query = 'SELECT * FROM cash_expenses WHERE negocio_id = ?';
@@ -3125,6 +3265,363 @@ export const onRequest: PagesFunction<Env> = async (context) => {
           .run();
 
         return jsonResponse({ success: true, deletedId: expenseId });
+      }
+    }
+
+    // 5.2.b Turnos de Caja (/cash-shifts) y Sangrías de Seguridad (/cash-withdrawals)
+    if (path === '/cash-shifts' || path.startsWith('/cash-shifts/')) {
+      const auth = await authenticateRequest(request, env);
+
+      if (method === 'GET' && path === '/cash-shifts/active') {
+        const activeShift = await findActiveCashShift(env.DB, auth.negocioId);
+        const lastClosing = activeShift
+          ? null
+          : await env.DB.prepare(
+              'SELECT closed_at FROM cash_closings WHERE negocio_id = ? ORDER BY closed_at DESC LIMIT 1'
+            )
+              .bind(auth.negocioId)
+              .first<{ closed_at: string }>();
+
+        const now = new Date();
+        const startOfTodayIso = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
+        const openedAt = activeShift?.opened_at || lastClosing?.closed_at || startOfTodayIso;
+        const initialCashCents = activeShift
+          ? Math.max(0, Number(activeShift.initial_cash_cents) || 0)
+          : 10000000;
+
+        const {
+          salesCashCents,
+          salesCashCount,
+          creditPaymentsCashCents,
+          creditPaymentsCashCount,
+          otherSales,
+        } = await aggregateShiftSalesAndCredits(env.DB, auth.negocioId, openedAt);
+
+        const expensesCashRow = await env.DB.prepare(
+          "SELECT COUNT(*) as count, COALESCE(SUM(amount_cents), 0) as total_expenses_cash_cents FROM cash_expenses WHERE negocio_id = ? AND payment_method = 'cash' AND created_at >= ?"
+        )
+          .bind(auth.negocioId, openedAt)
+          .first<{ count: number; total_expenses_cash_cents: number }>();
+
+        const expensesCashCents = expensesCashRow?.total_expenses_cash_cents || 0;
+        const expensesCashCount = expensesCashRow?.count || 0;
+
+        const withdrawalsRows = activeShift
+          ? await env.DB.prepare(
+              'SELECT * FROM cash_withdrawals WHERE negocio_id = ? AND (shift_id = ? OR (shift_id IS NULL AND created_at >= ?)) ORDER BY created_at DESC LIMIT 100'
+            )
+              .bind(auth.negocioId, activeShift.id, openedAt)
+              .all<any>()
+          : await env.DB.prepare(
+              'SELECT * FROM cash_withdrawals WHERE negocio_id = ? AND created_at >= ? ORDER BY created_at DESC LIMIT 100'
+            )
+              .bind(auth.negocioId, openedAt)
+              .all<any>();
+
+        const withdrawalsList = withdrawalsRows.results || [];
+        const withdrawalsTotalCents = withdrawalsList.reduce(
+          (sum: number, item: any) => sum + (Number(item.amount_cents) || 0),
+          0
+        );
+
+        const expectedCashCents = calculateExpectedDrawerCashCents({
+          initial_cash_cents: initialCashCents,
+          sales_cash_cents: salesCashCents,
+          credit_payments_cash_cents: creditPaymentsCashCents,
+          expenses_cash_cents: expensesCashCents,
+          withdrawals_cash_cents: withdrawalsTotalCents,
+        });
+
+        return jsonResponse({
+          active_shift: activeShift || null,
+          withdrawals: withdrawalsList,
+          withdrawals_total_cents: withdrawalsTotalCents,
+          summary: {
+            opened_at: openedAt,
+            initial_cash_cents: initialCashCents,
+            sales_cash_cents: salesCashCents,
+            sales_cash_count: salesCashCount,
+            credit_payments_cash_cents: creditPaymentsCashCents,
+            credit_payments_cash_count: creditPaymentsCashCount,
+            expenses_cash_cents: expensesCashCents,
+            expenses_cash_count: expensesCashCount,
+            withdrawals_cash_cents: withdrawalsTotalCents,
+            withdrawals_cash_count: withdrawalsList.length,
+            expected_cash_cents: expectedCashCents,
+            other_sales: otherSales,
+            active_shift: activeShift || null,
+          },
+        });
+      }
+
+      if (method === 'POST' && path === '/cash-shifts/open') {
+        const existingOpen = await findActiveCashShift(env.DB, auth.negocioId);
+        if (existingOpen) {
+          return errorResponse('Ya existe un turno de caja abierto. Ciérralo antes de abrir uno nuevo.', 409);
+        }
+
+        const body = (await request.json().catch(() => ({}))) as {
+          initial_cash_cents?: unknown;
+          shift_label?: unknown;
+          opening_notes?: unknown;
+        };
+
+        const validated = validateOpenShiftInput(body);
+        if (!validated.valid) {
+          return errorResponse(validated.error, 400);
+        }
+
+        const maxShiftRow = await env.DB.prepare(
+          'SELECT COALESCE(MAX(shift_number), 0) + 1 as next_number FROM cash_shifts WHERE negocio_id = ?'
+        )
+          .bind(auth.negocioId)
+          .first<{ next_number: number }>();
+
+        const shiftNumber = maxShiftRow?.next_number || 1;
+        const shiftId = `cshift-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+        const openedAt = new Date().toISOString();
+        const openedByName = auth.user.displayName || auth.user.email;
+
+        await env.DB.prepare(
+          `INSERT INTO cash_shifts (
+            id, negocio_id, shift_number, shift_label, status, opened_at,
+            opened_by_uid, opened_by_name, opened_by_role, initial_cash_cents, opening_notes, created_at
+          ) VALUES (?, ?, ?, ?, 'open', ?, ?, ?, ?, ?, ?, ?)`
+        )
+          .bind(
+            shiftId,
+            auth.negocioId,
+            shiftNumber,
+            validated.shift_label,
+            openedAt,
+            auth.user.id,
+            openedByName,
+            auth.user.role,
+            validated.initial_cash_cents,
+            validated.opening_notes,
+            openedAt
+          )
+          .run();
+
+        const created = await env.DB.prepare(
+          'SELECT * FROM cash_shifts WHERE id = ? AND negocio_id = ?'
+        )
+          .bind(shiftId, auth.negocioId)
+          .first<any>();
+
+        return jsonResponse(
+          created || {
+            id: shiftId,
+            negocio_id: auth.negocioId,
+            shift_number: shiftNumber,
+            shift_label: validated.shift_label,
+            status: 'open',
+            opened_at: openedAt,
+            opened_by_uid: auth.user.id,
+            opened_by_name: openedByName,
+            opened_by_role: auth.user.role,
+            initial_cash_cents: validated.initial_cash_cents,
+            opening_notes: validated.opening_notes,
+          },
+          201
+        );
+      }
+
+      if (method === 'GET' && path === '/cash-shifts') {
+        const shiftsRes = await env.DB.prepare(
+          'SELECT * FROM cash_shifts WHERE negocio_id = ? ORDER BY opened_at DESC LIMIT 30'
+        )
+          .bind(auth.negocioId)
+          .all<any>();
+
+        const withdrawalsRes = await env.DB.prepare(
+          'SELECT shift_id, amount_cents FROM cash_withdrawals WHERE negocio_id = ?'
+        )
+          .bind(auth.negocioId)
+          .all<{ shift_id?: string | null; amount_cents: number }>();
+
+        const withdrawalsByShift = new Map<string, { count: number; total_cents: number }>();
+        for (const w of withdrawalsRes.results || []) {
+          if (!w.shift_id) continue;
+          const prev = withdrawalsByShift.get(w.shift_id) || { count: 0, total_cents: 0 };
+          prev.count += 1;
+          prev.total_cents += Number(w.amount_cents) || 0;
+          withdrawalsByShift.set(w.shift_id, prev);
+        }
+
+        const enriched = (shiftsRes.results || []).map((shift: any) => {
+          const stats = withdrawalsByShift.get(shift.id) || { count: 0, total_cents: 0 };
+          return {
+            ...shift,
+            withdrawals_count: stats.count,
+            withdrawals_total_cents: stats.total_cents,
+          };
+        });
+
+        return jsonResponse(enriched);
+      }
+    }
+
+    if (path === '/cash-withdrawals' || path.startsWith('/cash-withdrawals/')) {
+      const auth = await authenticateRequest(request, env);
+
+      if (method === 'GET' && path === '/cash-withdrawals') {
+        const shiftIdParam = url.searchParams.get('shift_id');
+        const sinceParam = url.searchParams.get('since');
+        const shiftOnly = url.searchParams.get('shift_only') === 'true';
+
+        if (shiftIdParam) {
+          const rows = await env.DB.prepare(
+            'SELECT * FROM cash_withdrawals WHERE negocio_id = ? AND shift_id = ? ORDER BY created_at DESC LIMIT 100'
+          )
+            .bind(auth.negocioId, shiftIdParam)
+            .all<any>();
+          return jsonResponse(rows.results || []);
+        }
+
+        let sinceFilter = sinceParam || '';
+        let activeShiftId: string | null = null;
+        if (!sinceFilter && shiftOnly) {
+          const activeShift = await findActiveCashShift(env.DB, auth.negocioId);
+          if (activeShift) {
+            activeShiftId = activeShift.id;
+            sinceFilter = activeShift.opened_at;
+          } else {
+            const lastClosing = await env.DB.prepare(
+              'SELECT closed_at FROM cash_closings WHERE negocio_id = ? ORDER BY closed_at DESC LIMIT 1'
+            )
+              .bind(auth.negocioId)
+              .first<{ closed_at: string }>();
+            const now = new Date();
+            const startOfTodayIso = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
+            sinceFilter = lastClosing?.closed_at || startOfTodayIso;
+          }
+        }
+
+        if (activeShiftId) {
+          const rows = await env.DB.prepare(
+            'SELECT * FROM cash_withdrawals WHERE negocio_id = ? AND (shift_id = ? OR (shift_id IS NULL AND created_at >= ?)) ORDER BY created_at DESC LIMIT 100'
+          )
+            .bind(auth.negocioId, activeShiftId, sinceFilter)
+            .all<any>();
+          return jsonResponse(rows.results || []);
+        }
+
+        let query = 'SELECT * FROM cash_withdrawals WHERE negocio_id = ?';
+        const params: unknown[] = [auth.negocioId];
+        if (sinceFilter) {
+          query += ' AND created_at >= ?';
+          params.push(sinceFilter);
+        }
+        query += ' ORDER BY created_at DESC LIMIT 100';
+
+        const rows = await env.DB.prepare(query).bind(...params).all<any>();
+        return jsonResponse(rows.results || []);
+      }
+
+      if (method === 'POST' && path === '/cash-withdrawals') {
+        const body = (await request.json().catch(() => ({}))) as {
+          amount_cents?: unknown;
+          destination?: unknown;
+          reason?: unknown;
+          received_by?: unknown;
+        };
+
+        const validated = validateCashWithdrawalInput(body);
+        if (!validated.valid) {
+          return errorResponse(validated.error, 400);
+        }
+
+        const activeShift = await findActiveCashShift(env.DB, auth.negocioId);
+        const withdrawalId = `cwith-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+        const createdAt = new Date().toISOString();
+        const createdByName = auth.user.displayName || auth.user.email;
+
+        await env.DB.prepare(
+          `INSERT INTO cash_withdrawals (
+            id, negocio_id, shift_id, amount_cents, destination, reason, received_by,
+            created_by_uid, created_by_name, created_by_role, created_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        )
+          .bind(
+            withdrawalId,
+            auth.negocioId,
+            activeShift?.id || null,
+            validated.amount_cents,
+            validated.destination,
+            validated.reason,
+            validated.received_by,
+            auth.user.id,
+            createdByName,
+            auth.user.role,
+            createdAt
+          )
+          .run();
+
+        const created = await env.DB.prepare(
+          'SELECT * FROM cash_withdrawals WHERE id = ? AND negocio_id = ?'
+        )
+          .bind(withdrawalId, auth.negocioId)
+          .first<any>();
+
+        return jsonResponse(
+          created || {
+            id: withdrawalId,
+            negocio_id: auth.negocioId,
+            shift_id: activeShift?.id || null,
+            amount_cents: validated.amount_cents,
+            destination: validated.destination,
+            reason: validated.reason,
+            received_by: validated.received_by,
+            created_by_uid: auth.user.id,
+            created_by_name: createdByName,
+            created_by_role: auth.user.role,
+            created_at: createdAt,
+          },
+          201
+        );
+      }
+
+      if (method === 'DELETE' && path.startsWith('/cash-withdrawals/')) {
+        if (auth.user.role !== 'admin' && auth.user.role !== 'manager') {
+          return errorResponse(
+            'Solo administradores y gerentes pueden anular retiros de seguridad (sangrías).',
+            403
+          );
+        }
+
+        const withdrawalId = decodeURIComponent(path.replace(/^\/cash-withdrawals\//, ''));
+        if (!withdrawalId) {
+          return errorResponse('ID de sangría inválido.', 400);
+        }
+
+        const existing = await env.DB.prepare(
+          'SELECT id, shift_id FROM cash_withdrawals WHERE id = ? AND negocio_id = ?'
+        )
+          .bind(withdrawalId, auth.negocioId)
+          .first<{ id: string; shift_id?: string | null }>();
+
+        if (!existing) {
+          return errorResponse('Sangría de caja no encontrada.', 404);
+        }
+
+        if (existing.shift_id) {
+          const parentShift = await env.DB.prepare(
+            'SELECT status FROM cash_shifts WHERE id = ? AND negocio_id = ?'
+          )
+            .bind(existing.shift_id, auth.negocioId)
+            .first<{ status: string }>();
+
+          if (parentShift && parentShift.status === 'closed') {
+            return errorResponse('No se puede anular una sangría de un turno ya cerrado.', 409);
+          }
+        }
+
+        await env.DB.prepare('DELETE FROM cash_withdrawals WHERE id = ? AND negocio_id = ?')
+          .bind(withdrawalId, auth.negocioId)
+          .run();
+
+        return jsonResponse({ success: true, deletedId: withdrawalId });
       }
     }
 

@@ -234,6 +234,8 @@ export async function setupProductionE2EHarness(page: Page) {
   const sales: Array<Record<string, any>> = [];
   const cashClosings: Array<Record<string, any>> = [];
   let cashExpenses: Array<Record<string, any>> = [];
+  const cashShifts: Array<Record<string, any>> = [];
+  let cashWithdrawals: Array<Record<string, any>> = [];
   let shrinkageEntries: Array<Record<string, any>> = [];
 
   let loyaltyConfig = { ...DEFAULT_LOYALTY_CONFIG };
@@ -1525,6 +1527,144 @@ export async function setupProductionE2EHarness(page: Page) {
       return jsonResponse({ success: true, deletedId: expenseId });
     }
 
+    // Turnos de Caja y Sangrías de Seguridad
+    const findOpenShift = () => cashShifts.find((s) => s.status === 'open') || null;
+    const computeShiftMetrics = (fallbackInitialCents = 10000000) => {
+      const activeShift = findOpenShift();
+      const initialCashCents = activeShift ? Number(activeShift.initial_cash_cents || 0) : fallbackInitialCents;
+      const openedAt = activeShift?.opened_at || new Date(Date.now() - 3600000 * 6).toISOString();
+      const dynamicSalesCashCents = sales
+        .filter((s) => !isSaleVoided(s))
+        .reduce((sum, s) => sum + extractSalePaymentBuckets(s).cash_cents, 0);
+      const salesCashCents = 5000000 + dynamicSalesCashCents;
+      const cashExpList = cashExpenses.filter((e) => e.payment_method === 'cash');
+      const expensesCashCents = cashExpList.reduce((sum, e) => sum + (e.amount_cents || 0), 0);
+      const shiftWithList = activeShift
+        ? cashWithdrawals.filter((w) => w.shift_id === activeShift.id || !w.shift_id)
+        : cashWithdrawals;
+      const withdrawalsCashCents = shiftWithList.reduce((sum, w) => sum + (w.amount_cents || 0), 0);
+      return {
+        activeShift,
+        initialCashCents,
+        openedAt,
+        salesCashCents,
+        salesCashCount: 8 + sales.filter((s) => !isSaleVoided(s) && extractSalePaymentBuckets(s).cash_cents > 0).length,
+        expensesCashCents,
+        expensesCashCount: cashExpList.length,
+        withdrawalsList: shiftWithList,
+        withdrawalsCashCents,
+        withdrawalsCashCount: shiftWithList.length,
+        expectedCashCents: initialCashCents + salesCashCents - expensesCashCents - withdrawalsCashCents,
+      };
+    };
+
+    if (pathname === '/cash-shifts/active' && method === 'GET') {
+      const m = computeShiftMetrics(10000000);
+      return jsonResponse({
+        active_shift: m.activeShift,
+        withdrawals: m.withdrawalsList,
+        withdrawals_total_cents: m.withdrawalsCashCents,
+        summary: {
+          negocio_id: 'surtifacil',
+          opened_at: m.openedAt,
+          initial_cash_cents: m.initialCashCents,
+          sales_cash_cents: m.salesCashCents,
+          sales_cash_count: m.salesCashCount,
+          credit_payments_cash_cents: 0,
+          credit_payments_cash_count: 0,
+          expenses_cash_cents: m.expensesCashCents,
+          expenses_cash_count: m.expensesCashCount,
+          withdrawals_cash_cents: m.withdrawalsCashCents,
+          withdrawals_cash_count: m.withdrawalsCashCount,
+          expected_cash_cents: m.expectedCashCents,
+          other_sales: [],
+          active_shift: m.activeShift,
+        },
+      });
+    }
+
+    if (pathname === '/cash-shifts/open' && method === 'POST') {
+      if (findOpenShift()) {
+        return jsonResponse({ error: 'Ya existe un turno de caja abierto. Ciérralo antes de abrir uno nuevo.' }, 409);
+      }
+      const initialCashCents = Math.max(0, Math.floor(Number(body.initial_cash_cents ?? 10000000)));
+      const nowIso = new Date().toISOString();
+      const created = {
+        id: `cshift-e2e-${Date.now()}-${cashShifts.length + 1}`,
+        negocio_id: 'surtifacil',
+        shift_number: cashShifts.length + 1,
+        shift_label: body.shift_label || 'completo',
+        status: 'open',
+        opened_at: nowIso,
+        opened_by_uid: actor.id,
+        opened_by_name: actor.displayName,
+        opened_by_role: actor.role,
+        initial_cash_cents: initialCashCents,
+        opening_notes: body.opening_notes || null,
+        created_at: nowIso,
+      };
+      cashShifts.unshift(created);
+      return jsonResponse(created, 201);
+    }
+
+    if (pathname === '/cash-shifts' && method === 'GET') {
+      const enriched = cashShifts.map((s) => {
+        const list = cashWithdrawals.filter((w) => w.shift_id === s.id);
+        return {
+          ...s,
+          withdrawals_count: list.length,
+          withdrawals_total_cents: list.reduce((sum, w) => sum + (w.amount_cents || 0), 0),
+        };
+      });
+      return jsonResponse(enriched);
+    }
+
+    if (pathname === '/cash-withdrawals' && method === 'GET') {
+      return jsonResponse(cashWithdrawals);
+    }
+
+    if (pathname === '/cash-withdrawals' && method === 'POST') {
+      const amountCents = Math.floor(Number(body.amount_cents || 0));
+      if (!Number.isFinite(amountCents) || amountCents <= 0 || String(body.reason || '').trim().length < 3) {
+        return jsonResponse({ error: 'Datos inválidos de sangría.' }, 400);
+      }
+      const activeShift = findOpenShift();
+      const created = {
+        id: `cwith-e2e-${Date.now()}-${cashWithdrawals.length + 1}`,
+        negocio_id: 'surtifacil',
+        shift_id: activeShift?.id || null,
+        amount_cents: amountCents,
+        destination: body.destination || 'caja_fuerte',
+        reason: String(body.reason).trim(),
+        received_by: body.received_by || null,
+        created_by_uid: actor.id,
+        created_by_name: actor.displayName,
+        created_by_role: actor.role,
+        created_at: new Date().toISOString(),
+      };
+      cashWithdrawals.unshift(created);
+      return jsonResponse(created, 201);
+    }
+
+    if (pathname.startsWith('/cash-withdrawals/') && method === 'DELETE') {
+      if (actor.role !== 'admin' && actor.role !== 'manager') {
+        return jsonResponse(
+          { error: 'Solo administradores y gerentes pueden anular retiros de seguridad (sangrías).' },
+          403
+        );
+      }
+      const withdrawalId = decodeURIComponent(pathname.replace('/cash-withdrawals/', ''));
+      const target = cashWithdrawals.find((w) => w.id === withdrawalId);
+      if (target?.shift_id) {
+        const parent = cashShifts.find((s) => s.id === target.shift_id);
+        if (parent && parent.status === 'closed') {
+          return jsonResponse({ error: 'No se puede anular una sangría de un turno ya cerrado.' }, 409);
+        }
+      }
+      cashWithdrawals = cashWithdrawals.filter((w) => w.id !== withdrawalId);
+      return jsonResponse({ success: true, deletedId: withdrawalId });
+    }
+
     // Mermas, Averías y Vencimientos (con validación RBAC estricta)
     if (pathname === '/shrinkage' && method === 'GET') {
       return jsonResponse(shrinkageEntries);
@@ -1637,63 +1777,111 @@ export async function setupProductionE2EHarness(page: Page) {
 
     // Arqueo y Cierre de Caja COP
     if (pathname === '/cash-closings/summary' && method === 'GET') {
-      const initialCashCents = Number(
+      const fallbackBase = Number(
         urlObj.searchParams.get('initial_base_cents') ||
           urlObj.searchParams.get('initial_cash_cents') ||
           10000000,
       );
-      const dynamicSalesCashCents = sales
-        .filter((s) => !isSaleVoided(s))
-        .reduce((sum, s) => sum + extractSalePaymentBuckets(s).cash_cents, 0);
-      const salesCashCents = 5000000 + dynamicSalesCashCents; // $50.000 COP base + ventas vigentes en efectivo
-      const cashExpList = cashExpenses.filter((e) => e.payment_method === 'cash');
-      const expensesCashCents = cashExpList.reduce((sum, e) => sum + (e.amount_cents || 0), 0);
+      const m = computeShiftMetrics(fallbackBase);
       return jsonResponse({
         negocio_id: 'surtifacil',
-        opened_at: new Date(Date.now() - 3600000 * 6).toISOString(),
-        initial_cash_cents: initialCashCents,
-        sales_cash_cents: salesCashCents,
-        sales_cash_count: 8 + sales.filter((s) => !isSaleVoided(s) && extractSalePaymentBuckets(s).cash_cents > 0).length,
+        opened_at: m.openedAt,
+        initial_cash_cents: m.initialCashCents,
+        sales_cash_cents: m.salesCashCents,
+        sales_cash_count: m.salesCashCount,
         credit_payments_cash_cents: 0,
         credit_payments_cash_count: 0,
-        expenses_cash_cents: expensesCashCents,
-        expenses_cash_count: cashExpList.length,
-        expected_cash_cents: initialCashCents + salesCashCents - expensesCashCents,
+        expenses_cash_cents: m.expensesCashCents,
+        expenses_cash_count: m.expensesCashCount,
+        withdrawals_cash_cents: m.withdrawalsCashCents,
+        withdrawals_cash_count: m.withdrawalsCashCount,
+        expected_cash_cents: m.expectedCashCents,
         other_sales: [],
+        active_shift: m.activeShift,
       });
     }
     if (pathname === '/cash-closings' && method === 'POST') {
-      const initialCashCents = Number(body.initial_cash_cents || 10000000);
-      const dynamicSalesCashCents = sales
-        .filter((s) => !isSaleVoided(s))
-        .reduce((sum, s) => sum + extractSalePaymentBuckets(s).cash_cents, 0);
-      const salesCashCents = 5000000 + dynamicSalesCashCents;
-      const expensesCashCents = cashExpenses
-        .filter((e) => e.payment_method === 'cash')
-        .reduce((sum, e) => sum + (e.amount_cents || 0), 0);
-      const expectedCashCents = initialCashCents + salesCashCents - expensesCashCents;
-      const countedCashCents = Number(body.counted_cash_cents ?? expectedCashCents);
+      const fallbackBase = Number(body.initial_cash_cents || 10000000);
+      const m = computeShiftMetrics(fallbackBase);
+      const BILL_CENTS: Record<string, number> = {
+        '100000': 10000000,
+        '50000': 5000000,
+        '20000': 2000000,
+        '10000': 1000000,
+        '5000': 500000,
+        '2000': 200000,
+      };
+      const COIN_CENTS: Record<string, number> = {
+        '1000': 100000,
+        '500': 50000,
+        '200': 20000,
+        '100': 10000,
+        '50': 5000,
+      };
+      let countedFromBreakdown = 0;
+      let hasBreakdown = false;
+      if (body.breakdown?.bills) {
+        for (const [k, v] of Object.entries(body.breakdown.bills)) {
+          const qty = Math.max(0, Math.floor(Number(v) || 0));
+          if (qty > 0) hasBreakdown = true;
+          countedFromBreakdown += (BILL_CENTS[k] || Number(k) * 100) * qty;
+        }
+      }
+      if (body.breakdown?.coins) {
+        for (const [k, v] of Object.entries(body.breakdown.coins)) {
+          const qty = Math.max(0, Math.floor(Number(v) || 0));
+          if (qty > 0) hasBreakdown = true;
+          countedFromBreakdown += (COIN_CENTS[k] || Number(k) * 100) * qty;
+        }
+      }
+      const countedCashCents =
+        body.counted_cash_cents !== undefined
+          ? Number(body.counted_cash_cents)
+          : hasBreakdown
+            ? countedFromBreakdown
+            : m.expectedCashCents;
+      const diff = countedCashCents - m.expectedCashCents;
+      const closingStatus = diff === 0 ? 'balanced' : diff > 0 ? 'surplus' : 'shortage';
+      const closedAt = new Date().toISOString();
+      const closingId = `ACTA-E2E-${cashClosings.length + 1}`;
       const closing = {
-        id: `ACTA-E2E-${cashClosings.length + 1}`,
+        id: closingId,
         negocio_id: 'surtifacil',
         closing_number: cashClosings.length + 1,
-        opened_at: new Date(Date.now() - 3600000 * 6).toISOString(),
-        closed_at: new Date().toISOString(),
-        created_at: new Date().toISOString(),
+        opened_at: m.openedAt,
+        closed_at: closedAt,
+        created_at: closedAt,
         closed_by_uid: actor.id,
         closed_by_name: actor.displayName,
-        initial_cash_cents: initialCashCents,
-        sales_cash_cents: salesCashCents,
+        initial_cash_cents: m.initialCashCents,
+        sales_cash_cents: m.salesCashCents,
         credit_payments_cash_cents: 0,
-        expenses_cash_cents: expensesCashCents,
-        expected_cash_cents: expectedCashCents,
+        expenses_cash_cents: m.expensesCashCents,
+        withdrawals_cash_cents: m.withdrawalsCashCents,
+        shift_id: m.activeShift?.id || null,
+        shift_number: m.activeShift?.shift_number ?? null,
+        shift_label: m.activeShift?.shift_label || null,
+        opened_by_uid: m.activeShift?.opened_by_uid || null,
+        opened_by_name: m.activeShift?.opened_by_name || null,
+        expected_cash_cents: m.expectedCashCents,
         counted_cash_cents: countedCashCents,
-        difference_cents: countedCashCents - expectedCashCents,
-        status: countedCashCents === expectedCashCents ? 'balanced' : countedCashCents > expectedCashCents ? 'surplus' : 'shortage',
+        difference_cents: diff,
+        status: closingStatus,
         breakdown: body.breakdown || { bills: {}, coins: {} },
         notes: body.notes || '',
-        total_sales_count: 8,
+        total_sales_count: m.salesCashCount,
       };
+      if (m.activeShift) {
+        m.activeShift.status = 'closed';
+        m.activeShift.closed_at = closedAt;
+        m.activeShift.closed_by_uid = actor.id;
+        m.activeShift.closed_by_name = actor.displayName;
+        m.activeShift.closing_id = closingId;
+        m.activeShift.expected_cash_cents = m.expectedCashCents;
+        m.activeShift.counted_cash_cents = countedCashCents;
+        m.activeShift.difference_cents = diff;
+        m.activeShift.closing_status = closingStatus;
+      }
       cashClosings.unshift(closing);
       return jsonResponse(closing, 201);
     }

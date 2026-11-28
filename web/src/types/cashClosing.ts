@@ -1,8 +1,69 @@
+import type { CashShiftLabel, CashWithdrawalDestination } from '../utils/cashShiftAccounting';
+
+export {
+  SHIFT_LABELS,
+  WITHDRAWAL_DESTINATIONS,
+  type CashShiftLabel,
+  type CashWithdrawalDestination,
+} from '../utils/cashShiftAccounting';
+
 export type CashClosingStatus = 'balanced' | 'surplus' | 'shortage';
 
 export interface CashDenominationBreakdown {
   bills: Record<string, number>;
   coins: Record<string, number>;
+}
+
+export interface CashShift {
+  id: string;
+  negocio_id: string;
+  shift_number: number;
+  shift_label: CashShiftLabel;
+  status: 'open' | 'closed';
+  opened_at: string;
+  opened_by_uid: string;
+  opened_by_name?: string | null;
+  opened_by_role?: string | null;
+  initial_cash_cents: number;
+  opening_notes?: string | null;
+  closed_at?: string | null;
+  closed_by_uid?: string | null;
+  closed_by_name?: string | null;
+  closing_id?: string | null;
+  expected_cash_cents?: number | null;
+  counted_cash_cents?: number | null;
+  difference_cents?: number | null;
+  closing_status?: CashClosingStatus | null;
+  withdrawals_count?: number;
+  withdrawals_total_cents?: number;
+  created_at?: string;
+}
+
+export interface CashWithdrawal {
+  id: string;
+  negocio_id: string;
+  shift_id?: string | null;
+  amount_cents: number;
+  destination: CashWithdrawalDestination;
+  reason: string;
+  received_by?: string | null;
+  created_by_uid: string;
+  created_by_name?: string | null;
+  created_by_role?: string | null;
+  created_at: string;
+}
+
+export interface OpenCashShiftInput {
+  initial_cash_cents: number;
+  shift_label: CashShiftLabel;
+  opening_notes?: string;
+}
+
+export interface CashWithdrawalInput {
+  amount_cents: number;
+  destination: CashWithdrawalDestination;
+  reason: string;
+  received_by?: string;
 }
 
 export interface CashClosing {
@@ -24,6 +85,12 @@ export interface CashClosing {
   notes?: string | null;
   total_sales_count: number;
   expenses_cash_cents?: number;
+  withdrawals_cash_cents?: number;
+  shift_id?: string | null;
+  shift_number?: number | null;
+  shift_label?: string | null;
+  opened_by_uid?: string | null;
+  opened_by_name?: string | null;
   created_at?: string;
 }
 
@@ -36,8 +103,18 @@ export interface CashShiftSummary {
   credit_payments_cash_count: number;
   expenses_cash_cents?: number;
   expenses_cash_count?: number;
+  withdrawals_cash_cents?: number;
+  withdrawals_cash_count?: number;
   expected_cash_cents: number;
   other_sales: Array<{ payment_method: string; count: number; total_cents: number }>;
+  active_shift?: CashShift | null;
+}
+
+export interface ActiveCashShiftResponse {
+  active_shift: CashShift | null;
+  withdrawals: CashWithdrawal[];
+  withdrawals_total_cents: number;
+  summary: CashShiftSummary;
 }
 
 export interface CashClosingInput {

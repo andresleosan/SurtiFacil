@@ -19,6 +19,7 @@ import { Modal } from './ui/Modal';
 import { Icon } from './ui/Icon';
 import ThermalReceiptModal from './ThermalReceiptModal';
 import PettyCashModal from './PettyCashModal';
+import CashShiftModal from './CashShiftModal';
 
 interface CashClosingModalProps {
   isOpen: boolean;
@@ -45,6 +46,7 @@ export function CashClosingModal({ isOpen, onClose, onClosedSuccess }: CashClosi
   const [savedClosing, setSavedClosing] = useState<CashClosing | null>(null);
   const [thermalModalOpen, setThermalModalOpen] = useState(false);
   const [pettyCashModalOpen, setPettyCashModalOpen] = useState(false);
+  const [shiftWithdrawalModalOpen, setShiftWithdrawalModalOpen] = useState(false);
 
   const loadShiftSummary = (basePesosStr = initialBasePesos) => {
     const baseCents = parseCOP(basePesosStr) * 100;
@@ -56,6 +58,9 @@ export function CashClosingModal({ isOpen, onClose, onClosedSuccess }: CashClosi
       .then(([summary, settings]) => {
         setShiftSummary(summary);
         setStoreSettings(settings);
+        if (summary.active_shift) {
+          setInitialBasePesos(String(Math.round(summary.active_shift.initial_cash_cents / 100)));
+        }
       })
       .catch((err) => {
         console.error('Error cargando turno de caja:', err);
@@ -80,6 +85,7 @@ export function CashClosingModal({ isOpen, onClose, onClosedSuccess }: CashClosi
 
   // Recalcular resumen si el usuario cambia la base inicial
   const handleBaseChange = (value: string) => {
+    if (shiftSummary?.active_shift) return;
     setInitialBasePesos(value);
     const baseCents = parseCOP(value) * 100;
     if (shiftSummary) {
@@ -90,7 +96,8 @@ export function CashClosingModal({ isOpen, onClose, onClosedSuccess }: CashClosi
           baseCents +
           shiftSummary.sales_cash_cents +
           shiftSummary.credit_payments_cash_cents -
-          (shiftSummary.expenses_cash_cents || 0),
+          (shiftSummary.expenses_cash_cents || 0) -
+          (shiftSummary.withdrawals_cash_cents || 0),
       });
     }
   };
@@ -138,7 +145,9 @@ export function CashClosingModal({ isOpen, onClose, onClosedSuccess }: CashClosi
     setSubmitting(true);
     setError(null);
     try {
-      const baseCents = parseCOP(initialBasePesos) * 100;
+      const baseCents = shiftSummary?.active_shift
+        ? shiftSummary.active_shift.initial_cash_cents
+        : parseCOP(initialBasePesos) * 100;
       const created = await recordCashClosing({
         initial_cash_cents: baseCents,
         breakdown: { bills: billsCount, coins: coinsCount },
@@ -299,6 +308,26 @@ export function CashClosingModal({ isOpen, onClose, onClosedSuccess }: CashClosi
               </div>
             )}
 
+            {(savedClosing.withdrawals_cash_cents || 0) > 0 && (
+              <div className="rounded-xl border border-sky-200 bg-sky-50 px-3.5 py-2.5 text-xs text-sky-900 flex items-center justify-between">
+                <span className="font-semibold">🏦 Sangrías de Seguridad retiradas durante el turno:</span>
+                <span className="font-black tabular-nums">-{formatCentsCOP(savedClosing.withdrawals_cash_cents || 0)}</span>
+              </div>
+            )}
+
+            {(savedClosing.opened_by_name || savedClosing.closed_by_name) && (
+              <div className="rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2 text-xs text-slate-700 flex flex-wrap items-center justify-between gap-2">
+                {savedClosing.opened_by_name && (
+                  <span>
+                    <strong>Abierto por:</strong> {savedClosing.opened_by_name}
+                  </span>
+                )}
+                <span>
+                  <strong>Cerrado por:</strong> {savedClosing.closed_by_name}
+                </span>
+              </div>
+            )}
+
             {savedClosing.notes && (
               <div className="card p-3 bg-slate-50 text-xs text-slate-700">
                 <strong className="block text-slate-900 mb-0.5">Observaciones:</strong>
@@ -321,18 +350,24 @@ export function CashClosingModal({ isOpen, onClose, onClosedSuccess }: CashClosi
             <div className="card p-4 bg-gradient-to-r from-slate-900 to-sf-dark text-white border-none shadow-sm space-y-3">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-700/60 pb-3">
                 <div>
-                  <h4 className="text-sm font-bold text-white flex items-center gap-2">
+                  <h4 className="text-sm font-bold text-white flex flex-wrap items-center gap-2">
                     <span>⚡ Resumen del Turno Actual</span>
-                    <span className="rounded-full bg-emerald-500/20 text-emerald-300 text-[10px] px-2 py-0.5 border border-emerald-500/30 font-semibold">
-                      En Curso
-                    </span>
+                    {shiftSummary?.active_shift ? (
+                      <span className="rounded-full bg-emerald-500/20 text-emerald-300 text-[10px] px-2 py-0.5 border border-emerald-500/30 font-semibold">
+                        Turno #{shiftSummary.active_shift.shift_number} · {shiftSummary.active_shift.opened_by_name || 'Cajero'}
+                      </span>
+                    ) : (
+                      <span className="rounded-full bg-emerald-500/20 text-emerald-300 text-[10px] px-2 py-0.5 border border-emerald-500/30 font-semibold">
+                        En Curso
+                      </span>
+                    )}
                   </h4>
                   <p className="text-xs text-slate-300">
                     Apertura: {shiftSummary ? new Date(shiftSummary.opened_at).toLocaleDateString('es-CO', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : 'Hoy'}
                   </p>
                 </div>
 
-                {/* Base inicial editable y acceso a Caja Menor */}
+                {/* Base inicial editable (o bloqueada si hay turno abierto) y acceso a Caja Menor / Sangría */}
                 <div className="flex flex-wrap items-center gap-2">
                   <button
                     type="button"
@@ -341,24 +376,34 @@ export function CashClosingModal({ isOpen, onClose, onClosedSuccess }: CashClosi
                   >
                     💸 Registrar Gasto
                   </button>
+                  <button
+                    type="button"
+                    onClick={() => setShiftWithdrawalModalOpen(true)}
+                    className="min-h-[44px] rounded-xl border border-sky-400/50 bg-sky-500/20 px-3 text-xs font-bold text-sky-200 transition hover:bg-sky-500/30"
+                  >
+                    🏦 Sangría
+                  </button>
                   <div className="flex items-center gap-2 bg-slate-800/80 px-3 py-1.5 rounded-xl border border-slate-700">
                     <label htmlFor="base-cash" className="text-xs text-slate-300 font-medium">
-                      Base Inicial ($):
+                      {shiftSummary?.active_shift ? 'Base de Apertura ($):' : 'Base Inicial ($):'}
                     </label>
                     <input
                       id="base-cash"
                       type="text"
                       inputMode="numeric"
+                      readOnly={Boolean(shiftSummary?.active_shift)}
                       value={initialBasePesos}
                       onChange={(e) => handleBaseChange(e.target.value)}
-                      className="w-24 bg-slate-900 text-right text-xs font-bold text-emerald-400 px-2 py-1 rounded border border-slate-600 focus:outline-none focus:ring-1 focus:ring-sf-primary"
+                      className={`w-24 bg-slate-900 text-right text-xs font-bold text-emerald-400 px-2 py-1 rounded border border-slate-600 focus:outline-none focus:ring-1 focus:ring-sf-primary ${
+                        shiftSummary?.active_shift ? 'opacity-80 cursor-not-allowed' : ''
+                      }`}
                     />
                   </div>
                 </div>
               </div>
 
               {/* Métricas clave */}
-              <div className="grid grid-cols-2 gap-2 sm:grid-cols-5 text-xs">
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6 text-xs">
                 <div className="bg-slate-800/60 p-2.5 rounded-xl">
                   <span className="text-slate-400 block">Base Caja</span>
                   <span className="text-sm font-bold text-white tabular-nums">
@@ -381,6 +426,12 @@ export function CashClosingModal({ isOpen, onClose, onClosedSuccess }: CashClosi
                   <span className="text-slate-400 block">Gastos Caja Menor ({shiftSummary?.expenses_cash_count || 0})</span>
                   <span className="text-sm font-bold text-rose-400 tabular-nums">
                     -{formatCentsCOP(shiftSummary?.expenses_cash_cents || 0)}
+                  </span>
+                </div>
+                <div className="bg-slate-800/60 p-2.5 rounded-xl">
+                  <span className="text-slate-400 block">Sangrías Seguridad ({shiftSummary?.withdrawals_cash_count || 0})</span>
+                  <span className="text-sm font-bold text-sky-300 tabular-nums">
+                    -{formatCentsCOP(shiftSummary?.withdrawals_cash_cents || 0)}
                   </span>
                 </div>
                 <div className="bg-slate-800/90 p-2.5 rounded-xl border border-slate-700 col-span-2 sm:col-span-1">
@@ -599,6 +650,14 @@ export function CashClosingModal({ isOpen, onClose, onClosedSuccess }: CashClosi
         isOpen={pettyCashModalOpen}
         onClose={() => setPettyCashModalOpen(false)}
         onExpenseChanged={() => loadShiftSummary(initialBasePesos)}
+      />
+
+      {/* Modal de Sangrías de Seguridad / Turnos */}
+      <CashShiftModal
+        isOpen={shiftWithdrawalModalOpen}
+        onClose={() => setShiftWithdrawalModalOpen(false)}
+        initialTab="withdrawals"
+        onShiftChanged={() => loadShiftSummary(initialBasePesos)}
       />
     </>
   );

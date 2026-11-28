@@ -878,4 +878,91 @@ test.describe('Suite E2E de Certificación de Producción — SurtiFácil SaaS',
     await expect(page.getByRole('heading', { name: /Rastreo de Pedido en Vivo/i })).toBeVisible();
     await expect(page.getByText(/Doña Rosa Granel/i)).toBeVisible();
   });
+
+  test('14. Turnos de Caja con Base Inicial COP, Sangrías de Seguridad, Descuento en Arqueo y Trazabilidad por Cajero (Tarea 33)', async ({
+    page,
+  }) => {
+    await setupProductionE2EHarness(page);
+
+    // 1. Iniciar sesión como Cajero para validar apertura, sangría y bloqueo RBAC de anulación
+    await page.goto('/#/login');
+    await page.getByRole('button', { name: /Cajero/i }).first().click();
+    await expect(page.getByRole('complementary', { name: 'Menú principal' })).toBeVisible();
+    await page.goto('/#/create-sale');
+    await expect(page.getByRole('heading', { name: 'Nueva venta', level: 2 })).toBeVisible();
+
+    // Verificar cero desbordamiento horizontal en POS
+    const hasOverflow = await page.evaluate(
+      () => document.documentElement.scrollWidth > window.innerWidth + 1
+    );
+    expect(hasOverflow).toBe(false);
+
+    // 2. Abrir Turno de Caja con preset $ 150.000 COP (Turno Mañana)
+    await page.getByRole('button', { name: /Turno \/ Sangrías/i }).first().click();
+    const shiftDialog = page.getByRole('dialog', {
+      name: /Turnos de Caja y Sangrías de Seguridad/i,
+    });
+    await expect(shiftDialog).toBeVisible();
+
+    await shiftDialog.getByRole('button', { name: /Turno Mañana/i }).click();
+    await shiftDialog.getByRole('button', { name: '$ 150.000' }).click();
+    await shiftDialog.getByRole('button', { name: /Abrir Turno de Caja/i }).click();
+
+    await expect(shiftDialog.getByRole('status')).toContainText('Turno #1 abierto con base de $ 150.000');
+    await expect(shiftDialog.getByText('🟢 Turno #1 Abierto')).toBeVisible();
+
+    // 3. Registrar Sangría de Seguridad de $ 50.000 hacia Caja Fuerte
+    await shiftDialog.getByRole('button', { name: /Sangrías/i }).click();
+    await shiftDialog.getByRole('button', { name: /Caja Fuerte \/ Bodega/i }).click();
+    await shiftDialog.getByRole('button', { name: '$ 50.000' }).click();
+    await shiftDialog.getByLabel(/Motivo \/ Concepto/i).fill('Resguardo preventivo billetes de 50');
+    await shiftDialog.getByLabel(/Recibido por \/ Custodia/i).fill('Caja fuerte principal');
+    await shiftDialog.getByRole('button', { name: /Registrar Sangría de Seguridad/i }).click();
+
+    await expect(shiftDialog.getByRole('status')).toContainText('Sangría registrada: $ 50.000');
+
+    // Rol Cajero NO puede anular sangrías
+    await expect(
+      shiftDialog.getByRole('button', { name: /Anular sangría Resguardo preventivo billetes de 50/i })
+    ).toHaveCount(0);
+    await expect(shiftDialog.getByText(/Solo Admin o Gerente puede anular sangrías/i)).toBeVisible();
+
+    // 4. Pasar directo a Arqueo y Cerrar Turno: Base $150.000 + Ventas $50.000 - Sangría $50.000 = $150.000 esperado
+    await shiftDialog.getByRole('button', { name: /Arqueo y Cerrar Turno/i }).first().click();
+    const closingDialog = page.getByRole('dialog', { name: /Arqueo y Cierre de Caja/i });
+    await expect(closingDialog).toBeVisible();
+
+    await expect(closingDialog.getByText(/Turno #1/i)).toBeVisible();
+    await expect(closingDialog.getByText(/Sangrías Seguridad \(1\)/i)).toBeVisible();
+    await expect(closingDialog.getByText('-$ 50.000')).toBeVisible();
+    await expect(closingDialog.getByLabel(/Base de Apertura/i)).toHaveAttribute('readonly', '');
+
+    // Contar $ 150.000 físicos (1 billete de 100k + 1 billete de 50k) -> Cuadrado ($ 0)
+    await closingDialog.getByRole('button', { name: 'Sumar billete de $ 100.000' }).click();
+    await closingDialog.getByRole('button', { name: 'Sumar billete de $ 50.000' }).click();
+    await expect(closingDialog.getByText(/Cuadrado \(\$ 0\)/i)).toBeVisible();
+
+    await closingDialog.getByRole('button', { name: /Cerrar Caja y Generar Acta/i }).click();
+    const savedDialog = page.getByRole('dialog', { name: /Acta de Cierre/i });
+    await expect(savedDialog.getByText(/Cierre de Caja Guardado con Éxito/i)).toBeVisible();
+    await expect(savedDialog.getByText(/Sangrías de Seguridad retiradas durante el turno/i)).toBeVisible();
+
+    // 5. Tirilla térmica incluye Apertura y Sangrías Caja (-)
+    await savedDialog.getByRole('button', { name: /Imprimir Tirilla/i }).click();
+    const thermalDialog = page.getByRole('dialog').filter({ hasText: /ACTA DE ARQUEO Y CIERRE DE CAJA/i });
+    await expect(thermalDialog.getByText(/Sangrías Caja \(-\):/i)).toBeVisible();
+    await expect(thermalDialog.getByText(/Apertura:/i)).toBeVisible();
+    await thermalDialog.getByRole('button', { name: /Cerrar/i }).first().click();
+    await savedDialog.getByRole('button', { name: 'Listo' }).click();
+
+    // 6. Reabrir Turno / Sangrías y verificar en Historial que el Turno #1 quedó cerrado Cuadrado
+    await page.getByRole('button', { name: /Turno \/ Sangrías|Turno #1/i }).first().click();
+    const reopenedDialog = page.getByRole('dialog', {
+      name: /Turnos de Caja y Sangrías de Seguridad/i,
+    });
+    await reopenedDialog.getByRole('button', { name: /Historial/i }).click();
+    await expect(reopenedDialog.getByText('Turno #1', { exact: true })).toBeVisible();
+    await expect(reopenedDialog.getByText(/Cerrado Cuadrado/i)).toBeVisible();
+    await expect(reopenedDialog.getByText(/Sangrías realizadas \(1\)/i)).toBeVisible();
+  });
 });

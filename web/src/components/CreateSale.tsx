@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   CreditCustomer,
   PaymentBreakdownEntry,
@@ -34,7 +34,11 @@ import { SarinVoicePOS } from './SarinVoicePOS';
 import type { VoiceSaleCommandResult } from '../utils/sarinVoiceParser';
 import ThermalReceiptModal from './ThermalReceiptModal';
 import CashClosingModal from './CashClosingModal';
+import CashShiftModal from './CashShiftModal';
 import PettyCashModal from './PettyCashModal';
+import { onDataChange } from '../services/apiClient';
+import { getActiveCashShift } from '../services/cashShiftService';
+import type { CashShift } from '../types/cashClosing';
 import { CashChangeCalculator } from './CashChangeCalculator';
 import {
   isNotificationSupported,
@@ -139,7 +143,30 @@ const CreateSale = () => {
   const [lastCreatedSale, setLastCreatedSale] = useState<Sale | null>(null);
   const [receiptModalOpen, setReceiptModalOpen] = useState(false);
   const [closingModalOpen, setClosingModalOpen] = useState(false);
+  const [shiftModalOpen, setShiftModalOpen] = useState(false);
+  const [activeShift, setActiveShift] = useState<CashShift | null>(null);
   const [pettyCashModalOpen, setPettyCashModalOpen] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    const refreshShift = () => {
+      void getActiveCashShift()
+        .then((res) => {
+          if (active) setActiveShift(res.active_shift);
+        })
+        .catch(() => {
+          // Silencioso en barra de estado si el backend aún no responde
+        });
+    };
+    refreshShift();
+    const unsubShift = onDataChange('cash-shifts', refreshShift);
+    const unsubClosing = onDataChange('cash-closings', refreshShift);
+    return () => {
+      active = false;
+      unsubShift();
+      unsubClosing();
+    };
+  }, []);
   const [bulkProduct, setBulkProduct] = useState<Product | null>(null);
   const [bulkInitialQty, setBulkInitialQty] = useState<number | undefined>(undefined);
   const [notifPermission, setNotifPermission] = useState<NotificationPermission>(() => getNotificationPermission());
@@ -757,7 +784,7 @@ const CreateSale = () => {
         title="Nueva venta"
         description={isMobile ? undefined : 'Toca un producto para agregarlo al carrito o atiende pedidos en vivo.'}
         actions={
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             {isNotificationSupported() && (
               <button
                 type="button"
@@ -784,6 +811,17 @@ const CreateSale = () => {
                 <span>{notifPermission === 'granted' ? '🔔 Alertas ON' : '🔕 Activar Alertas'}</span>
               </button>
             )}
+            <button
+              type="button"
+              onClick={() => setShiftModalOpen(true)}
+              className={`min-h-[44px] px-3 text-xs font-bold flex items-center gap-1.5 rounded-xl border transition ${
+                activeShift
+                  ? 'border-emerald-300 bg-emerald-50 text-emerald-800 hover:bg-emerald-100'
+                  : 'btn-secondary text-slate-700 hover:text-slate-900'
+              }`}
+            >
+              <span>{activeShift ? `🟢 Turno #${activeShift.shift_number}` : '🔓 Turno / Sangrías'}</span>
+            </button>
             <button
               type="button"
               onClick={() => setPettyCashModalOpen(true)}
@@ -1097,6 +1135,14 @@ const CreateSale = () => {
         <CashClosingModal
           isOpen={closingModalOpen}
           onClose={() => setClosingModalOpen(false)}
+        />
+      )}
+
+      {shiftModalOpen && (
+        <CashShiftModal
+          isOpen={shiftModalOpen}
+          onClose={() => setShiftModalOpen(false)}
+          onRequestCloseShift={() => setClosingModalOpen(true)}
         />
       )}
 

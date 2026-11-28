@@ -1,6 +1,15 @@
 import { apiClient, emitDataChange, hasAuthSession } from './apiClient';
 import { getLocalSales } from './mockData';
 import { getMockShiftCashExpenses } from './cashExpenseService';
+import {
+  closeMockActiveShift,
+  getMockActiveShift,
+  getMockShiftCashWithdrawals,
+} from './cashShiftService';
+import {
+  calculateClosingStatus,
+  calculateExpectedDrawerCashCents,
+} from '../utils/cashShiftAccounting';
 import { extractSalePaymentBuckets, isSaleVoided } from '../utils/saleAccounting';
 import {
   CashClosing,
@@ -48,8 +57,12 @@ export function calculateCountedCents(breakdown: {
 export async function getCashShiftSummary(initialBaseCents = 10000000): Promise<CashShiftSummary> {
   if (isMockMode() || !hasAuthSession()) {
     const localSales = getLocalSales();
-    const lastClosing = mockClosingsStorage[0];
-    const openedAt = lastClosing ? lastClosing.closed_at : new Date(new Date().setHours(0, 0, 0, 0)).toISOString();
+    const activeShift = getMockActiveShift();
+    const lastClosing = activeShift ? null : mockClosingsStorage[0];
+    const openedAt =
+      activeShift?.opened_at ||
+      (lastClosing ? lastClosing.closed_at : new Date(new Date().setHours(0, 0, 0, 0)).toISOString());
+    const resolvedBaseCents = activeShift ? activeShift.initial_cash_cents : initialBaseCents;
     const threshold = new Date(openedAt).getTime();
 
     const currentShiftSales = localSales.filter((s) => {
@@ -89,6 +102,7 @@ export async function getCashShiftSummary(initialBaseCents = 10000000): Promise<
     const creditPaymentsCashCount = 0;
 
     const shiftExpenses = getMockShiftCashExpenses(openedAt);
+    const shiftWithdrawals = getMockShiftCashWithdrawals(openedAt, activeShift?.id || null);
 
     const otherSales = Object.entries(otherMethods).map(([payment_method, data]) => ({
       payment_method,
@@ -98,15 +112,24 @@ export async function getCashShiftSummary(initialBaseCents = 10000000): Promise<
 
     return {
       opened_at: openedAt,
-      initial_cash_cents: initialBaseCents,
+      initial_cash_cents: resolvedBaseCents,
       sales_cash_cents: salesCashCents,
       sales_cash_count: salesCashCount,
       credit_payments_cash_cents: creditPaymentsCashCents,
       credit_payments_cash_count: creditPaymentsCashCount,
       expenses_cash_cents: shiftExpenses.total_cents,
       expenses_cash_count: shiftExpenses.count,
-      expected_cash_cents: initialBaseCents + salesCashCents + creditPaymentsCashCents - shiftExpenses.total_cents,
+      withdrawals_cash_cents: shiftWithdrawals.total_cents,
+      withdrawals_cash_count: shiftWithdrawals.count,
+      expected_cash_cents: calculateExpectedDrawerCashCents({
+        initial_cash_cents: resolvedBaseCents,
+        sales_cash_cents: salesCashCents,
+        credit_payments_cash_cents: creditPaymentsCashCents,
+        expenses_cash_cents: shiftExpenses.total_cents,
+        withdrawals_cash_cents: shiftWithdrawals.total_cents,
+      }),
       other_sales: otherSales,
+      active_shift: activeShift,
     };
   }
 
@@ -123,8 +146,11 @@ export async function getCashShiftSummary(initialBaseCents = 10000000): Promise<
       credit_payments_cash_count: 0,
       expenses_cash_cents: 0,
       expenses_cash_count: 0,
+      withdrawals_cash_cents: 0,
+      withdrawals_cash_count: 0,
       expected_cash_cents: initialBaseCents,
       other_sales: [],
+      active_shift: null,
     };
   }
 }
@@ -139,6 +165,7 @@ export async function recordCashClosing(input: CashClosingInput): Promise<CashCl
     try {
       const result = await apiClient.post<CashClosing>('/cash-closings', input);
       emitDataChange('cash-closings');
+      emitDataChange('cash-shifts');
       return result;
     } catch (err) {
       console.warn('Error enviando cash-closing a D1, usando mock fallback:', err);
@@ -146,20 +173,23 @@ export async function recordCashClosing(input: CashClosingInput): Promise<CashCl
   }
 
   // Fallback local en memoria
-  const summary = await getCashShiftSummary(input.initial_cash_cents);
+  const activeShift = getMockActiveShift();
+  const resolvedBaseCents = activeShift ? activeShift.initial_cash_cents : input.initial_cash_cents;
+  const summary = await getCashShiftSummary(resolvedBaseCents);
   const expectedCents = summary.expected_cash_cents;
-  const diff = countedCents - expectedCents;
-  const status = diff === 0 ? 'balanced' : diff > 0 ? 'surplus' : 'shortage';
+  const { difference_cents: diff, status } = calculateClosingStatus(expectedCents, countedCents);
+  const closedAt = new Date().toISOString();
+  const closingId = `cclose-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
 
   const closing: CashClosing = {
-    id: `cclose-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
-    negocio_id: 'surtifacil',
+    id: closingId,
+    negocio_id: activeShift?.negocio_id || 'surtifacil',
     closing_number: mockClosingsStorage.length + 1,
     opened_at: summary.opened_at,
-    closed_at: new Date().toISOString(),
+    closed_at: closedAt,
     closed_by_uid: 'mock-cashier-uid',
     closed_by_name: 'Cajero de Mostrador',
-    initial_cash_cents: input.initial_cash_cents,
+    initial_cash_cents: resolvedBaseCents,
     sales_cash_cents: summary.sales_cash_cents,
     credit_payments_cash_cents: summary.credit_payments_cash_cents,
     expected_cash_cents: expectedCents,
@@ -170,11 +200,31 @@ export async function recordCashClosing(input: CashClosingInput): Promise<CashCl
     notes: input.notes?.trim() || null,
     total_sales_count: summary.sales_cash_count,
     expenses_cash_cents: summary.expenses_cash_cents || 0,
-    created_at: new Date().toISOString(),
+    withdrawals_cash_cents: summary.withdrawals_cash_cents || 0,
+    shift_id: activeShift?.id || null,
+    shift_number: activeShift?.shift_number ?? null,
+    shift_label: activeShift?.shift_label || null,
+    opened_by_uid: activeShift?.opened_by_uid || null,
+    opened_by_name: activeShift?.opened_by_name || null,
+    created_at: closedAt,
   };
+
+  if (activeShift) {
+    closeMockActiveShift({
+      closing_id: closingId,
+      closed_at: closedAt,
+      closed_by_uid: closing.closed_by_uid,
+      closed_by_name: closing.closed_by_name,
+      expected_cash_cents: expectedCents,
+      counted_cash_cents: countedCents,
+      difference_cents: diff,
+      closing_status: status,
+    });
+  }
 
   mockClosingsStorage.unshift(closing);
   emitDataChange('cash-closings');
+  emitDataChange('cash-shifts');
   return closing;
 }
 

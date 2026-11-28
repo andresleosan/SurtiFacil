@@ -289,10 +289,59 @@ CREATE TABLE IF NOT EXISTS cash_closings (
   notes TEXT,
   total_sales_count INTEGER NOT NULL DEFAULT 0,
   expenses_cash_cents INTEGER NOT NULL DEFAULT 0,
+  shift_id TEXT,
+  shift_label TEXT,
+  opened_by_uid TEXT,
+  opened_by_name TEXT,
+  withdrawals_cash_cents INTEGER NOT NULL DEFAULT 0,
   created_at TEXT DEFAULT (datetime('now'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_cash_closings_negocio ON cash_closings(negocio_id, closed_at);
+
+-- 10.1.b Tabla de Turnos de Caja (Apertura / Base Inicial / Cierre por Cajero)
+CREATE TABLE IF NOT EXISTS cash_shifts (
+  id TEXT PRIMARY KEY,
+  negocio_id TEXT NOT NULL DEFAULT 'surtifacil' REFERENCES negocios(id) ON DELETE CASCADE,
+  shift_number INTEGER NOT NULL,
+  shift_label TEXT NOT NULL DEFAULT 'completo',
+  status TEXT NOT NULL DEFAULT 'open' CHECK(status IN ('open', 'closed')),
+  opened_at TEXT NOT NULL DEFAULT (datetime('now')),
+  opened_by_uid TEXT NOT NULL,
+  opened_by_name TEXT,
+  opened_by_role TEXT DEFAULT 'cashier',
+  initial_cash_cents INTEGER NOT NULL DEFAULT 0,
+  opening_notes TEXT,
+  closed_at TEXT,
+  closed_by_uid TEXT,
+  closed_by_name TEXT,
+  closing_id TEXT,
+  expected_cash_cents INTEGER,
+  counted_cash_cents INTEGER,
+  difference_cents INTEGER,
+  closing_status TEXT,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_cash_shifts_negocio_status ON cash_shifts(negocio_id, status, opened_at DESC);
+
+-- 10.1.c Tabla de Retiros Parciales de Seguridad ("Sangrías" de Caja)
+CREATE TABLE IF NOT EXISTS cash_withdrawals (
+  id TEXT PRIMARY KEY,
+  negocio_id TEXT NOT NULL DEFAULT 'surtifacil' REFERENCES negocios(id) ON DELETE CASCADE,
+  shift_id TEXT REFERENCES cash_shifts(id) ON DELETE SET NULL,
+  amount_cents INTEGER NOT NULL,
+  destination TEXT NOT NULL DEFAULT 'caja_fuerte',
+  reason TEXT NOT NULL,
+  received_by TEXT,
+  created_by_uid TEXT NOT NULL DEFAULT 'system',
+  created_by_name TEXT,
+  created_by_role TEXT DEFAULT 'cashier',
+  created_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_cash_withdrawals_negocio_date ON cash_withdrawals(negocio_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_cash_withdrawals_shift ON cash_withdrawals(negocio_id, shift_id);
 
 -- 10.2 Tabla de Caja Menor y Gastos Operativos del Turno
 CREATE TABLE IF NOT EXISTS cash_expenses (

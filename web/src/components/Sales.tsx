@@ -12,6 +12,7 @@ import { exportSalesToCSV } from '../utils/csvExporter';
 import { extractSalePaymentBuckets, isSaleVoided, parsePaymentBreakdown } from '../utils/saleAccounting';
 import ThermalReceiptModal from './ThermalReceiptModal';
 import CashClosingModal from './CashClosingModal';
+import CashShiftModal from './CashShiftModal';
 import PettyCashModal from './PettyCashModal';
 
 const PAGE_SIZE = 50;
@@ -67,6 +68,7 @@ const Sales = () => {
   const [expandedSaleId, setExpandedSaleId] = useState<string | null>(null);
   const [selectedSaleForReceipt, setSelectedSaleForReceipt] = useState<Sale | null>(null);
   const [closingModalOpen, setClosingModalOpen] = useState(false);
+  const [shiftModalOpen, setShiftModalOpen] = useState(false);
   const [pettyCashModalOpen, setPettyCashModalOpen] = useState(false);
 
   // Estado del modal de anulación atómica
@@ -190,6 +192,13 @@ const Sales = () => {
       title="Historial de ventas"
       actions={
         <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setShiftModalOpen(true)}
+            className="btn-secondary min-h-[44px] px-3 text-xs font-semibold text-slate-800"
+          >
+            <span>🔓 Turno / Sangrías</span>
+          </button>
           <button
             type="button"
             onClick={() => setPettyCashModalOpen(true)}
@@ -434,6 +443,14 @@ const Sales = () => {
           isOpen={closingModalOpen}
           onClose={() => setClosingModalOpen(false)}
           onClosedSuccess={() => void loadFirstPage()}
+        />
+      )}
+
+      {shiftModalOpen && (
+        <CashShiftModal
+          isOpen={shiftModalOpen}
+          onClose={() => setShiftModalOpen(false)}
+          onRequestCloseShift={() => setClosingModalOpen(true)}
         />
       )}
 

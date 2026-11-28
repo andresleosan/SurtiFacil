@@ -569,6 +569,45 @@ Para maximizar la eficiencia de tokens y la precisión de razonamiento en cada s
        - **Build de Producción (`npm run build:web`):** `tsc && vite build` completado sin errores (`767` módulos en `6.25s`, PWA precache `76 entries` / `2000.44 KiB`).
        - **Playwright E2E (`npm run test:e2e`):** `55` pruebas activas aprobadas y `0` fallidas en `2.5m` (`chromium`, `mobile-chromium` Pixel 7 y `tablet-chromium` iPad landscape; `7` omitidas condicionales de credenciales `QA_USER_EMAIL`).
 
+---
+
+## Fase 8 — Operación Diaria de Abastos y Escala Comercial
+
+- [x] **Tarea 33 — Apertura/Cierre de Turnos por Cajero con Base Inicial COP, Retiros Parciales de Seguridad ("Sangrías" de Caja) y Trazabilidad de Turno:**
+  - **Nivel Recomendado:** `3.8 Flash (High)`
+  - **Estado:** ✅ Completada y Desplegada
+  - **Evidencia Técnica de Implementación:**
+    1. **Motor Contable Isomórfico (`web/functions/_lib/cashShiftAccounting.ts` y `web/src/utils/cashShiftAccounting.ts`):**
+       - Definidos tipos y metadatos de jornadas (`Turno Mañana`, `Turno Tarde`, `Turno Completo`, `Fin de Semana`), destinos de sangría (`Caja Fuerte / Bodega`, `Entrega al Dueño`, `Consignación Banco / Nequi`, `Cambio de Sencillo`), presets rápidos COP, validadores estrictos (`validateOpenShiftInput`, `validateCashWithdrawalInput`), cálculo de efectivo esperado en cajón (`calculateExpectedDrawerCashCents`) descontando caja menor y sangrías, y alerta preventiva de exceso en cajón (`>= $ 500.000 COP`).
+    2. **Esquema Multi-Tenant en Cloudflare D1 (`docs/schema-d1.sql` y `web/functions/_lib/dbSchema.ts`):**
+       - Creadas tablas `cash_shifts` y `cash_withdrawals` aisladas por `negocio_id` con índices operativos, más columnas `shift_id`, `shift_label`, `opened_by_uid`, `opened_by_name` y `withdrawals_cash_cents` en `cash_closings` mediante auto-migración idempotente.
+    3. **API Serverless en Cloudflare Pages Functions (`web/functions/api/[[route]].ts`):**
+       - Endpoints `GET /api/cash-shifts/active`, `POST /api/cash-shifts/open` (bloqueo `409` ante turno ya abierto), `GET /api/cash-shifts`, `GET /api/cash-withdrawals`, `POST /api/cash-withdrawals` y `DELETE /api/cash-withdrawals/:id` (con RBAC `403` para `cashier` y bloqueo `409` en turnos cerrados).
+       - Integración en `GET /api/cash-closings/summary`, `POST /api/cash-closings` (cierre atómico del turno vía `env.DB.batch`) y `GET /api/cash-expenses?shift_only=true` sin contaminar el Estado de Resultados (`net-profit`).
+    4. **Servicios, Tirilla Térmica, Exportación CSV e Interfaz Táctil (`cashShiftService.ts`, `cashClosingService.ts`, `CashShiftModal.tsx`, `CashClosingModal.tsx`, `CreateSale.tsx`, `Dashboard.tsx`, `Sales.tsx`, `AppShell.tsx`, `receiptGenerator.ts`, `csvExporter.ts`):**
+       - Modal táctil `<CashShiftModal />` con 3 pestañas (*Turno Actual*, *Sangrías*, *Historial*), indicador en vivo `🟢 Turno #X` en POS, descuento automático de sangrías y trazabilidad `Apertura:` / `Sangrías Caja (-):` en tirilla térmica 58mm/80mm, reporte WhatsApp y Excel CSV.
+    5. **100% de Pruebas en Verde tras la Última Edición:**
+       - **Vitest (`npm test`):** `68` archivos de prueba y `512` tests aprobados al 100% en `18.26s` (incluyendo [`web/src/test/cashShift.test.tsx`](../web/src/test/cashShift.test.tsx) y pruebas integrales de servidor en [`web/src/test/apiFunctions.test.ts`](../web/src/test/apiFunctions.test.ts)).
+       - **Build de Producción (`npm run build:web`):** `tsc && vite build` completado sin errores (`771` módulos en `5.32s`, PWA precache `76 entries` / `2036.17 KiB`).
+       - **Playwright E2E (`npm run test:e2e`):** `56` pruebas activas aprobadas y `0` fallidas en `2.8m` (incluyendo Escenario 14 en [`qa/e2e/saas-production.spec.ts`](../qa/e2e/saas-production.spec.ts) y suites multi-dispositivo `chromium`, `mobile-chromium` y `tablet-chromium`; `7` omitidas condicionales de credenciales `QA_USER_EMAIL`).
+
+- [ ] **Tarea 34 — Cuentas por Pagar a Proveedores (Facturas a Crédito de Distribuidoras, Fechas de Vencimiento y Abonos):**
+  - **Nivel Recomendado:** `3.8 Flash (High)`
+  - **Objetivo:** Permitir al tendero y gerente registrar compras a crédito de distribuidoras (Bavaria, Postobón, Colanta, Mayoristas), controlar fechas de vencimiento, registrar abonos parciales/totales desde caja o transferencia y consultar cartera por pagar consolidada en `formatCOP`.
+
+- [ ] **Tarea 35 — Gestión de Domicilios y Repartidores del Barrio (Asignación de Pedidos Web/WhatsApp, Control de Vueltas Contraentrega y Liquidación):**
+  - **Nivel Recomendado:** `Argon (Low)`
+  - **Objetivo:** Asignar pedidos a domicilio a repartidores del barrio, calcular el efectivo a llevar para vueltas contraentrega, rastrear entregas completadas y cuadrar la liquidación diaria del domiciliario al regresar al mostrador.
+
+- [ ] **Tarea 36 — Importación/Actualización Masiva de Catálogo y Precios por Excel/CSV + Asistente de Onboarding Rápido con Canasta Colombiana:**
+  - **Nivel Recomendado:** `3.8 Flash (Medium)`
+  - **Objetivo:** Facilitar el arranque de tiendas nuevas y la actualización rápida de precios en lote mediante plantilla CSV/Excel validada con vista previa de cambios y cargador inicial de canasta familiar colombiana por categorías.
+
+- [ ] **Tarea 37 — Suite E2E Multi-Dispositivo de Certificación Total de Fase 8 y Despliegue en Vivo:**
+  - **Nivel Recomendado:** `Argon (High)`
+  - **Objetivo:** Certificar de extremo a extremo con Vitest y Playwright multi-dispositivo (`chromium`, `mobile-chromium` y `tablet-chromium`) todos los flujos de turnos/sangrías, cuentas por pagar a proveedores, gestión de domiciliarios e importación masiva de catálogo.
+
+
 
 
 

@@ -314,8 +314,70 @@ export async function ensureDatabaseSchema(db: D1Database, force = false): Promi
       notes TEXT,
       total_sales_count INTEGER NOT NULL DEFAULT 0,
       expenses_cash_cents INTEGER NOT NULL DEFAULT 0,
+      shift_id TEXT,
+      shift_label TEXT,
+      opened_by_uid TEXT,
+      opened_by_name TEXT,
+      withdrawals_cash_cents INTEGER NOT NULL DEFAULT 0,
       created_at TEXT DEFAULT (datetime('now'))
     )`
+  );
+
+  await safeRun(
+    db,
+    `CREATE TABLE IF NOT EXISTS cash_shifts (
+      id TEXT PRIMARY KEY,
+      negocio_id TEXT NOT NULL DEFAULT 'surtifacil',
+      shift_number INTEGER NOT NULL,
+      shift_label TEXT NOT NULL DEFAULT 'completo',
+      status TEXT NOT NULL DEFAULT 'open',
+      opened_at TEXT NOT NULL DEFAULT (datetime('now')),
+      opened_by_uid TEXT NOT NULL,
+      opened_by_name TEXT,
+      opened_by_role TEXT DEFAULT 'cashier',
+      initial_cash_cents INTEGER NOT NULL DEFAULT 0,
+      opening_notes TEXT,
+      closed_at TEXT,
+      closed_by_uid TEXT,
+      closed_by_name TEXT,
+      closing_id TEXT,
+      expected_cash_cents INTEGER,
+      counted_cash_cents INTEGER,
+      difference_cents INTEGER,
+      closing_status TEXT,
+      created_at TEXT DEFAULT (datetime('now'))
+    )`
+  );
+
+  await safeRun(
+    db,
+    'CREATE INDEX IF NOT EXISTS idx_cash_shifts_negocio_status ON cash_shifts(negocio_id, status, opened_at DESC)'
+  );
+
+  await safeRun(
+    db,
+    `CREATE TABLE IF NOT EXISTS cash_withdrawals (
+      id TEXT PRIMARY KEY,
+      negocio_id TEXT NOT NULL DEFAULT 'surtifacil',
+      shift_id TEXT,
+      amount_cents INTEGER NOT NULL,
+      destination TEXT NOT NULL DEFAULT 'caja_fuerte',
+      reason TEXT NOT NULL,
+      received_by TEXT,
+      created_by_uid TEXT NOT NULL DEFAULT 'system',
+      created_by_name TEXT,
+      created_by_role TEXT DEFAULT 'cashier',
+      created_at TEXT DEFAULT (datetime('now'))
+    )`
+  );
+
+  await safeRun(
+    db,
+    'CREATE INDEX IF NOT EXISTS idx_cash_withdrawals_negocio_date ON cash_withdrawals(negocio_id, created_at DESC)'
+  );
+  await safeRun(
+    db,
+    'CREATE INDEX IF NOT EXISTS idx_cash_withdrawals_shift ON cash_withdrawals(negocio_id, shift_id)'
   );
 
   await safeRun(
@@ -573,6 +635,11 @@ export async function ensureDatabaseSchema(db: D1Database, force = false): Promi
     'ALTER TABLE purchase_orders ADD COLUMN notes TEXT',
     // cash_closings
     'ALTER TABLE cash_closings ADD COLUMN expenses_cash_cents INTEGER NOT NULL DEFAULT 0',
+    'ALTER TABLE cash_closings ADD COLUMN shift_id TEXT',
+    'ALTER TABLE cash_closings ADD COLUMN shift_label TEXT',
+    'ALTER TABLE cash_closings ADD COLUMN opened_by_uid TEXT',
+    'ALTER TABLE cash_closings ADD COLUMN opened_by_name TEXT',
+    'ALTER TABLE cash_closings ADD COLUMN withdrawals_cash_cents INTEGER NOT NULL DEFAULT 0',
   ];
 
   for (const sql of alterColumns) {

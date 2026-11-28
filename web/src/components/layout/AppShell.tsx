@@ -8,6 +8,7 @@ import { Modal } from '../ui/Modal';
 import { findNavItem, MOBILE_TAB_LABELS, MOBILE_TAB_PAGES, NAV_GROUPS, NAV_ITEMS } from './navItems';
 import { SarinBusinessCopilot } from '../SarinBusinessCopilot';
 import CashClosingModal from '../CashClosingModal';
+import CashShiftModal from '../CashShiftModal';
 import { OfflineQueueModal, OfflineStatusPill, OfflineSyncBanner } from '../OfflineSyncBanner';
 
 const SIDEBAR_STORAGE_KEY = 'surtifacil.sidebar.collapsed';
@@ -58,6 +59,7 @@ export function AppShell({ user, page, onNavigate, onLogout, children }: AppShel
   const isMobile = useIsMobile();
   const [copilotOpen, setCopilotOpen] = useState(false);
   const [closingModalOpen, setClosingModalOpen] = useState(false);
+  const [shiftModalOpen, setShiftModalOpen] = useState(false);
   const [offlineModalOpen, setOfflineModalOpen] = useState(false);
   const visibleItems = useMemo(
     () => NAV_ITEMS.filter((item) => canAccessPage(user.role, item.page)),
@@ -75,6 +77,7 @@ export function AppShell({ user, page, onNavigate, onLogout, children }: AppShel
           onLogout={onLogout}
           onOpenCopilot={() => setCopilotOpen(true)}
           onOpenClosingModal={() => setClosingModalOpen(true)}
+          onOpenShiftModal={() => setShiftModalOpen(true)}
         />
       )}
       <div className="flex min-w-0 flex-1 flex-col">
@@ -110,6 +113,7 @@ export function AppShell({ user, page, onNavigate, onLogout, children }: AppShel
           onLogout={onLogout}
           onOpenCopilot={() => setCopilotOpen(true)}
           onOpenClosingModal={() => setClosingModalOpen(true)}
+          onOpenShiftModal={() => setShiftModalOpen(true)}
         />
       )}
 
@@ -118,6 +122,13 @@ export function AppShell({ user, page, onNavigate, onLogout, children }: AppShel
 
       {/* Modal Arqueo y Cierre de Caja COP */}
       <CashClosingModal isOpen={closingModalOpen} onClose={() => setClosingModalOpen(false)} />
+
+      {/* Modal Turnos de Caja y Sangrías COP */}
+      <CashShiftModal
+        isOpen={shiftModalOpen}
+        onClose={() => setShiftModalOpen(false)}
+        onRequestCloseShift={() => setClosingModalOpen(true)}
+      />
 
       {/* Modal Resiliencia Offline y Cola FIFO */}
       <OfflineQueueModal isOpen={offlineModalOpen} onClose={() => setOfflineModalOpen(false)} />
@@ -133,9 +144,10 @@ interface NavProps {
   onLogout: () => void;
   onOpenCopilot?: () => void;
   onOpenClosingModal?: () => void;
+  onOpenShiftModal?: () => void;
 }
 
-function Sidebar({ user, page, items, onNavigate, onLogout, onOpenCopilot, onOpenClosingModal }: NavProps) {
+function Sidebar({ user, page, items, onNavigate, onLogout, onOpenCopilot, onOpenClosingModal, onOpenShiftModal }: NavProps) {
   const isWide = useIsWideScreen();
   const [storedCollapsed, setStoredCollapsed] = useState<boolean | null>(() => readStoredCollapsed());
   const collapsed = storedCollapsed ?? !isWide;
@@ -298,16 +310,28 @@ function Sidebar({ user, page, items, onNavigate, onLogout, onOpenCopilot, onOpe
                         );
                       })}
                       {group.id === 'sales' && (
-                        <li key="cash-closing-launcher">
-                          <button
-                            type="button"
-                            onClick={onOpenClosingModal}
-                            className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm font-medium text-emerald-400 hover:bg-white/10 hover:text-emerald-300 transition"
-                          >
-                            <span className="text-base">🔒</span>
-                            <span className="truncate">Arqueo y Cierre COP</span>
-                          </button>
-                        </li>
+                        <>
+                          <li key="cash-closing-launcher">
+                            <button
+                              type="button"
+                              onClick={onOpenClosingModal}
+                              className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm font-medium text-emerald-400 hover:bg-white/10 hover:text-emerald-300 transition"
+                            >
+                              <span className="text-base">🔒</span>
+                              <span className="truncate">Arqueo y Cierre COP</span>
+                            </button>
+                          </li>
+                          <li key="cash-shift-launcher">
+                            <button
+                              type="button"
+                              onClick={onOpenShiftModal}
+                              className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm font-medium text-sky-300 hover:bg-white/10 hover:text-sky-200 transition"
+                            >
+                              <span className="text-base">🔓</span>
+                              <span className="truncate">Turnos y Sangrías COP</span>
+                            </button>
+                          </li>
+                        </>
                       )}
                       {group.id === 'channels' && (
                         <>
@@ -614,7 +638,7 @@ function MobileTopBar({
   );
 }
 
-function MobileTabBar({ user, page, items, onNavigate, onLogout, onOpenCopilot, onOpenClosingModal }: NavProps) {
+function MobileTabBar({ user, page, items, onNavigate, onLogout, onOpenCopilot, onOpenClosingModal, onOpenShiftModal }: NavProps) {
   const [moreOpen, setMoreOpen] = useState(false);
   const tabItems = items.filter((item) => MOBILE_TAB_PAGES.includes(item.page));
   const moreItems = items.filter((item) => !MOBILE_TAB_PAGES.includes(item.page));
@@ -723,6 +747,20 @@ function MobileTabBar({ user, page, items, onNavigate, onLogout, onOpenCopilot, 
             >
               <span className="text-lg">🔒</span>
               <span className="flex-1">Arqueo y Cierre de Caja (COP)</span>
+              <Icon name="chevron-right" className="text-gray-400" size={18} />
+            </button>
+          </li>
+          <li key="cash-shift-mobile-launcher">
+            <button
+              type="button"
+              onClick={() => {
+                setMoreOpen(false);
+                onOpenShiftModal?.();
+              }}
+              className="flex min-h-[52px] w-full items-center gap-3 px-4 text-left text-sm font-semibold hover:bg-gray-50 transition text-sky-700"
+            >
+              <span className="text-lg">🔓</span>
+              <span className="flex-1">Turnos de Caja y Sangrías (COP)</span>
               <Icon name="chevron-right" className="text-gray-400" size={18} />
             </button>
           </li>

@@ -22,6 +22,8 @@ class MockD1Database implements D1Database {
     whatsapp_messages: any[];
     cash_closings: any[];
     cash_expenses: any[];
+    cash_shifts: any[];
+    cash_withdrawals: any[];
     inventory_shrinkage: any[];
     inventory_kardex: any[];
     loyalty_accounts: any[];
@@ -139,6 +141,8 @@ class MockD1Database implements D1Database {
       whatsapp_messages: [],
       cash_closings: [],
       cash_expenses: [],
+      cash_shifts: [],
+      cash_withdrawals: [],
       inventory_shrinkage: [],
       inventory_kardex: [],
       loyalty_accounts: [
@@ -534,6 +538,92 @@ class MockD1Database implements D1Database {
           let list = db.tables.cash_expenses.filter((exp) => exp.negocio_id === boundValues[0]);
           if (boundValues[1]) {
             list = list.filter((exp) => exp.created_at >= boundValues[1]);
+          }
+          list = list.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+          return { results: list as T[], success: true };
+        }
+
+        if (q.includes('FROM cash_shifts') && q.includes("status = 'open'")) {
+          const list = db.tables.cash_shifts
+            .filter((s) => s.negocio_id === boundValues[0] && s.status === 'open')
+            .sort((a, b) => new Date(b.opened_at).getTime() - new Date(a.opened_at).getTime());
+          return { results: list.length > 0 ? [list[0] as T] : [], success: true };
+        }
+
+        if (q.includes('SELECT COALESCE(MAX(shift_number), 0) + 1 as next_number FROM cash_shifts')) {
+          const shifts = db.tables.cash_shifts.filter((s) => s.negocio_id === boundValues[0]);
+          const maxNum = shifts.reduce((max, s) => Math.max(max, s.shift_number || 0), 0);
+          return { results: [{ next_number: maxNum + 1 } as unknown as T], success: true };
+        }
+
+        if (q.includes('FROM cash_shifts WHERE id = ? AND negocio_id = ?')) {
+          const s = db.tables.cash_shifts.find(
+            (sh) => sh.id === boundValues[0] && sh.negocio_id === boundValues[1]
+          );
+          return { results: s ? [s as T] : [], success: true };
+        }
+
+        if (q.includes('FROM cash_shifts WHERE negocio_id = ?')) {
+          const list = db.tables.cash_shifts
+            .filter((s) => s.negocio_id === boundValues[0])
+            .sort((a, b) => new Date(b.opened_at).getTime() - new Date(a.opened_at).getTime());
+          return { results: list as T[], success: true };
+        }
+
+        if (q.includes('FROM cash_withdrawals') && q.includes('total_withdrawals_cents')) {
+          let list: any[] = [];
+          if (q.includes('shift_id = ?')) {
+            const [negId, shiftId, openedAt] = boundValues;
+            list = db.tables.cash_withdrawals.filter(
+              (w) => w.negocio_id === negId && (w.shift_id === shiftId || (!w.shift_id && w.created_at >= openedAt))
+            );
+          } else {
+            const [negId, openedAt] = boundValues;
+            list = db.tables.cash_withdrawals.filter(
+              (w) => w.negocio_id === negId && (!openedAt || w.created_at >= openedAt)
+            );
+          }
+          const total = list.reduce((sum, w) => sum + (w.amount_cents || 0), 0);
+          return {
+            results: [{ count: list.length, total_withdrawals_cents: total } as unknown as T],
+            success: true,
+          };
+        }
+
+        if (q.includes('SELECT shift_id, amount_cents FROM cash_withdrawals WHERE negocio_id = ?')) {
+          const list = db.tables.cash_withdrawals.filter((w) => w.negocio_id === boundValues[0]);
+          return { results: list as T[], success: true };
+        }
+
+        if (q.includes('FROM cash_withdrawals WHERE id = ? AND negocio_id = ?')) {
+          const w = db.tables.cash_withdrawals.find(
+            (wd) => wd.id === boundValues[0] && wd.negocio_id === boundValues[1]
+          );
+          return { results: w ? [w as T] : [], success: true };
+        }
+
+        if (q.includes('FROM cash_withdrawals') && q.includes('shift_id = ? OR')) {
+          const [negId, shiftId, sinceIso] = boundValues;
+          const list = db.tables.cash_withdrawals
+            .filter(
+              (w) => w.negocio_id === negId && (w.shift_id === shiftId || (!w.shift_id && w.created_at >= sinceIso))
+            )
+            .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+          return { results: list as T[], success: true };
+        }
+
+        if (q.includes('FROM cash_withdrawals WHERE negocio_id = ? AND shift_id = ?')) {
+          const [negId, shiftId] = boundValues;
+          const list = db.tables.cash_withdrawals
+            .filter((w) => w.negocio_id === negId && w.shift_id === shiftId)
+            .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+          return { results: list as T[], success: true };
+        }
+
+        if (q.includes('FROM cash_withdrawals WHERE negocio_id = ?')) {
+          let list = db.tables.cash_withdrawals.filter((w) => w.negocio_id === boundValues[0]);
+          if (boundValues[1]) {
+            list = list.filter((w) => w.created_at >= boundValues[1]);
           }
           list = list.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
           return { results: list as T[], success: true };
@@ -1447,7 +1537,12 @@ class MockD1Database implements D1Database {
         }
 
         if (q.startsWith('INSERT INTO cash_closings')) {
-          const [id, negocio_id, closing_number, opened_at, closed_at, closed_by_uid, closed_by_name, initial_cash_cents, sales_cash_cents, credit_payments_cash_cents, expected_cash_cents, counted_cash_cents, difference_cents, status, breakdown_json, notes, total_sales_count, expenses_cash_cents] = boundValues;
+          const [
+            id, negocio_id, closing_number, opened_at, closed_at, closed_by_uid, closed_by_name,
+            initial_cash_cents, sales_cash_cents, credit_payments_cash_cents, expected_cash_cents,
+            counted_cash_cents, difference_cents, status, breakdown_json, notes, total_sales_count,
+            expenses_cash_cents, shift_id, shift_label, opened_by_uid, opened_by_name, withdrawals_cash_cents,
+          ] = boundValues;
           db.tables.cash_closings.push({
             id,
             negocio_id,
@@ -1467,8 +1562,80 @@ class MockD1Database implements D1Database {
             notes,
             total_sales_count,
             expenses_cash_cents: expenses_cash_cents ?? 0,
+            shift_id: shift_id ?? null,
+            shift_label: shift_label ?? null,
+            opened_by_uid: opened_by_uid ?? null,
+            opened_by_name: opened_by_name ?? null,
+            withdrawals_cash_cents: withdrawals_cash_cents ?? 0,
             created_at: new Date().toISOString(),
           });
+        }
+
+        if (q.startsWith('INSERT INTO cash_shifts')) {
+          const [
+            id, negocio_id, shift_number, shift_label, opened_at, opened_by_uid,
+            opened_by_name, opened_by_role, initial_cash_cents, opening_notes, created_at,
+          ] = boundValues;
+          db.tables.cash_shifts.push({
+            id,
+            negocio_id,
+            shift_number,
+            shift_label,
+            status: 'open',
+            opened_at,
+            opened_by_uid,
+            opened_by_name,
+            opened_by_role,
+            initial_cash_cents,
+            opening_notes,
+            created_at,
+          });
+        }
+
+        if (q.startsWith('UPDATE cash_shifts')) {
+          const [
+            closed_at, closed_by_uid, closed_by_name, closing_id, expected_cash_cents,
+            counted_cash_cents, difference_cents, closing_status, shiftId, negId,
+          ] = boundValues;
+          const shift = db.tables.cash_shifts.find((s) => s.id === shiftId && s.negocio_id === negId);
+          if (shift) {
+            shift.status = 'closed';
+            shift.closed_at = closed_at;
+            shift.closed_by_uid = closed_by_uid;
+            shift.closed_by_name = closed_by_name;
+            shift.closing_id = closing_id;
+            shift.expected_cash_cents = expected_cash_cents;
+            shift.counted_cash_cents = counted_cash_cents;
+            shift.difference_cents = difference_cents;
+            shift.closing_status = closing_status;
+          }
+        }
+
+        if (q.startsWith('INSERT INTO cash_withdrawals')) {
+          const [
+            id, negocio_id, shift_id, amount_cents, destination, reason, received_by,
+            created_by_uid, created_by_name, created_by_role, created_at,
+          ] = boundValues;
+          db.tables.cash_withdrawals.push({
+            id,
+            negocio_id,
+            shift_id,
+            amount_cents,
+            destination,
+            reason,
+            received_by,
+            created_by_uid,
+            created_by_name,
+            created_by_role,
+            created_at,
+          });
+        }
+
+        if (q.startsWith('DELETE FROM cash_withdrawals WHERE id = ? AND negocio_id = ?')) {
+          const [withdrawalId, negId] = boundValues;
+          db.tables.cash_withdrawals = db.tables.cash_withdrawals.filter(
+            (w) => !(w.id === withdrawalId && w.negocio_id === negId)
+          );
         }
 
         if (q.startsWith('INSERT INTO cash_expenses')) {
@@ -3583,6 +3750,166 @@ describe('Cloudflare Pages Functions API (/api/*)', () => {
       const publicOrderData = await publicOrderRes.json();
       expect(publicOrderData.order.items[0].quantity).toBe(0.5);
       expect(publicOrderData.order.subtotal_cents).toBe(225000);
+    });
+
+    it('gestiona turnos de caja con base inicial, sangrías, RBAC, aislamiento multi-tenant y cierre atómico', async () => {
+      const cashierAuth = { Authorization: 'Bearer mock:cashier-1:cajero@surtifacil.com:cashier' };
+      const adminAuth = { Authorization: 'Bearer mock:admin-1:admin@surtifacil.com:admin' };
+      const otherStoreAuth = { Authorization: 'Bearer mock:other-admin:otro@tienda.com:admin:otra-tienda' };
+
+      // 1. Abrir turno por cajero con base $ 150.000 COP
+      const openRes = await onRequest(
+        createMockContext(
+          'POST',
+          'http://localhost/api/cash-shifts/open',
+          cashierAuth,
+          { initial_cash_cents: 15000000, shift_label: 'manana', opening_notes: 'Base sencillo' },
+          db
+        ) as any
+      );
+      expect(openRes.status).toBe(201);
+      const openedShift = await openRes.json();
+      expect(openedShift.shift_number).toBe(1);
+      expect(openedShift.status).toBe('open');
+      expect(openedShift.initial_cash_cents).toBe(15000000);
+
+      // 2. Doble apertura rechazada con 409
+      const dupOpenRes = await onRequest(
+        createMockContext(
+          'POST',
+          'http://localhost/api/cash-shifts/open',
+          adminAuth,
+          { initial_cash_cents: 10000000, shift_label: 'tarde' },
+          db
+        ) as any
+      );
+      expect(dupOpenRes.status).toBe(409);
+
+      // 3. Registrar venta en efectivo ($ 80.000), gasto efectivo ($ 10.000) y sangría ($ 50.000)
+      db.tables.sales.push({
+        id: 'sale-shift-cash-1',
+        negocio_id: 'surtifacil',
+        total_cents: 8000000,
+        payment_method: 'cash',
+        status: 'completed',
+        created_at: new Date().toISOString(),
+      });
+
+      const expRes = await onRequest(
+        createMockContext(
+          'POST',
+          'http://localhost/api/cash-expenses',
+          cashierAuth,
+          { category: 'insumos_bolsas', description: 'Bolsas turno', amount_cents: 1000000, payment_method: 'cash' },
+          db
+        ) as any
+      );
+      expect(expRes.status).toBe(201);
+
+      const withRes = await onRequest(
+        createMockContext(
+          'POST',
+          'http://localhost/api/cash-withdrawals',
+          cashierAuth,
+          { amount_cents: 5000000, destination: 'caja_fuerte', reason: 'Resguardo billetes altos', received_by: 'Caja fuerte' },
+          db
+        ) as any
+      );
+      expect(withRes.status).toBe(201);
+      const createdWithdrawal = await withRes.json();
+      expect(createdWithdrawal.shift_id).toBe(openedShift.id);
+
+      // 4. Cajero NO puede anular sangría (403)
+      const delForbiddenRes = await onRequest(
+        createMockContext(
+          'DELETE',
+          `http://localhost/api/cash-withdrawals/${createdWithdrawal.id}`,
+          cashierAuth,
+          null,
+          db
+        ) as any
+      );
+      expect(delForbiddenRes.status).toBe(403);
+
+      // 5. Aislamiento multi-tenant: otra tienda no ve el turno ni la sangría
+      db.tables.negocios.push({
+        id: 'otra-tienda',
+        slug: 'otra-tienda',
+        nombre: 'Otra Tienda',
+        estado: 'activo',
+        plan_id: 'mensual_30d',
+      });
+      const otherActiveRes = await onRequest(
+        createMockContext('GET', 'http://localhost/api/cash-shifts/active', otherStoreAuth, null, db) as any
+      );
+      expect(otherActiveRes.status).toBe(200);
+      const otherActiveData = await otherActiveRes.json();
+      expect(otherActiveData.active_shift).toBeNull();
+      expect(otherActiveData.withdrawals).toHaveLength(0);
+
+      // 6. Summary en SurtiFácil: 150.000 + 80.000 - 10.000 - 50.000 = 170.000 COP (17000000 cents)
+      const summaryRes = await onRequest(
+        createMockContext(
+          'GET',
+          'http://localhost/api/cash-closings/summary?initial_base_cents=10000000',
+          adminAuth,
+          null,
+          db
+        ) as any
+      );
+      expect(summaryRes.status).toBe(200);
+      const summaryData = await summaryRes.json();
+      expect(summaryData.initial_cash_cents).toBe(15000000);
+      expect(summaryData.expenses_cash_cents).toBe(1000000);
+      expect(summaryData.withdrawals_cash_cents).toBe(5000000);
+      expect(summaryData.expected_cash_cents).toBe(17000000);
+      expect(summaryData.active_shift?.id).toBe(openedShift.id);
+
+      // 7. Cierre atómico con $ 170.000 contados (Cuadrado) cierra también el turno en cash_shifts
+      const closeRes = await onRequest(
+        createMockContext(
+          'POST',
+          'http://localhost/api/cash-closings',
+          adminAuth,
+          {
+            initial_cash_cents: 99999, // El servidor debe usar la base autoritativa del turno (15000000)
+            breakdown: { bills: { '100000': 1, '50000': 1, '20000': 1 }, coins: {} },
+            notes: 'Cierre turno mañana cuadrado',
+          },
+          db
+        ) as any
+      );
+      expect(closeRes.status).toBe(201);
+      const closeData = await closeRes.json();
+      expect(closeData.initial_cash_cents).toBe(15000000);
+      expect(closeData.withdrawals_cash_cents).toBe(5000000);
+      expect(closeData.expected_cash_cents).toBe(17000000);
+      expect(closeData.status).toBe('balanced');
+      expect(closeData.shift_id).toBe(openedShift.id);
+      expect(closeData.opened_by_name).toBe('Cajero Test');
+
+      // 8. Admin no puede anular sangría de un turno ya cerrado (409)
+      const delClosedRes = await onRequest(
+        createMockContext(
+          'DELETE',
+          `http://localhost/api/cash-withdrawals/${createdWithdrawal.id}`,
+          adminAuth,
+          null,
+          db
+        ) as any
+      );
+      expect(delClosedRes.status).toBe(409);
+
+      // 9. Historial de turnos refleja estado cerrado y total de sangrías
+      const shiftsListRes = await onRequest(
+        createMockContext('GET', 'http://localhost/api/cash-shifts', adminAuth, null, db) as any
+      );
+      expect(shiftsListRes.status).toBe(200);
+      const shiftsList = await shiftsListRes.json();
+      expect(shiftsList).toHaveLength(1);
+      expect(shiftsList[0].status).toBe('closed');
+      expect(shiftsList[0].withdrawals_count).toBe(1);
+      expect(shiftsList[0].withdrawals_total_cents).toBe(5000000);
     });
   });
 });

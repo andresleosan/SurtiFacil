@@ -4,6 +4,7 @@ import StockAlerts from './StockAlerts';
 import SubscriptionBanner from './SubscriptionBanner';
 import SarinBusinessCopilot from './SarinBusinessCopilot';
 import CashClosingModal from './CashClosingModal';
+import CashShiftModal from './CashShiftModal';
 import PettyCashModal from './PettyCashModal';
 import { Icon } from './ui/Icon';
 import { PageHeader } from './ui/PageHeader';
@@ -35,6 +36,7 @@ const Dashboard = () => {
   const [error, setError] = useState<string | null>(null);
   const [copilotOpen, setCopilotOpen] = useState(false);
   const [closingModalOpen, setClosingModalOpen] = useState(false);
+  const [shiftModalOpen, setShiftModalOpen] = useState(false);
   const [pettyCashModalOpen, setPettyCashModalOpen] = useState(false);
 
   const loadDashboardData = useCallback(async () => {
@@ -105,6 +107,13 @@ const Dashboard = () => {
       title="Panel de Control"
       actions={
         <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setShiftModalOpen(true)}
+            className="btn-secondary min-h-[44px] px-3 text-xs font-semibold text-slate-800"
+          >
+            <span>🔓 Turno / Sangrías</span>
+          </button>
           <button
             type="button"
             onClick={() => setPettyCashModalOpen(true)}
@@ -211,6 +220,13 @@ const Dashboard = () => {
         isOpen={closingModalOpen}
         onClose={() => setClosingModalOpen(false)}
         onClosedSuccess={() => void loadDashboardData()}
+      />
+
+      {/* Modal Turnos de Caja y Sangrías COP */}
+      <CashShiftModal
+        isOpen={shiftModalOpen}
+        onClose={() => setShiftModalOpen(false)}
+        onRequestCloseShift={() => setClosingModalOpen(true)}
       />
 
       {/* Modal Caja Menor y Gastos del Turno */}
